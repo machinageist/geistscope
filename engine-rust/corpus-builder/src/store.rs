@@ -49,6 +49,41 @@ impl Corpus {
         Ok(())
     }
 
+    // Bulk-insert subdomains for one domain inside a single transaction.
+    // Without this, each insert is its own autocommit fsync — orders of
+    // magnitude slower for large mining runs.
+    pub fn insert_subdomains_batch(
+        &mut self,
+        domain: &str,
+        subdomains: &[String],
+        source: &str,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR IGNORE INTO subdomains (domain, subdomain, source) VALUES (?1, ?2, ?3)",
+            )?;
+            for sub in subdomains {
+                stmt.execute(params![domain, sub, source])?;
+            }
+        }
+        tx.commit()
+    }
+
+    // Bulk-insert paths for one domain inside a single transaction
+    pub fn insert_paths_batch(&mut self, domain: &str, paths: &[String]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR IGNORE INTO paths (domain, path) VALUES (?1, ?2)",
+            )?;
+            for path in paths {
+                stmt.execute(params![domain, path])?;
+            }
+        }
+        tx.commit()
+    }
+
     // Return all known subdomains for a domain, sorted
     pub fn subdomains(&self, domain: &str) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
@@ -118,5 +153,22 @@ mod tests {
         assert_eq!(domains, 2);
         assert_eq!(subs, 2);
         assert_eq!(paths, 1);
+    }
+
+    #[test]
+    fn batch_insert_writes_all_rows() {
+        let mut c = mem_corpus();
+        let subs: Vec<String> = (0..100).map(|i| format!("h{i}.example.com")).collect();
+        c.insert_subdomains_batch("example.com", &subs, "ct_log").unwrap();
+        assert_eq!(c.subdomains("example.com").unwrap().len(), 100);
+    }
+
+    #[test]
+    fn batch_insert_dedups_against_existing() {
+        let mut c = mem_corpus();
+        c.insert_subdomain("example.com", "api.example.com", "ct_log").unwrap();
+        let more = vec!["api.example.com".into(), "www.example.com".into()];
+        c.insert_subdomains_batch("example.com", &more, "brute").unwrap();
+        assert_eq!(c.subdomains("example.com").unwrap().len(), 2);
     }
 }

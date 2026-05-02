@@ -14,7 +14,7 @@ struct CrtEntry {
 }
 
 // Mine crt.sh for all certificate SANs for each domain; store results in corpus
-pub async fn mine_ct_logs(domains: &[String], corpus: &Corpus, rate_limit_ms: u64) {
+pub async fn mine_ct_logs(domains: &[String], corpus: &mut Corpus, rate_limit_ms: u64) {
     let client = Client::new(ClientConfig {
         timeout_ms: 30_000,
         rate_limit_ms: Some(rate_limit_ms),
@@ -27,10 +27,8 @@ pub async fn mine_ct_logs(domains: &[String], corpus: &Corpus, rate_limit_ms: u6
         match fetch_ct(domain, &client).await {
             Ok(subs) => {
                 eprintln!("[ct] {domain}: {} subdomains", subs.len());
-                for sub in &subs {
-                    if let Err(e) = corpus.insert_subdomain(domain, sub, "ct_log") {
-                        eprintln!("[ct] store error: {e}");
-                    }
+                if let Err(e) = corpus.insert_subdomains_batch(domain, &subs, "ct_log") {
+                    eprintln!("[ct] store error: {e}");
                 }
             }
             Err(e) => eprintln!("[ct] {domain}: {e}"),
@@ -42,7 +40,9 @@ async fn fetch_ct(
     domain: &str,
     client: &Client,
 ) -> Result<Vec<String>, http_client::HttpError> {
-    let url = format!("https://crt.sh/?q=%.{domain}&output=json");
+    let raw_q = format!("%.{domain}");
+    let q = urlencoding::encode(&raw_q);
+    let url = format!("https://crt.sh/?q={q}&output=json");
     let entries: Vec<CrtEntry> = client.get_json(&url).await?;
 
     let suffix = format!(".{domain}");

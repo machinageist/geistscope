@@ -62,6 +62,10 @@ pub fn tech_wordlist(fp: &Fingerprint) -> Vec<&'static str> {
         _ => {}
     }
 
+    // Sort then dedup; plain dedup() only removes adjacent duplicates and would
+    // leave repeats from overlapping tech-stack matches (e.g. "api" from both
+    // framework and cloud branches)
+    words.sort_unstable();
     words.dedup();
     words
 }
@@ -86,5 +90,18 @@ mod tests {
     fn empty_fingerprint_returns_empty() {
         let fp = Fingerprint::default();
         assert!(tech_wordlist(&fp).is_empty());
+    }
+
+    #[test]
+    fn overlapping_tech_dedups_api() {
+        // Both "nextjs" framework and "aws" cloud emit "api" — must appear once
+        let fp = Fingerprint {
+            framework: Some("nextjs".into()),
+            cloud: Some("aws".into()),
+            ..Default::default()
+        };
+        let words = tech_wordlist(&fp);
+        let api_count = words.iter().filter(|w| **w == "api").count();
+        assert_eq!(api_count, 1, "expected single 'api', got {api_count}: {words:?}");
     }
 }

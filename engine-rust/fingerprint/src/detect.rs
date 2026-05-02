@@ -2,7 +2,7 @@
 // Date: 2026-05-01
 // Description: Parse HTTP response headers + body to identify server, framework, CDN, CMS, cloud
 
-use http_client::{Client, ClientConfig};
+use http_client::Client;
 use serde::Serialize;
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -15,13 +15,9 @@ pub struct Fingerprint {
     pub powered_by: Option<String>,
 }
 
-// Probe a URL and return the technology fingerprint
-pub async fn fingerprint_url(url: &str) -> Result<Fingerprint, http_client::HttpError> {
-    let client = Client::new(ClientConfig {
-        timeout_ms: 8_000,
-        max_retries: 1,
-        ..Default::default()
-    })?;
+// Probe a URL and return the technology fingerprint.
+// Caller owns the HTTP client so it can be reused across many probes.
+pub async fn fingerprint_url(client: &Client, url: &str) -> Result<Fingerprint, http_client::HttpError> {
     let resp = client.get(url).await?;
     let headers = resp.headers().clone();
     let body = resp.text().await.unwrap_or_default();
@@ -53,11 +49,15 @@ fn detect_cdn(headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
     if headers.contains_key("x-amz-cf-pop") { return Some("cloudfront"); }
     if headers.contains_key("x-vercel-id") { return Some("vercel"); }
     if headers.contains_key("x-netlify-id") { return Some("netlify"); }
-    if let Some(via) = header_str(headers, "via") {
-        if via.contains("varnish") { return Some("fastly"); }
+    if let Some(via) = header_str(headers, "via")
+        && via.contains("varnish")
+    {
+        return Some("fastly");
     }
-    if let Some(cache) = header_str(headers, "x-cache") {
-        if cache.contains("Fastly") { return Some("fastly"); }
+    if let Some(cache) = header_str(headers, "x-cache")
+        && cache.contains("Fastly")
+    {
+        return Some("fastly");
     }
     None
 }
@@ -65,8 +65,10 @@ fn detect_cdn(headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
 fn detect_cloud(headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
     if headers.contains_key("x-cloud-trace-context") { return Some("gcp"); }
     if headers.contains_key("x-ms-request-id") { return Some("azure"); }
-    if let Some(server) = header_str(headers, "server") {
-        if server.contains("awselb") || server.contains("AmazonS3") { return Some("aws"); }
+    if let Some(server) = header_str(headers, "server")
+        && (server.contains("awselb") || server.contains("AmazonS3"))
+    {
+        return Some("aws");
     }
     None
 }

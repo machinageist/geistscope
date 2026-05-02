@@ -9,7 +9,7 @@ use url::Url;
 use crate::store::Corpus;
 
 // Mine Wayback CDX for paths under each domain; store unique paths in corpus
-pub async fn mine_wayback(domains: &[String], corpus: &Corpus, rate_limit_ms: u64) {
+pub async fn mine_wayback(domains: &[String], corpus: &mut Corpus, rate_limit_ms: u64) {
     let client = Client::new(ClientConfig {
         timeout_ms: 60_000,
         rate_limit_ms: Some(rate_limit_ms),
@@ -22,10 +22,8 @@ pub async fn mine_wayback(domains: &[String], corpus: &Corpus, rate_limit_ms: u6
         match fetch_paths(domain, &client).await {
             Ok(paths) => {
                 eprintln!("[wayback] {domain}: {} paths", paths.len());
-                for path in &paths {
-                    if let Err(e) = corpus.insert_path(domain, path) {
-                        eprintln!("[wayback] store error: {e}");
-                    }
+                if let Err(e) = corpus.insert_paths_batch(domain, &paths) {
+                    eprintln!("[wayback] store error: {e}");
                 }
             }
             Err(e) => eprintln!("[wayback] {domain}: {e}"),
@@ -38,9 +36,11 @@ async fn fetch_paths(
     client: &Client,
 ) -> Result<Vec<String>, http_client::HttpError> {
     // CDX API: returns JSON array-of-arrays; first row is header ["original"]
+    let raw_url = format!("*.{domain}/*");
+    let url_param = urlencoding::encode(&raw_url);
     let cdx_url = format!(
-        "http://web.archive.org/cdx/search/cdx\
-         ?url=*.{domain}/*&output=json&fl=original&collapse=urlkey\
+        "https://web.archive.org/cdx/search/cdx\
+         ?url={url_param}&output=json&fl=original&collapse=urlkey\
          &filter=statuscode:200&limit=50000"
     );
 
@@ -49,12 +49,12 @@ async fn fetch_paths(
 
     // Skip header row (index 0 = ["original"])
     for row in raw.iter().skip(1) {
-        if let Some(raw_url) = row.first() {
-            if let Ok(parsed) = Url::parse(raw_url) {
-                let path = parsed.path().to_string();
-                if path.len() > 1 {
-                    seen.insert(path);
-                }
+        if let Some(raw_url) = row.first()
+            && let Ok(parsed) = Url::parse(raw_url)
+        {
+            let path = parsed.path().to_string();
+            if path.len() > 1 {
+                seen.insert(path);
             }
         }
     }

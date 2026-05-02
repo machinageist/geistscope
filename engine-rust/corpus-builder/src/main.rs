@@ -29,18 +29,18 @@ async fn main() {
     match args.command {
         cli::Command::MineCt { domains, db, rate_limit_ms } => {
             let domains = read_domains(&domains);
-            let corpus = open_corpus(&db);
+            let mut corpus = open_corpus(&db);
             eprintln!("Mining CT logs for {} domains → {db}", domains.len());
-            ct::mine_ct_logs(&domains, &corpus, rate_limit_ms).await;
+            ct::mine_ct_logs(&domains, &mut corpus, rate_limit_ms).await;
             let (_, subs, _) = corpus.stats().unwrap_or_default();
             eprintln!("Done. Total subdomains in corpus: {subs}");
         }
 
         cli::Command::MineWayback { domains, db, rate_limit_ms } => {
             let domains = read_domains(&domains);
-            let corpus = open_corpus(&db);
+            let mut corpus = open_corpus(&db);
             eprintln!("Mining Wayback CDX for {} domains → {db}", domains.len());
-            wayback::mine_wayback(&domains, &corpus, rate_limit_ms).await;
+            wayback::mine_wayback(&domains, &mut corpus, rate_limit_ms).await;
             let (_, _, paths) = corpus.stats().unwrap_or_default();
             eprintln!("Done. Total paths in corpus: {paths}");
         }

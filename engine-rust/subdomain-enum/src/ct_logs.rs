@@ -15,7 +15,11 @@ pub async fn query_ct_logs(
     domain: &str,
     timeout_ms: u64,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("https://crt.sh/?q=%.{domain}&output=json");
+    // Encode the query so a malformed domain (containing & ? # etc) cannot
+    // break the URL or smuggle additional query params
+    let raw_q = format!("%.{domain}");
+    let q = urlencoding::encode(&raw_q);
+    let url = format!("https://crt.sh/?q={q}&output=json");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(timeout_ms))
         .build()?;
@@ -44,7 +48,7 @@ pub async fn query_ct_logs(
 mod tests {
     #[test]
     fn wildcard_filter() {
-        let names = vec!["*.example.com", "www.example.com", "other.com"];
+        let names = ["*.example.com", "www.example.com", "other.com"];
         let domain = "example.com";
         let suffix = format!(".{domain}");
         let filtered: Vec<&str> = names
@@ -57,7 +61,7 @@ mod tests {
 
     #[test]
     fn unrelated_domain_excluded() {
-        let names = vec!["evil.com", "sub.evil.com", "api.example.com"];
+        let names = ["evil.com", "sub.evil.com", "api.example.com"];
         let domain = "example.com";
         let suffix = format!(".{domain}");
         let filtered: Vec<&str> = names

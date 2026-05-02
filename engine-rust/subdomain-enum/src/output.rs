@@ -31,7 +31,7 @@ pub fn make_output(domain: &str, mut subdomains: Vec<SubdomainEntry>, elapsed: D
 
 pub fn print_table(out: &ScanOutput) {
     println!("\nSubdomains for {}:", out.domain);
-    println!("{:<50} {:<40} {}", "SUBDOMAIN", "IPs", "SOURCE");
+    println!("{:<50} {:<40} SOURCE", "SUBDOMAIN", "IPs");
     println!("{}", "-".repeat(100));
     for s in &out.subdomains {
         println!("{:<50} {:<40} {}", s.name, s.ips.join(", "), s.source);
