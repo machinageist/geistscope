@@ -37,12 +37,12 @@ struct ResponseMessage {
 }
 
 impl OllamaClient {
-    pub fn new(endpoint: impl Into<String>, model: impl Into<String>) -> Self {
+    // Build an Ollama client; returns LlmError if the underlying HTTP builder fails
+    pub fn new(endpoint: impl Into<String>, model: impl Into<String>) -> Result<Self, LlmError> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
-            .build()
-            .expect("failed to build reqwest client");
-        Self { endpoint: endpoint.into(), model: model.into(), http }
+            .build()?;
+        Ok(Self { endpoint: endpoint.into(), model: model.into(), http })
     }
 
     pub async fn complete(&self, system: &str, user: &str) -> Result<String, LlmError> {

@@ -1,10 +1,9 @@
 // Author: Jeff
 // Date: 2026-05-01
-// Description: Shared HTTP client — UA rotation, rate limiting, retry with backoff
+// Description: Shared HTTP client — UA rotation, rate limiting, retry with jittered backoff
 
 use reqwest::Response;
 use serde::de::DeserializeOwned;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -18,27 +17,12 @@ static USER_AGENTS: &[&str] = &[
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
 ];
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum HttpError {
-    Network(reqwest::Error),
+    #[error("network: {0}")]
+    Network(#[from] reqwest::Error),
+    #[error("HTTP {0}")]
     Status(u16),
-    MaxRetriesExceeded,
-}
-
-impl std::fmt::Display for HttpError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Network(e) => write!(f, "network: {e}"),
-            Self::Status(code) => write!(f, "HTTP {code}"),
-            Self::MaxRetriesExceeded => write!(f, "max retries exceeded"),
-        }
-    }
-}
-
-impl std::error::Error for HttpError {}
-
-impl From<reqwest::Error> for HttpError {
-    fn from(e: reqwest::Error) -> Self { Self::Network(e) }
 }
 
 pub struct ClientConfig {
@@ -47,6 +31,8 @@ pub struct ClientConfig {
     pub rate_limit_ms: Option<u64>,
     pub max_retries: u32,
     pub rotate_ua: bool,
+    /// Max redirects to follow; 0 = don't follow
+    pub max_redirects: usize,
 }
 
 impl Default for ClientConfig {
@@ -56,6 +42,7 @@ impl Default for ClientConfig {
             rate_limit_ms: None,
             max_retries: 3,
             rotate_ua: true,
+            max_redirects: 10,
         }
     }
 }
@@ -64,26 +51,26 @@ pub struct Client {
     inner: reqwest::Client,
     config: ClientConfig,
     ua_index: AtomicUsize,
-    last_req: Arc<Mutex<Instant>>,
+    last_req: Mutex<Instant>,
 }
 
 impl Client {
+    // Build a configured HTTP client
     pub fn new(config: ClientConfig) -> Result<Self, HttpError> {
         let inner = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.timeout_ms))
-            .redirect(reqwest::redirect::Policy::limited(10))
+            .redirect(reqwest::redirect::Policy::limited(config.max_redirects))
             .build()?;
         Ok(Self {
             inner,
             config,
             ua_index: AtomicUsize::new(0),
-            last_req: Arc::new(Mutex::new(
-                // Start far in the past so the first request fires immediately
-                Instant::now() - Duration::from_secs(3600),
-            )),
+            // Start far in the past so the first request fires immediately
+            last_req: Mutex::new(Instant::now() - Duration::from_secs(3600)),
         })
     }
 
+    // Pick the next User-Agent string from the rotation
     fn next_ua(&self) -> &'static str {
         if !self.config.rotate_ua {
             return USER_AGENTS[0];
@@ -92,6 +79,7 @@ impl Client {
         USER_AGENTS[i]
     }
 
+    // Sleep until the rate-limit interval has elapsed since the last request
     async fn throttle(&self) {
         let Some(min_ms) = self.config.rate_limit_ms else { return };
         let min = Duration::from_millis(min_ms);
@@ -103,6 +91,7 @@ impl Client {
         *last = Instant::now();
     }
 
+    // Issue a GET with retry-with-jittered-backoff on transient failures
     pub async fn get(&self, url: &str) -> Result<Response, HttpError> {
         self.throttle().await;
         let mut attempt = 0u32;
@@ -111,14 +100,18 @@ impl Client {
                 Ok(r) => return Ok(r),
                 Err(_) if attempt < self.config.max_retries => {
                     attempt += 1;
-                    // Exponential backoff: 600ms, 1200ms, 2400ms
-                    tokio::time::sleep(Duration::from_millis(300 * (1 << attempt))).await;
+                    let base_ms = 300u64 * (1u64 << attempt);
+                    // Jitter in [0, 200)ms breaks up synchronized retries
+                    // when many concurrent clients hit the same transient failure
+                    let jitter_ms = fastrand::u64(0..200);
+                    tokio::time::sleep(Duration::from_millis(base_ms + jitter_ms)).await;
                 }
                 Err(e) => return Err(HttpError::Network(e)),
             }
         }
     }
 
+    // GET and deserialize JSON; returns Status error on 4xx/5xx
     pub async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, HttpError> {
         let resp = self.get(url).await?;
         let status = resp.status().as_u16();
@@ -128,6 +121,7 @@ impl Client {
         Ok(resp.json::<T>().await?)
     }
 
+    // GET and return body as text; returns Status error on 4xx/5xx
     pub async fn get_text(&self, url: &str) -> Result<String, HttpError> {
         let resp = self.get(url).await?;
         let status = resp.status().as_u16();
@@ -163,7 +157,9 @@ mod tests {
     }
 
     #[test]
-    fn default_config_no_rate_limit() {
-        assert!(ClientConfig::default().rate_limit_ms.is_none());
+    fn default_config_has_no_rate_limit_and_default_redirects() {
+        let cfg = ClientConfig::default();
+        assert!(cfg.rate_limit_ms.is_none());
+        assert_eq!(cfg.max_redirects, 10);
     }
 }

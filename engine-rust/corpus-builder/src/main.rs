@@ -8,14 +8,38 @@ mod cli;
 use std::fs;
 use corpus_builder::{ct, wayback, Corpus};
 
+// Validate ASCII domain syntax — alnum + . + -, no leading/trailing dot or dash,
+// no double-dot, must contain at least one dot
+fn is_valid_domain(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 253
+        && s.contains('.')
+        && !s.contains("..")
+        && !s.starts_with('.')
+        && !s.ends_with('.')
+        && !s.starts_with('-')
+        && !s.ends_with('-')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+}
+
+// Read domains file, skip blank/comment lines, warn on (and skip) malformed entries
 fn read_domains(path: &str) -> Vec<String> {
-    fs::read_to_string(path)
-        .unwrap_or_else(|e| { eprintln!("cannot read {path}: {e}"); std::process::exit(1); })
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(str::to_lowercase)
-        .collect()
+    let raw = fs::read_to_string(path)
+        .unwrap_or_else(|e| { eprintln!("cannot read {path}: {e}"); std::process::exit(1); });
+    let mut valid = Vec::new();
+    for (i, line) in raw.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let lower = line.to_lowercase();
+        if is_valid_domain(&lower) {
+            valid.push(lower);
+        } else {
+            eprintln!("skipping invalid domain at line {}: {line}", i + 1);
+        }
+    }
+    valid
 }
 
 fn open_corpus(db: &str) -> Corpus {
@@ -65,5 +89,31 @@ async fn main() {
                 Err(e) => eprintln!("stats error: {e}"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_domain;
+
+    #[test]
+    fn valid_domains_accepted() {
+        assert!(is_valid_domain("example.com"));
+        assert!(is_valid_domain("api.staging.example.com"));
+        assert!(is_valid_domain("a.b"));
+        assert!(is_valid_domain("foo-bar.example.com"));
+    }
+
+    #[test]
+    fn malformed_domains_rejected() {
+        assert!(!is_valid_domain(""));
+        assert!(!is_valid_domain("no-dot"));
+        assert!(!is_valid_domain(".leading-dot.com"));
+        assert!(!is_valid_domain("trailing-dot."));
+        assert!(!is_valid_domain("double..dot.com"));
+        assert!(!is_valid_domain("-leading-dash.com"));
+        assert!(!is_valid_domain("under_score.com"));
+        assert!(!is_valid_domain("space in.com"));
+        assert!(!is_valid_domain("ampersand&injection.com"));
     }
 }

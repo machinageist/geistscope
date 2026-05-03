@@ -20,6 +20,7 @@ pub async fn mine_ct_logs(domains: &[String], corpus: &mut Corpus, rate_limit_ms
         rate_limit_ms: Some(rate_limit_ms),
         max_retries: 2,
         rotate_ua: false,
+        ..Default::default()
     })
     .expect("failed to build HTTP client");
 

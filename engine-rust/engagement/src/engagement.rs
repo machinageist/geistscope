@@ -1,0 +1,239 @@
+// Author: Jeff
+// Date: 2026-05-02
+// Description: Engagement directory — metadata, layout, audit log
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
+
+use crate::scope::Scope;
+use crate::EngagementError;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngagementMeta {
+    pub name: String,
+    pub target: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+pub struct Engagement {
+    pub root: PathBuf,
+    pub meta: EngagementMeta,
+}
+
+impl Engagement {
+    // Create a fresh engagement directory under `parent`; fails if it already exists
+    pub fn init(parent: &Path, mut meta: EngagementMeta) -> Result<Self, EngagementError> {
+        let root = parent.join(&meta.name);
+        if root.exists() {
+            return Err(EngagementError::AlreadyExists(root.display().to_string()));
+        }
+
+        if meta.created_at.is_empty() {
+            meta.created_at = now_rfc3339()?;
+        }
+
+        fs::create_dir_all(&root)?;
+        fs::create_dir_all(root.join("recon"))?;
+        fs::create_dir_all(root.join("crawl"))?;
+        fs::create_dir_all(root.join("findings"))?;
+
+        write_json(&root.join("engagement.json"), &meta)?;
+        Scope::default_for(&meta.target).save(&root.join("scope.json"))?;
+
+        fs::write(
+            root.join("notes.md"),
+            format!(
+                "# {} — {}\n\nCreated {}.\n\n## Notes\n\n",
+                meta.name, meta.target, meta.created_at
+            ),
+        )?;
+        fs::File::create(root.join("audit.log"))?;
+
+        Ok(Self { root, meta })
+    }
+
+    // Load an existing engagement from disk
+    pub fn load(root: &Path) -> Result<Self, EngagementError> {
+        let meta_path = root.join("engagement.json");
+        if !meta_path.exists() {
+            return Err(EngagementError::NotFound(root.display().to_string()));
+        }
+        let raw = fs::read_to_string(&meta_path)?;
+        let meta: EngagementMeta = serde_json::from_str(&raw)?;
+        Ok(Self { root: root.to_path_buf(), meta })
+    }
+
+    // List all engagements under a parent directory
+    pub fn list(parent: &Path) -> Result<Vec<Self>, EngagementError> {
+        if !parent.exists() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        for entry in fs::read_dir(parent)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            if path.join("engagement.json").exists()
+                && let Ok(e) = Self::load(&path)
+            {
+                out.push(e);
+            }
+        }
+        out.sort_by(|a, b| a.meta.name.cmp(&b.meta.name));
+        Ok(out)
+    }
+
+    pub fn scope(&self) -> Result<Scope, EngagementError> {
+        Scope::load(&self.root.join("scope.json"))
+    }
+
+    pub fn save_scope(&self, scope: &Scope) -> Result<(), EngagementError> {
+        scope.save(&self.root.join("scope.json"))
+    }
+
+    // Append an entry to audit.log: ISO-8601 timestamp + tool + target + optional detail
+    pub fn audit(&self, tool: &str, target: &str, detail: Option<&str>) -> Result<(), EngagementError> {
+        let ts = now_rfc3339()?;
+        let mut line = format!("{ts} {tool} {target}");
+        if let Some(d) = detail {
+            line.push(' ');
+            line.push_str(d);
+        }
+        line.push('\n');
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.root.join("audit.log"))?;
+        f.write_all(line.as_bytes())?;
+        Ok(())
+    }
+
+    // Append a timestamped block to notes.md
+    pub fn append_note(&self, text: &str) -> Result<(), EngagementError> {
+        let ts = now_rfc3339()?;
+        let block = format!("\n### {ts}\n\n{text}\n");
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.root.join("notes.md"))?;
+        f.write_all(block.as_bytes())?;
+        Ok(())
+    }
+
+    pub fn recon_dir(&self) -> PathBuf { self.root.join("recon") }
+    pub fn crawl_dir(&self) -> PathBuf { self.root.join("crawl") }
+    pub fn findings_dir(&self) -> PathBuf { self.root.join("findings") }
+}
+
+fn now_rfc3339() -> Result<String, EngagementError> {
+    Ok(OffsetDateTime::now_utc().format(&Rfc3339)?)
+}
+
+fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), EngagementError> {
+    let json = serde_json::to_string_pretty(value)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Per-test unique temp dir; uses pid + atomic counter so parallel tests
+    // never collide (SystemTime nanos can collide on fast tests)
+    fn tmp_parent() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let p = std::env::temp_dir().join(format!("engagement-test-{pid}-{n}"));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn meta(name: &str, target: &str) -> EngagementMeta {
+        EngagementMeta {
+            name: name.into(),
+            target: target.into(),
+            created_at: String::new(),
+            platform: None,
+            url: None,
+            tags: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn init_creates_full_layout() {
+        let p = tmp_parent();
+        let e = Engagement::init(&p, meta("acme", "acme.test")).unwrap();
+        assert!(e.root.join("engagement.json").exists());
+        assert!(e.root.join("scope.json").exists());
+        assert!(e.root.join("notes.md").exists());
+        assert!(e.root.join("audit.log").exists());
+        assert!(e.root.join("recon").is_dir());
+        assert!(e.root.join("crawl").is_dir());
+        assert!(e.root.join("findings").is_dir());
+    }
+
+    #[test]
+    fn init_refuses_existing() {
+        let p = tmp_parent();
+        Engagement::init(&p, meta("acme", "acme.test")).unwrap();
+        let err = Engagement::init(&p, meta("acme", "acme.test"));
+        assert!(matches!(err, Err(EngagementError::AlreadyExists(_))));
+    }
+
+    #[test]
+    fn load_round_trip() {
+        let p = tmp_parent();
+        let e1 = Engagement::init(&p, meta("acme", "acme.test")).unwrap();
+        let e2 = Engagement::load(&e1.root).unwrap();
+        assert_eq!(e2.meta.name, "acme");
+        assert_eq!(e2.meta.target, "acme.test");
+    }
+
+    #[test]
+    fn audit_log_appends() {
+        let p = tmp_parent();
+        let e = Engagement::init(&p, meta("acme", "acme.test")).unwrap();
+        e.audit("mg-scan", "api.acme.test", Some("ports=80-443")).unwrap();
+        e.audit("subdomain-enum", "acme.test", None).unwrap();
+        let log = fs::read_to_string(e.root.join("audit.log")).unwrap();
+        assert!(log.contains("mg-scan api.acme.test ports=80-443"));
+        assert!(log.contains("subdomain-enum acme.test"));
+    }
+
+    #[test]
+    fn list_returns_initialized_engagements() {
+        let p = tmp_parent();
+        Engagement::init(&p, meta("a-engagement", "a.test")).unwrap();
+        Engagement::init(&p, meta("b-engagement", "b.test")).unwrap();
+        let all = Engagement::list(&p).unwrap();
+        assert_eq!(all.len(), 2);
+        // Sorted alphabetically
+        assert_eq!(all[0].meta.name, "a-engagement");
+        assert_eq!(all[1].meta.name, "b-engagement");
+    }
+
+    #[test]
+    fn scope_round_trip() {
+        let p = tmp_parent();
+        let e = Engagement::init(&p, meta("acme", "acme.test")).unwrap();
+        let s = e.scope().unwrap();
+        assert!(s.is_in_scope("api.acme.test"));
+        assert!(!s.is_in_scope("other.test"));
+    }
+}
