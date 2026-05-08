@@ -1,9 +1,11 @@
 // Author: Jeff
-// Date: 2026-05-01
+// Date: 2026-05-08
 // Description: CLI argument definitions for subdomain-enum
+// Notes: --engagement wires this tool into an engagement workspace for scope-filtering and recon file output
 
 use clap::{Parser, ValueEnum};
 
+// Enumeration strategy selector
 #[derive(Clone, ValueEnum, Debug)]
 pub enum Mode {
     Passive,
@@ -11,6 +13,7 @@ pub enum Mode {
     All,
 }
 
+// Stdout format selector
 #[derive(Clone, ValueEnum, Debug)]
 pub enum OutputFormat {
     Table,
@@ -42,8 +45,17 @@ pub struct Args {
     /// Output format
     #[arg(short, long, default_value = "table")]
     pub format: OutputFormat,
+
+    /// Engagement name — scope-filter results and write to recon/subdomain-enum.json
+    #[arg(long)]
+    pub engagement: Option<String>,
+
+    /// Engagements root directory (overrides MG_ENGAGEMENTS_DIR)
+    #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
+    pub engagements_dir: String,
 }
 
+// Parse and return CLI arguments
 pub fn get_args() -> Args {
     Args::parse()
 }

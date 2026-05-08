@@ -1,7 +1,7 @@
 // Author: Jeff
 // Date: 2026-05-01
 // Description: mg-scan public library API — exposes the scanner for use
-//              by other workspace members and the RedBrowser Go engine
+//              by other workspace members and the GeistScope Go engine
 
 pub mod output;
 pub mod scanner;

@@ -2,17 +2,17 @@
 // Date: 2026-05-01
 // Description: Output formatting for subdomain-enum (table and JSON)
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SubdomainEntry {
     pub name: String,
     pub ips: Vec<String>,
     pub source: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ScanOutput {
     pub domain: String,
     pub subdomains: Vec<SubdomainEntry>,

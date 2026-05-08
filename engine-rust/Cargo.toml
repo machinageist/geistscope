@@ -7,5 +7,6 @@ members = [
     "fingerprint",
     "corpus-builder",
     "engagement",
+    "mg-recon",
 ]
 resolver = "2"

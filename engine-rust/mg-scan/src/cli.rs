@@ -1,19 +1,21 @@
-/*****************************************************************************
+/*******************************************************************
  * Filename:        cli.rs
- * Author:          machinageist
- * Date:            2026-05-01
- * Description:     Argument parsing with clap
- *****************************************************************************/
+ * Author:          Jeff
+ * Date:            2026-05-08
+ * Description:     Argument parsing for mg-scan
+ * Notes:           --engagement scope-checks each target before probing
+ *                  and writes results to recon/mg-scan.json
+ *******************************************************************/
 use clap::{Parser, ValueEnum};
 
-// Output format selection
+// Stdout format selector
 #[derive(ValueEnum, Clone)]
 pub enum OutputFormat {
     Table,
     Json,
 }
 
-// Internal clap struct for parsing command line arguments
+// Raw clap struct converted to Args after validation
 #[derive(Parser)]
 #[command(version, about = "Fast async port scanner with banner grabbing", long_about = None)]
 struct CliArgs {
@@ -51,10 +53,19 @@ struct CliArgs {
     /// Bind probes to this source port (e.g. 53 or 80 for firewall evasion)
     #[arg(long)]
     source_port: Option<u16>,
+
+    /// Engagement name — scope-check targets and write to recon/mg-scan.json
+    #[arg(long)]
+    engagement: Option<String>,
+
+    /// Engagements root directory (overrides MG_ENGAGEMENTS_DIR)
+    #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
+    engagements_dir: String,
 }
 
-// Parse port range string into start and end values
+// Validate and split port range string into (start, end)
 fn parse_port_range(range: &str) -> Result<(u16, u16), String> {
+    // split on first dash only so the format is unambiguous
     let parts: Vec<&str> = range.splitn(2, '-').collect();
 
     if parts.len() != 2 {
@@ -86,7 +97,7 @@ fn parse_port_range(range: &str) -> Result<(u16, u16), String> {
     Ok((port_start, port_end))
 }
 
-// Public struct returned to the rest of the program
+// Validated public args returned to main
 pub struct Args {
     pub host: String,
     pub port_start: u16,
@@ -98,9 +109,11 @@ pub struct Args {
     pub delay_ms: u64,
     pub jitter_ms: u64,
     pub source_port: Option<u16>,
+    pub engagement: Option<String>,
+    pub engagements_dir: String,
 }
 
-// Parse and validate command line arguments
+// Parse, validate, and return structured CLI args
 pub fn get_args() -> Args {
     let cli = CliArgs::parse();
 
@@ -125,6 +138,8 @@ pub fn get_args() -> Args {
         delay_ms: cli.delay,
         jitter_ms: cli.jitter,
         source_port: cli.source_port,
+        engagement: cli.engagement,
+        engagements_dir: cli.engagements_dir,
     }
 }
 

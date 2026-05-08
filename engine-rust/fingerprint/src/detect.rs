@@ -3,9 +3,9 @@
 // Description: Parse HTTP response headers + body to identify server, framework, CDN, CMS, cloud
 
 use http_client::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Serialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Fingerprint {
     pub server: Option<String>,
     pub framework: Option<String>,
