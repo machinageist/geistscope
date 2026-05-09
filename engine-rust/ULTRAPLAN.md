@@ -1,202 +1,122 @@
-# Bug Bounty Foundation — Plan
+# GeistScope Bug Bounty Pipeline — Plan
 
-## Context
+## Status
 
-The GeistScope `engine-rust/` workspace has 7 Rust crates for recon and offensive tooling. The most recent crate, `engagement`, defines a per-engagement workspace (scope.json, audit.log, recon/, findings/, etc.) so that the operator and an AI assistant can collaborate on bug bounty work via shared files.
-
-That foundation is in place but no other tool writes to it yet. A code audit (run before this plan) surfaced gaps that need fixing as the rest of the pipeline lands. This plan ships **5 forward features** (tool integration, recon orchestration, AI prioritization, crawling, replay) **interleaved** with **foundational adjustments** to the engagement crate, so each adjustment is justified by the step that uses it.
-
-User choices already made:
-- Adjustments ship **interleaved per step**, not preflight
-- New tools are **separate binary crates**, not subcommands
-- CIDR / URL path / port-spec scope features are **deferred to v2** (current `*.foo.com` semantics suffice)
-
-## Sequence
-
-The 5 steps run in order. Each step lists the engagement-crate adjustments that ship alongside it.
+All original 5 steps complete. Three additional tools added based on Burp Suite gap analysis.
+Active development focus: frontend layer (TUI first, then GUI).
 
 ---
 
-### Step 1 — Tool integration `[MEDIUM-LARGE, ~1 day]`
+## Completed steps
 
-**Goal:** subdomain-enum, mg-scan, and fingerprint each accept `--engagement <name>`. They scope-check before any active probe, write structured JSON to `engagements/<name>/recon/<tool>.json`, and append a structured audit-log line.
+### Step 1 — Tool integration ✅
+`subdomain-enum`, `mg-scan`, `fingerprint` each accept `--engagement`.
+Scope-check before active probe → write structured JSON to `recon/<tool>.json` → audit.log entry.
 
-**Adjustments shipping with this step:**
+### Step 2 — `mg-recon` orchestrator ✅
+Four-stage resumable pipeline: subdomain enum → fingerprint → port scan → `summary.json`.
+In-process (no subprocess). Each stage checks existing output file before re-running.
 
-- **0a. Output envelope** (`engagement/src/envelope.rs` — NEW). Public `Output<T> { tool, schema_version, target, timestamp, args, data: T }` with serde derive. Every tool wraps its data in this. Schema version starts at 1.
-- **0b. JSONL audit log** (`engagement/src/engagement.rs` — modify `audit()` ~line 107). Switch from plain text to JSON Lines: `{"ts":"...","tool":"...","target":"...","detail":{...}}`. `detail` is `serde_json::Value` so each tool can attach structured args. Migrate the existing test at ~line 199 to assert JSONL.
-- **0c. Atomic JSON writes** (`engagement/src/engagement.rs` — new private `write_json_atomic`). Writes to `path.tmp` then renames. Replace the `fs::write` calls in `Engagement::init` (~line 50) and `Scope::save` (`scope.rs:50`). Closes the race when two tools edit scope concurrently.
-- **0d. `Session` helper** (`engagement/src/session.rs` — NEW). `Session::load(name, root)` returns a struct that wraps the loaded `Engagement` + an open append-mode handle to `audit.log`. Methods: `check_scope(target) -> Result<()>`, `write_output<T: Serialize>(filename, Output<T>)`, `audit(tool, target, detail)`. All step-1 tools use this; no copy-paste of load/scope/audit logic.
+### Step 3 — `ai-prioritize` ✅
+Reads `summary.json` + bug-hunting skill files (`~/.claude/bug-hunting-skills/`).
+Ranks attack surface by payout × exploitability. Writes `priorities.md` (timestamped, appendable)
+and `priorities.json`. Anthropic primary, Ollama fallback.
 
-**Per-tool changes:**
+### Step 4 — `mg-crawl` ✅
+BFS crawler: depth-limited, same-origin, in-scope, robots.txt-aware, 1 req/sec default.
+Stores pages as SHA-256-named `.html` + `.js` files.
+Outputs `index.json`, `endpoints.json`, `secrets.json` per host.
+Secret regex catalog: AWS keys, GitHub tokens, JWTs, Slack, Stripe, Google API keys, PEM, api_key, password.
 
-| Tool | Files | Where |
-|------|-------|-------|
-| subdomain-enum | `cli.rs`, `main.rs` | Add `engagement: Option<String>` to `Args`. In `main.rs` ~line 103, after `make_output`, if engagement is set: load `Session`, scope-filter the `subdomains` Vec, write `Output<ScanOutput>` to `recon/subdomain-enum.json`, audit with `{count: N, mode}`. |
-| mg-scan | `cli.rs`, `main.rs` | Add `engagement: Option<String>` to `Args`. In `main.rs` ~line 66, for each `(display_name, ip)` after `resolve_targets`, check scope before `scanner::scan_ports`. Skip out-of-scope with a warning. Write `Output<Vec<ScanResult>>` to `recon/mg-scan.json`. Audit per host. |
-| fingerprint | NEW: `cli.rs`, `main.rs`. Modify `Cargo.toml` to add `[[bin]]` + clap dep. | Minimal binary: take URL/host + `--engagement`. Build one `http_client::Client`, call `fingerprint_url`. Write `Output<Fingerprint>` to `recon/fingerprint.json`. Audit. |
+### Step 5 — `mg-probe` ✅ (added beyond original plan)
+Passive + semi-active security posture checker.
+Checks: missing security headers (CSP, X-Frame-Options, HSTS, etc.), CORS origin reflection,
+cookie flags (Secure, HttpOnly, SameSite), exposed debug paths (Swagger, actuator, .env, console),
+stack traces in crawl HTML. Writes findings/ markdown files + `probe-report.json`.
 
-**Tests:** envelope round-trip, atomic write smoke (best-effort), Session loads correctly. End-to-end: `mg-engagement init demo --target acme.test` → `subdomain-enum --engagement demo acme.test` → assert `recon/subdomain-enum.json` exists + audit.log has a JSONL line.
+### Step 6 — `mg-fuzz` ✅ (added beyond original plan)
+Burp Intruder equivalent. Reads raw HTTP request templates with `§marker§` positions.
+Attack modes: sniper, battering-ram, pitchfork, cluster-bomb.
+Built-in payload sets: sqli, xss, ssti, traversal, ssrf, common-passwords, http-methods, usernames, numbers:N-M.
+Diffs each response against baseline (status, body hash, length delta, timing anomaly).
+Writes timestamped `fuzz-<ts>.json` report.
 
----
-
-### Step 2 — `mg-recon` orchestrator `[MEDIUM, half day]`
-
-**New crate:** `engine-rust/mg-recon/` — depends on `engagement`, `subdomain-enum` (lib), `fingerprint` (lib), `mg-scan` (lib), `http-client` (lib). All **in-process** (no subprocess spawning).
-
-**Architecture choice:** in-process calling of library functions, not subprocess. Reasons: shared HTTP connection pool, typed Results instead of exit codes, single binary install. Tradeoff accepted: a panic in any sub-library would crash the orchestrator, but those libs don't panic.
-
-**Files:**
-- `mg-recon/src/main.rs` — CLI takes engagement name + optional `--force`
-- `mg-recon/src/orchestrator.rs` — sequential stages
-
-**Stages:**
-1. Subdomain enum → discovered hosts (CT logs + brute force)
-2. Fingerprint each discovered host → tech stack per host
-3. Port scan each host (top 1000 by default) → open ports per host
-4. Aggregate → `recon/recon-summary.json` indexed by host
-
-**Resumability:** each stage checks if `recon/<stage>.json` already exists; if so, skips. `--force` overrides.
-
-**Tests:** integration test with a mocked target (HTTP fixture); smoke test against a real engagement.
+### Step 7 — `mg-replay` ✅ (added beyond original plan)
+Burp Repeater equivalent for finding verification.
+Extracts curl commands from `## Evidence` section of finding markdown.
+Re-executes, diffs against optional baseline in frontmatter.
+Verdict: `still_vulnerable` / `appears_fixed` / `indeterminate`.
+Writes `<id>-replay-<date>.json`.
 
 ---
 
-### Step 3 — `ai-prioritize` `[MEDIUM, half day]`
+## Active pipeline summary
 
-**New crate:** `engine-rust/ai-prioritize/` — depends on `engagement`, `llm-client`.
-
-**Backend selection:**
-1. If `ANTHROPIC_API_KEY` is set → use Anthropic (better quality)
-2. Else probe `http://localhost:11434/api/tags` (Ollama) — if reachable, use Ollama
-3. Else fail with clear "install Ollama or set ANTHROPIC_API_KEY" message
-
-**Default Ollama model:** `llama3.2` (override via `--model`). User can run `ollama pull llama3.2` to install.
-
-**Files:**
-- `ai-prioritize/src/main.rs` — CLI
-- `ai-prioritize/src/prompt.rs` — builds the structured prompt from `recon/*.json` envelopes + recent audit.log entries
-- `ai-prioritize/src/parse.rs` — parses model output (request JSON-formatted ranking with rationale)
-
-**Outputs:**
-- `priorities.json` — machine-readable ranked list `[{rank, target, reason, suggested_actions[]}, ...]`
-- `priorities.md` — human-readable narrative for the operator + AI assistant collaborator
-
-**Why two outputs:** the AI assistant collaborator reads `priorities.md` to brief itself on the engagement; downstream tools could read `priorities.json` programmatically.
-
-**Risk:** model output non-determinism. Mitigation: priorities are a discussion starter, not a verdict. Always re-runnable.
-
-**Tests:** prompt-builder unit tests (deterministic input → expected prompt string); parse.rs robust to malformed JSON; integration test gated on `OLLAMA_AVAILABLE` env var.
-
----
-
-### Step 4 — `mg-crawl` + JS analyzer `[LARGE, full day]`
-
-**New crate:** `engine-rust/mg-crawl/` — depends on `engagement`, `http-client`. Adds: `scraper` (HTML parsing), `regex` (pattern catalog).
-
-**Files:**
-- `mg-crawl/src/main.rs` — CLI takes engagement name + starting URL(s)
-- `mg-crawl/src/crawl.rs` — BFS, depth-limited (default 2), same-origin only, in-scope only
-- `mg-crawl/src/extract.rs` — pull `<a href>`, `<script src>`, inline `<script>` blocks from HTML
-- `mg-crawl/src/analyze.rs` — regex pass over JS for endpoints (`fetch(`, axios, XHR), secrets (AWS keys, GitHub tokens, JWTs)
-
-**Storage layout:**
 ```
-engagements/<name>/crawl/<host>/
-├── pages/<sha256>.html
-├── js/<sha256>.js
-├── index.json         # URL → sha256 mapping
-├── endpoints.json     # extracted endpoint URLs from JS
-└── secrets.json       # regex-matched candidate secrets
+subdomain-enum ──┐
+mg-scan ─────────┤                     ┌── ai-prioritize (LLM ranking)
+fingerprint ─────┴── mg-recon ─────────┤
+                      (summary.json)   └── mg-crawl ──── mg-probe
+                                                   └─── mg-fuzz
+                                                   └─── mg-replay
 ```
 
-**Etiquette:** honors `robots.txt` by default (`--ignore-robots` override). Default 1 req/sec (`--rate` override). Sets a User-Agent identifying the tool. Scope-checks every fetch and refuses out-of-scope.
-
-**Regex catalog (initial):** ~10 high-precision rules — AWS access keys (`AKIA[0-9A-Z]{16}`), GitHub tokens (`gh[ps]_[A-Za-z0-9]{36}`), JWTs (`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`), Slack tokens, generic `api_key=` / `password=`.
-
-**JS analysis tradeoff:** regex-only (cheap, fast, some false positives). Real parser (oxc/swc) deferred to v2. Document this.
-
-**Tests:** crawl logic against a static localhost fixture; regex catalog unit-tested with positive and negative samples; integration smoke test verifying the storage layout.
+Every tool writes to the engagement directory. Claude reads the same files.
 
 ---
 
-### Step 5 — `mg-replay` `[SMALL-MEDIUM, half day]`
+## Next: Frontend layer
 
-**New crate:** `engine-rust/mg-replay/` — depends on `engagement`, `http-client`.
+### Decision needed
+Two complementary interfaces, not mutually exclusive:
 
-**Files:**
-- `mg-replay/src/main.rs` — CLI: `mg-replay <engagement> <finding-id>`
-- `mg-replay/src/parse.rs` — extract `curl …` commands from the finding markdown's "Evidence" section
-- `mg-replay/src/replay.rs` — re-execute parsed requests, diff response
+**TUI (Ratatui)** — terminal-based interactive dashboard
+- Engagement list with status indicators (recon %, findings count, last run)
+- Split pane: host list + detail panel (fingerprint, ports, open findings)
+- Live log tail from audit.log during active recon
+- Finding browser with severity filter
+- Quick-action shortcuts: run probe, fuzz from template, replay finding
+- Ships first; most useful for headless/SSH environments
 
-**Logic:**
-1. Load finding markdown by ID from `findings/`
-2. Parse fenced code blocks (`bash`/`shell`) under `## Evidence`
-3. For each curl: parse to URL/method/headers/body via a small parser (or `clap`-style approach)
-4. Re-execute via `http-client`, capture response
-5. Compare: status code, sha256(body), key headers
-6. Write `findings/<id>-replay-<timestamp>.json` with diff
-7. Print summary: "still vulnerable" / "appears fixed" / "indeterminate"
+**GUI (planned post-TUI)** — native desktop with egui or Tauri/React
+- Richer visualizations: attack surface map, finding timeline
+- Template editor with §marker§ highlighting
+- Side-by-side response diff viewer (mg-fuzz results)
+- Export: PDF report, Markdown bundle for submission
 
-**Tests:** curl parser unit tests with realistic invocations; replay logic against a local fixture; ensure `--engagement` scope-check runs (don't replay against an out-of-scope target even if the finding is older).
+### TUI architecture (Ratatui)
+New crate: `engine-rust/mg-tui/`
+
+```
+mg-tui/src/
+├── main.rs        — app init, event loop, terminal setup/restore
+├── app.rs         — App state machine (selected tab, cursor, refresh timer)
+├── ui.rs          — top-level render: tabs + status bar
+├── views/
+│   ├── engagements.rs  — engagement list table
+│   ├── hosts.rs        — host detail with fingerprint + ports
+│   ├── findings.rs     — findings browser with severity filter
+│   ├── fuzz.rs         — fuzz job status + interesting results
+│   └── logs.rs         — live audit.log tail
+└── loader.rs      — async file watchers: poll recon/ + findings/ for changes
+```
+
+Key dependencies: `ratatui`, `crossterm`, `tokio` (already in workspace).
+Data: read from engagement JSON files — no new IPC needed.
+
+### OOB server integration (future)
+Integrate with a self-hosted `interactsh` instance for blind SSRF / blind XSS detection.
+`mg-fuzz` accepts `--oob-host` flag; generates payloads with encoded callback URLs.
+Polling the interactsh API for hits closes the loop without managing DNS infrastructure.
 
 ---
 
-## Critical files
+## Deferred items
 
-**Modified (engagement crate):**
-- `engagement/src/engagement.rs` — JSONL audit, atomic writes, new init dirs (`captures/`, `screenshots/` deferred until step 4 actually needs them)
-- `engagement/src/scope.rs` — atomic save
-
-**New files (engagement crate):**
-- `engagement/src/envelope.rs` — `Output<T>` envelope
-- `engagement/src/session.rs` — `Session` helper
-
-**Modified (existing tool crates):**
-- `subdomain-enum/src/{cli,main}.rs`
-- `mg-scan/src/{cli,main}.rs`
-- `fingerprint/Cargo.toml` (add `[[bin]]`)
-
-**New (in fingerprint):**
-- `fingerprint/src/{cli,main}.rs`
-
-**New crates:**
-- `engine-rust/mg-recon/`
-- `engine-rust/ai-prioritize/`
-- `engine-rust/mg-crawl/`
-- `engine-rust/mg-replay/`
-
-**Workspace metadata:**
-- `engine-rust/Cargo.toml` — add 4 new members
-- `engine-rust/README.md` — update crate map after each step
-
-## Architectural risks (acknowledge, don't pre-solve)
-
-1. **Schema versioning.** The `Output` envelope's `schema_version` is the migration handle. Bump it whenever a tool changes its `data` shape; downstream consumers handle multiple versions. Document the bump rule in `envelope.rs`.
-2. **In-process orchestrator coupling.** `mg-recon` depends on `subdomain-enum`, `fingerprint`, `mg-scan` libs. Any breaking lib change cascades. The lib/bin split in those crates is already clean — orchestrator uses lib only.
-3. **JS regex false positives.** Tunable. Track FP rate per real engagement; defer real parser until FP cost exceeds parser-integration cost.
-4. **LLM non-determinism.** `priorities.md` is a discussion starter, not a verdict. Operator and AI assistant treat it as such.
-5. **Rate-limit etiquette.** Bug bounty programs vary on probing aggression. `mg-crawl` defaults conservatively (1 req/sec). Document that operators must check program rules.
-6. **Deferred scope features.** CIDR / URL paths / port specs are v2. Add a TODO in `scope.rs` referencing this plan.
-
-## Verification per step
-
-- **Step 1:** unit tests for envelope round-trip and atomic writes; end-to-end smoke `mg-engagement init demo --target acme.test && subdomain-enum --engagement demo acme.test && jq . engagements/demo/recon/subdomain-enum.json && tail engagements/demo/audit.log`.
-- **Step 2:** integration test with HTTP fixtures; smoke test `mg-recon run demo` producing `recon-summary.json`.
-- **Step 3:** prompt-builder and parser unit tests; integration test gated on Ollama availability.
-- **Step 4:** crawl logic against static localhost fixture; regex catalog positive/negative tests.
-- **Step 5:** curl parser unit tests; smoke test with a fake finding markdown.
-
-After every step: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`.
-
-## Effort total
-
-Approximately **3.5–4 working days** end-to-end if sequenced strictly. Step 4 is the largest single chunk; steps 1 and 2 are the most foundational.
-
-## Out of scope (for this plan)
-
-- Tracing / structured logging across all crates (deferred — separate, independent change)
-- `subdomain-enum` migration to use `http-client` (deferred — minor duplication, low value to fix now)
-- Frontmatter expansion (CVSS, CWE, OWASP fields) — defer until first real submission needs them
-- Additional CLI commands (`edit`, `list-findings`, `show-finding`, `status`) — defer until daily-use friction motivates them
-- CIDR / URL path / port-spec scope matching — v2, tracked as TODO
+- CIDR / port-spec / URL-path scope rules (current `*.foo.com` suffices for now)
+- Real JS AST parser (oxc/swc) in mg-crawl — regex-only is current approach
+- mg-replay: honor `follow_redirects` from parsed curl `-L` flag
+- mg-probe: HTTP-only fallback when HTTPS connection is refused
+- Rate-limit coordination across concurrent tools (currently per-tool)
+- Subdomain takeover checks (DNS CNAME → unclaimed service)
+- GraphQL introspection and operation fuzzing

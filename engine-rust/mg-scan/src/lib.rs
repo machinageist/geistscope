@@ -1,7 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-01
-// Description: mg-scan public library API — exposes the scanner for use
-//              by other workspace members and the GeistScope Go engine
+/*******************************************************************
+ * Filename:        lib.rs
+ * Author:          Jeff
+ * Date:            2026-05-01
+ * Description:     mg-scan public library API — exposes the scanner for use
+ *                  by other workspace members (primarily mg-recon orchestrator)
+ * Notes:           Re-exports keep external callers isolated from sub-module paths.
+ *******************************************************************/
 
 pub mod output;
 pub mod scanner;

@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-01
-// Description: Ollama local LLM backend — chat completion via /api/chat
+/*******************************************************************
+ * Filename:        ollama.rs
+ * Author:          Jeff
+ * Date:            2026-05-01
+ * Description:     Ollama local LLM backend — chat completion via /api/chat
+ * Notes:           Requires Ollama running at the configured endpoint.
+ *                  stream=false blocks until completion; 120s timeout.
+ *******************************************************************/
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -45,6 +50,7 @@ impl OllamaClient {
         Ok(Self { endpoint: endpoint.into(), model: model.into(), http })
     }
 
+    // Send system + user messages and return the assistant's reply text
     pub async fn complete(&self, system: &str, user: &str) -> Result<String, LlmError> {
         let url = format!("{}/api/chat", self.endpoint);
         let body = ChatRequest {

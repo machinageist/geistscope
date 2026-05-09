@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-01
-// Description: Anthropic API backend — messages endpoint
+/*******************************************************************
+ * Filename:        anthropic.rs
+ * Author:          Jeff
+ * Date:            2026-05-01
+ * Description:     Anthropic API backend — messages endpoint
+ * Notes:           MAX_TOKENS raised from 2048 to 8192; prioritization tables
+ *                  routinely exceed the old limit.
+ *******************************************************************/
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -53,6 +58,7 @@ impl AnthropicClient {
         Ok(Self { api_key: api_key.into(), model: model.into(), http })
     }
 
+    // Send system + user messages and return the first text content block from the response
     pub async fn complete(&self, system: &str, user: &str) -> Result<String, LlmError> {
         let body = Request {
             model: &self.model,

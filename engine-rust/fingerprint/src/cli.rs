@@ -1,7 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-08
-// Description: CLI arguments for mg-fingerprint
-// Notes: probes a single URL and optionally writes to an engagement recon file
+/*******************************************************************
+ * Filename:        cli.rs
+ * Author:          Jeff
+ * Date:            2026-05-08
+ * Description:     CLI arguments for mg-fingerprint
+ * Notes:           Probes a single URL; when --engagement is set the result merges
+ *                  into recon/fingerprint.json keyed by hostname.
+ *******************************************************************/
 
 use clap::Parser;
 

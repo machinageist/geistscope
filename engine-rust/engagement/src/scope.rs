@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-02
-// Description: Scope rules for an engagement — wildcard match, default-deny
+/*******************************************************************
+ * Filename:        scope.rs
+ * Author:          Jeff
+ * Date:            2026-05-02
+ * Description:     Scope rules for an engagement — wildcard match, default-deny
+ * Notes:           out_of_scope wins over in_scope.
+ *                  Wildcard pattern *.foo.com matches subdomains but not the apex.
+ *******************************************************************/
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -17,7 +22,7 @@ pub struct Scope {
 }
 
 impl Scope {
-    // Default-permissive scope for the given root domain (target itself + *.target)
+    // Build a default scope allowing the apex domain and all subdomains
     pub fn default_for(target: &str) -> Self {
         Self {
             target: target.to_string(),
@@ -27,7 +32,7 @@ impl Scope {
         }
     }
 
-    // Default-deny check: out_of_scope wins; otherwise must match in_scope
+    // Return true if target is in-scope; out_of_scope list takes priority
     pub fn is_in_scope(&self, target: &str) -> bool {
         let target = target.to_lowercase();
         if self.out_of_scope.iter().any(|p| matches_pattern(p, &target)) {
@@ -36,11 +41,13 @@ impl Scope {
         self.in_scope.iter().any(|p| matches_pattern(p, &target))
     }
 
+    // Deserialize scope rules from a JSON file
     pub fn load(path: &Path) -> Result<Self, EngagementError> {
         let raw = std::fs::read_to_string(path)?;
         Ok(serde_json::from_str(&raw)?)
     }
 
+    // Serialize scope rules to a pretty-printed JSON file
     pub fn save(&self, path: &Path) -> Result<(), EngagementError> {
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(path, json)?;

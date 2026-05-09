@@ -10,5 +10,8 @@ members = [
     "mg-recon",
     "ai-prioritize",
     "mg-crawl",
+    "mg-probe",
+    "mg-fuzz",
+    "mg-replay",
 ]
 resolver = "2"

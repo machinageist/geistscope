@@ -1,6 +1,12 @@
-// Author: Jeff
-// Date: 2026-05-01
-// Description: Shared HTTP client — UA rotation, rate limiting, retry with jittered backoff
+/*******************************************************************
+ * Filename:        lib.rs
+ * Author:          Jeff
+ * Date:            2026-05-01
+ * Description:     Shared HTTP client — UA rotation, rate limiting, retry with jittered backoff
+ * Notes:           UA rotation cycles through 6 realistic browser strings.
+ *                  Rate limiting is per-client-instance via a Mutex<Instant>.
+ *                  Retry uses exponential backoff with 200ms jitter.
+ *******************************************************************/
 
 use reqwest::Response;
 use serde::de::DeserializeOwned;

@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-02
-// Description: Finding records — markdown body with simple frontmatter
+/*******************************************************************
+ * Filename:        finding.rs
+ * Author:          Jeff
+ * Date:            2026-05-02
+ * Description:     Finding records — Severity, Status, Finding struct, markdown I/O
+ * Notes:           Findings are stored as YAML-frontmatter + markdown body files.
+ *                  ID format: YYYY-MM-DD-NNN (operator assigns at creation).
+ *******************************************************************/
 
 use serde::{Deserialize, Serialize};
 use std::fs;

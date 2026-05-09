@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-01
-// Description: Unified LLM client — Ollama (local) and Anthropic (remote)
+/*******************************************************************
+ * Filename:        lib.rs
+ * Author:          Jeff
+ * Date:            2026-05-01
+ * Description:     Unified LLM client — Ollama (local) and Anthropic (remote)
+ * Notes:           LlmClient is the public-facing enum; callers do not need to
+ *                  import AnthropicClient or OllamaClient directly.
+ *******************************************************************/
 
 pub mod anthropic;
 pub mod ollama;

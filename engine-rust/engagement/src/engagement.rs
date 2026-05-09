@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-02
-// Description: Engagement directory — metadata, layout, audit log
+/*******************************************************************
+ * Filename:        engagement.rs
+ * Author:          Jeff
+ * Date:            2026-05-02
+ * Description:     Engagement directory — metadata, layout, audit log
+ * Notes:           Each engagement is a directory with engagement.json,
+ *                  scope.json, audit.log, notes.md, recon/, crawl/, findings/
+ *******************************************************************/
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -95,10 +100,12 @@ impl Engagement {
         Ok(out)
     }
 
+    // Load and return the scope rules for this engagement
     pub fn scope(&self) -> Result<Scope, EngagementError> {
         Scope::load(&self.root.join("scope.json"))
     }
 
+    // Persist updated scope rules back to scope.json
     pub fn save_scope(&self, scope: &Scope) -> Result<(), EngagementError> {
         scope.save(&self.root.join("scope.json"))
     }
@@ -132,15 +139,20 @@ impl Engagement {
         Ok(())
     }
 
+    // Return path to the recon output directory
     pub fn recon_dir(&self) -> PathBuf { self.root.join("recon") }
+    // Return path to the crawl output directory
     pub fn crawl_dir(&self) -> PathBuf { self.root.join("crawl") }
+    // Return path to the findings directory
     pub fn findings_dir(&self) -> PathBuf { self.root.join("findings") }
 }
 
+// Return the current UTC time formatted as RFC 3339
 fn now_rfc3339() -> Result<String, EngagementError> {
     Ok(OffsetDateTime::now_utc().format(&Rfc3339)?)
 }
 
+// Serialize value to pretty-printed JSON and write it to path
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), EngagementError> {
     let json = serde_json::to_string_pretty(value)?;
     fs::write(path, json)?;

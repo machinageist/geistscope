@@ -1,0 +1,24 @@
+[package]
+name = "mg-fuzz"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "mg-fuzz"
+path = "src/main.rs"
+
+[dependencies]
+engagement = { path = "../engagement" }
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+reqwest = { version = "0.12", features = ["json"] }
+sha2 = "0.10"
+hex = "0.4"
+time = { version = "0.3", features = ["formatting", "macros"] }
+itertools = "0.13"
+
+[dev-dependencies]
+tempfile = "3"

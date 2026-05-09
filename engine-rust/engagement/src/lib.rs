@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-02
-// Description: Bug bounty engagement workspace — directory layout, scope rules, audit log
+/*******************************************************************
+ * Filename:        lib.rs
+ * Author:          Jeff
+ * Date:            2026-05-02
+ * Description:     Bug bounty engagement workspace — directory layout, scope rules, audit log
+ * Notes:           Public API surface: Engagement, Scope, Finding, Severity, Status.
+ *                  All other types are internal to their respective modules.
+ *******************************************************************/
 
 pub mod engagement;
 pub mod finding;

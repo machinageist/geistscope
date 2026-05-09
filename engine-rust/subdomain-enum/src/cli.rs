@@ -1,7 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-08
-// Description: CLI argument definitions for subdomain-enum
-// Notes: --engagement wires this tool into an engagement workspace for scope-filtering and recon file output
+/*******************************************************************
+ * Filename:        cli.rs
+ * Author:          Jeff
+ * Date:            2026-05-08
+ * Description:     CLI argument definitions for subdomain-enum
+ * Notes:           --engagement wires this tool into an engagement workspace for
+ *                  scope-filtering and recon file output (recon/subdomain-enum.json).
+ *******************************************************************/
 
 use clap::{Parser, ValueEnum};
 

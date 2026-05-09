@@ -1,6 +1,11 @@
-// Author: Jeff
-// Date: 2026-05-01
-// Description: Parse HTTP response headers + body to identify server, framework, CDN, CMS, cloud
+/*******************************************************************
+ * Filename:        detect.rs
+ * Author:          Jeff
+ * Date:            2026-05-01
+ * Description:     Parse HTTP response headers + body to identify server, framework, CDN, CMS, cloud
+ * Notes:           Header-based detection runs first (cheaper); body scan is fallback.
+ *                  All detection functions return &'static str or Option<String> to avoid allocation.
+ *******************************************************************/
 
 use http_client::Client;
 use serde::{Deserialize, Serialize};
@@ -32,18 +37,22 @@ pub async fn fingerprint_url(client: &Client, url: &str) -> Result<Fingerprint, 
     })
 }
 
+// Extract a header value as a str reference; returns None if missing or non-UTF8
 fn header_str<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
 
+// Return the lowercased Server header value
 fn detect_server_header(headers: &reqwest::header::HeaderMap) -> Option<String> {
     header_str(headers, "server").map(|s| s.to_lowercase())
 }
 
+// Return the lowercased X-Powered-By header value
 fn detect_powered_by(headers: &reqwest::header::HeaderMap) -> Option<String> {
     header_str(headers, "x-powered-by").map(|s| s.to_lowercase())
 }
 
+// Identify CDN from well-known response headers
 fn detect_cdn(headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
     if headers.contains_key("cf-ray") { return Some("cloudflare"); }
     if headers.contains_key("x-amz-cf-pop") { return Some("cloudfront"); }
@@ -62,6 +71,7 @@ fn detect_cdn(headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
     None
 }
 
+// Identify cloud provider from well-known response headers
 fn detect_cloud(headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
     if headers.contains_key("x-cloud-trace-context") { return Some("gcp"); }
     if headers.contains_key("x-ms-request-id") { return Some("azure"); }
@@ -73,6 +83,7 @@ fn detect_cloud(headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
     None
 }
 
+// Identify CMS from well-known body patterns
 fn detect_cms(body: &str) -> Option<&'static str> {
     if body.contains("/wp-content/") || body.contains("/wp-includes/") { return Some("wordpress"); }
     if body.contains("Drupal.settings") || body.contains("/sites/default/files/") { return Some("drupal"); }
@@ -81,8 +92,8 @@ fn detect_cms(body: &str) -> Option<&'static str> {
     None
 }
 
+// Identify web framework from headers then body; headers checked first as they are cheaper
 fn detect_framework(headers: &reqwest::header::HeaderMap, body: &str) -> Option<&'static str> {
-    // Header-based detection first (cheaper than body scan)
     if let Some(xpb) = header_str(headers, "x-powered-by") {
         let xpb = xpb.to_lowercase();
         if xpb.contains("express") { return Some("express"); }
