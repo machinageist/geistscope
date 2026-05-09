@@ -9,5 +9,6 @@ members = [
     "engagement",
     "mg-recon",
     "ai-prioritize",
+    "mg-crawl",
 ]
 resolver = "2"
