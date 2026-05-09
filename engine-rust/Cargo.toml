@@ -8,5 +8,6 @@ members = [
     "corpus-builder",
     "engagement",
     "mg-recon",
+    "ai-prioritize",
 ]
 resolver = "2"

@@ -15,6 +15,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-prioritize"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "fingerprint",
+ "llm-client",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+]
+
+[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

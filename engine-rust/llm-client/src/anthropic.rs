@@ -9,7 +9,8 @@ use crate::LlmError;
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const MAX_TOKENS: u32 = 2048;
+// raised from 2048 — prioritization tables and analysis routinely exceed the old limit
+const MAX_TOKENS: u32 = 8192;
 
 pub struct AnthropicClient {
     api_key: String,
