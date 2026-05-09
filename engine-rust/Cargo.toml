@@ -13,5 +13,6 @@ members = [
     "mg-probe",
     "mg-fuzz",
     "mg-replay",
+    "mg-tui",
 ]
 resolver = "2"

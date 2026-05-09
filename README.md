@@ -6,7 +6,7 @@ Tools write to a shared file layout; an AI operator reads the same files — no 
 ## Architecture
 
 ```
-engine-rust/          Rust workspace — 10 binaries, 4 libraries
+engine-rust/          Rust workspace — 11 binaries, 4 libraries
 docs/                 Design notes
 CLAUDE.md             AI session orientation (read this first)
 ```
@@ -28,6 +28,8 @@ mg-recon              ← subdomain enum + fingerprint + port scan → summary.j
       ├── mg-fuzz         ← Payload fuzzer (Burp Intruder equivalent)
       │
       └── mg-replay       ← Finding verification (Burp Repeater equivalent)
+      │
+      └── mg-tui          ← Terminal dashboard (Ratatui)
 ```
 
 ## Quick start
@@ -37,7 +39,7 @@ mg-recon              ← subdomain enum + fingerprint + port scan → summary.j
 cd engine-rust
 cargo build --workspace
 for crate in engagement subdomain-enum mg-scan fingerprint mg-recon \
-             ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay; do
+             ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-tui; do
     cargo install --path $crate
 done
 
@@ -63,6 +65,7 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-probe`       | Passive security posture checker                    |
 | `mg-fuzz`        | Burp Intruder-style HTTP fuzzer                     |
 | `mg-replay`      | Burp Repeater-style finding verification            |
+| `mg-tui`         | Ratatui terminal dashboard: engagements/hosts/findings/fuzz/logs |
 
 ## Requirements
 

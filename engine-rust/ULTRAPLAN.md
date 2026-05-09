@@ -65,7 +65,7 @@ Every tool writes to the engagement directory. Claude reads the same files.
 
 ---
 
-## Next: Frontend layer
+## Frontend layer ✅
 
 ### Decision needed
 Two complementary interfaces, not mutually exclusive:
@@ -84,8 +84,8 @@ Two complementary interfaces, not mutually exclusive:
 - Side-by-side response diff viewer (mg-fuzz results)
 - Export: PDF report, Markdown bundle for submission
 
-### TUI architecture (Ratatui)
-New crate: `engine-rust/mg-tui/`
+### TUI architecture (Ratatui) ✅
+Crate: `engine-rust/mg-tui/`
 
 ```
 mg-tui/src/

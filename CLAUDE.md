@@ -76,9 +76,11 @@ Every crate must pass `cargo clippy -- -D warnings` before commit.
 
 ## Active development focus
 
-**Next crate: `mg-tui`** — Ratatui terminal UI
-Architecture is specified in `engine-rust/ULTRAPLAN.md` under "Frontend layer".
-Build the TUI before the GUI. Data comes from engagement JSON files — no new IPC.
+**`mg-tui` is complete** — Ratatui terminal dashboard installed at `~/.cargo/bin/mg-tui`.
+Tabs: Engagements · Hosts · Findings · Fuzz · Logs. Keys: Tab/BackTab navigate tabs, ↑↓ move cursor, Enter selects engagement, f cycles severity filter, r refreshes.
+
+**Next:** GUI layer (egui or Tauri/React) — see ULTRAPLAN.md "GUI (planned post-TUI)".
+Also candidates: OOB interactsh integration, subdomain takeover checks, GraphQL fuzzing.
 
 ## Key reference files
 
