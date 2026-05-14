@@ -9,7 +9,8 @@
  *                  and writes a full JSON report.
  * Notes:           The Host header in the template sets the target unless
  *                  --host overrides it. HTTPS is used by default; use --no-tls
- *                  to force HTTP. Rate is configurable; defaults to 500ms/req.
+ *                  to force HTTP or --insecure for test targets with bad certs.
+ *                  Rate is configurable; defaults to 500ms/req.
  *******************************************************************/
 
 mod attack;
@@ -31,6 +32,8 @@ use engagement::Engagement;
 use crate::diff::ResponseRecord;
 use crate::report::{FuzzReport, FuzzResult};
 
+const MAX_CAPTURED_BODY_BYTES: usize = 256 * 1024;
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -42,7 +45,10 @@ enum AttackMode {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "mg-fuzz", about = "HTTP fuzzer — Burp Intruder-style payload injection")]
+#[command(
+    name = "mg-fuzz",
+    about = "HTTP fuzzer — Burp Intruder-style payload injection"
+)]
 struct Args {
     /// Engagement name (engagement.json must exist)
     engagement: String,
@@ -72,6 +78,10 @@ struct Args {
     #[arg(long)]
     no_tls: bool,
 
+    /// Accept invalid TLS certificates
+    #[arg(long)]
+    insecure: bool,
+
     /// Milliseconds between requests
     #[arg(long, default_value_t = 500)]
     rate_ms: u64,
@@ -95,32 +105,36 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let eng_root = Path::new(&args.engagements_dir).join(&args.engagement);
-    let eng = Engagement::load(&eng_root)
+    let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
     // read and parse the request template
     let tmpl_raw = std::fs::read_to_string(&args.template)
         .with_context(|| format!("read template {}", args.template))?;
-    let tmpl = template::RequestTemplate::parse(&tmpl_raw)
-        .context("parse template")?;
+    let tmpl = template::RequestTemplate::parse(&tmpl_raw).context("parse template")?;
 
-    eprintln!("mg-fuzz: {} positions: {:?}", tmpl.positions.len(), tmpl.positions);
+    eprintln!(
+        "mg-fuzz: {} positions: {:?}",
+        tmpl.positions.len(),
+        tmpl.positions
+    );
 
     if tmpl.positions.is_empty() {
         anyhow::bail!("template has no §markers§ — nothing to fuzz");
     }
 
     // load all payload lists
-    let payload_lists: Vec<Vec<String>> = args.payload_specs.iter()
+    let payload_lists: Vec<Vec<String>> = args
+        .payload_specs
+        .iter()
         .map(|spec| payload::load(spec).with_context(|| format!("load payload '{spec}'")))
         .collect::<Result<_>>()?;
 
     // generate the attack request sequence based on mode
     let attack_reqs = match args.mode {
-        AttackMode::Sniper      => attack::sniper(&tmpl.positions, &payload_lists),
+        AttackMode::Sniper => attack::sniper(&tmpl.positions, &payload_lists),
         AttackMode::BatteringRam => attack::battering_ram(&tmpl.positions, &payload_lists),
-        AttackMode::Pitchfork   => attack::pitchfork(&tmpl.positions, &payload_lists),
+        AttackMode::Pitchfork => attack::pitchfork(&tmpl.positions, &payload_lists),
         AttackMode::ClusterBomb => attack::cluster_bomb(&tmpl.positions, &payload_lists),
     };
 
@@ -130,7 +144,8 @@ async fn main() -> Result<()> {
     let host = if let Some(h) = &args.host {
         h.clone()
     } else {
-        tmpl.headers.iter()
+        tmpl.headers
+            .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case("host"))
             .map(|(_, v)| v.clone())
             .unwrap_or_else(|| eng.meta.target.clone())
@@ -144,20 +159,26 @@ async fn main() -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(args.timeout_ms))
         .user_agent("mg-fuzz/0.1 (security research)")
-        .danger_accept_invalid_certs(true)  // needed for TLS cert mismatches on test targets
+        .danger_accept_invalid_certs(args.insecure)
         .build()
         .context("build HTTP client")?;
 
     let rate = Duration::from_millis(args.rate_ms);
-    let ts = OffsetDateTime::now_utc().format(&Rfc3339).context("format timestamp")?;
+    let ts = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .context("format timestamp")?;
 
     // take a baseline response using the first request from the list (all-empty payloads)
     let empty_payloads: Vec<&str> = tmpl.positions.iter().map(|_| "").collect();
     let baseline_req = tmpl.inject(&empty_payloads);
     eprintln!("  taking baseline...");
-    let baseline = send_request(&client, &base_url, &baseline_req).await
+    let baseline = send_request(&client, &base_url, &baseline_req)
+        .await
         .context("baseline request failed")?;
-    eprintln!("  baseline: {} {} bytes", baseline.status, baseline.body_len);
+    eprintln!(
+        "  baseline: {} {} bytes",
+        baseline.status, baseline.body_len
+    );
 
     report::print_header();
 
@@ -178,7 +199,7 @@ async fn main() -> Result<()> {
 
         let diff_result = diff::diff(&baseline, &response);
         let result = FuzzResult {
-            label:    attack_req.label.clone(),
+            label: attack_req.label.clone(),
             payloads: attack_req.payloads.clone(),
             response,
             diff: diff_result,
@@ -192,7 +213,11 @@ async fn main() -> Result<()> {
     }
 
     let interesting_count = results.iter().filter(|r| r.diff.interesting).count();
-    eprintln!("  {} interesting / {} total", interesting_count, results.len());
+    eprintln!(
+        "  {} interesting / {} total",
+        interesting_count,
+        results.len()
+    );
 
     // write the full report to the engagement recon directory
     let mode_str = format!("{:?}", args.mode).to_lowercase();
@@ -211,7 +236,10 @@ async fn main() -> Result<()> {
     let _ = eng.audit(
         "mg-fuzz",
         &host,
-        Some(&format!("requests={} interesting={}", fuzz_report.total_requests, interesting_count)),
+        Some(&format!(
+            "requests={} interesting={}",
+            fuzz_report.total_requests, interesting_count
+        )),
     );
 
     Ok(())
@@ -230,14 +258,16 @@ async fn send_request(
 
     // build the request with the correct method
     let mut builder = match req.method.as_str() {
-        "GET"    => client.get(&url),
-        "POST"   => client.post(&url),
-        "PUT"    => client.put(&url),
-        "PATCH"  => client.patch(&url),
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        "PUT" => client.put(&url),
+        "PATCH" => client.patch(&url),
         "DELETE" => client.delete(&url),
-        "HEAD"   => client.head(&url),
-        m => client.request(reqwest::Method::from_bytes(m.as_bytes())
-                .unwrap_or(reqwest::Method::GET), &url),
+        "HEAD" => client.head(&url),
+        m => client.request(
+            reqwest::Method::from_bytes(m.as_bytes()).unwrap_or(reqwest::Method::GET),
+            &url,
+        ),
     };
 
     // apply headers from the injected request (skip Host — reqwest sets it from URL)
@@ -256,16 +286,41 @@ async fn send_request(
     let elapsed_ms = t0.elapsed().as_millis() as u64;
 
     let status = resp.status().as_u16();
-    let content_type = resp.headers()
+    let content_type = resp
+        .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .map(String::from);
-    let location = resp.headers()
+    let location = resp
+        .headers()
         .get("location")
         .and_then(|v| v.to_str().ok())
         .map(String::from);
 
-    let body = resp.text().await.unwrap_or_default();
+    let body = read_limited_text(resp, MAX_CAPTURED_BODY_BYTES).await?;
 
-    Ok(ResponseRecord::new(status, body, elapsed_ms, content_type, location))
+    Ok(ResponseRecord::new(
+        status,
+        body,
+        elapsed_ms,
+        content_type,
+        location,
+    ))
+}
+
+// Read at most `limit` bytes so a single large response cannot exhaust memory or bloat reports
+async fn read_limited_text(mut resp: reqwest::Response, limit: usize) -> Result<String> {
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.context("read response chunk")? {
+        let remaining = limit.saturating_sub(body.len());
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(chunk.len());
+        body.extend_from_slice(&chunk[..take]);
+        if take < chunk.len() {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
 }

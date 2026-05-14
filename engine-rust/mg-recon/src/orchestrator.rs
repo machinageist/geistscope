@@ -22,9 +22,12 @@ use tokio::task::JoinSet;
 
 use engagement::{Engagement, Scope};
 use fingerprint::Fingerprint;
-use mg_scan::{scan_ports, PortState, ScanConfig};
-use subdomain_enum::{brute, ct_logs, output::{make_output, ScanOutput, SubdomainEntry}};
 use http_client::{Client, ClientConfig};
+use mg_scan::{PortState, ScanConfig, scan_ports};
+use subdomain_enum::{
+    brute, ct_logs,
+    output::{ScanOutput, SubdomainEntry, make_output},
+};
 
 // Configuration for a single recon run
 pub struct RunConfig {
@@ -62,12 +65,20 @@ pub struct ReconSummary {
 // Entrypoint: load the engagement, run all four stages, write summary.json
 pub async fn run(cfg: RunConfig) -> Result<()> {
     // fail fast if the engagement directory does not exist
-    let eng = Engagement::load(&cfg.eng_root)
-        .with_context(|| format!("load engagement {} at {}", cfg.engagement_name, cfg.eng_root.display()))?;
+    let eng = Engagement::load(&cfg.eng_root).with_context(|| {
+        format!(
+            "load engagement {} at {}",
+            cfg.engagement_name,
+            cfg.eng_root.display()
+        )
+    })?;
 
     let scope = eng.scope().context("load scope.json")?;
 
-    eprintln!("=== mg-recon: {} → {} ===", cfg.engagement_name, eng.meta.target);
+    eprintln!(
+        "=== mg-recon: {} → {} ===",
+        cfg.engagement_name, eng.meta.target
+    );
 
     // stage 1: discover subdomains
     let subdomains = stage_subdomains(&cfg, &eng, &scope).await?;
@@ -85,12 +96,19 @@ pub async fn run(cfg: RunConfig) -> Result<()> {
     // stage 4: merge all three data sources and write summary.json
     stage_summarise(&cfg, &eng, &subdomains, &fingerprints, &scan_map).await?;
 
-    eprintln!("=== done — see {}/recon/summary.json ===", cfg.eng_root.display());
+    eprintln!(
+        "=== done — see {}/recon/summary.json ===",
+        cfg.eng_root.display()
+    );
     Ok(())
 }
 
 // Stage 1: CT log query + DNS brute force, scope-filtered, written to recon/subdomain-enum.json
-async fn stage_subdomains(cfg: &RunConfig, eng: &Engagement, scope: &Scope) -> Result<Vec<SubdomainEntry>> {
+async fn stage_subdomains(
+    cfg: &RunConfig,
+    eng: &Engagement,
+    scope: &Scope,
+) -> Result<Vec<SubdomainEntry>> {
     let path = eng.recon_dir().join("subdomain-enum.json");
 
     // skip enumeration if cached output exists and --force was not passed
@@ -102,8 +120,12 @@ async fn stage_subdomains(cfg: &RunConfig, eng: &Engagement, scope: &Scope) -> R
         return Ok(out.subdomains);
     }
 
-    eprintln!("[1/4] subdomain-enum — {} (CT logs + brute force)", eng.meta.target);
+    eprintln!(
+        "[1/4] subdomain-enum — {} (CT logs + brute force)",
+        eng.meta.target
+    );
     let start = Instant::now();
+    let concurrency = cfg.concurrency.max(1);
     // accumulate unique entries from both sources, deduplicating by hostname
     let mut merged: HashMap<String, SubdomainEntry> = HashMap::new();
 
@@ -115,16 +137,18 @@ async fn stage_subdomains(cfg: &RunConfig, eng: &Engagement, scope: &Scope) -> R
             let mut set: JoinSet<(String, Vec<IpAddr>)> = JoinSet::new();
             for name in names {
                 // drain one result when at ceiling to avoid unbounded task growth
-                while set.len() >= cfg.concurrency {
-                    // drain one result when at ceiling to avoid unbounded task growth
+                while set.len() >= concurrency {
                     if let Some(Ok((n, ips))) = set.join_next().await
                         && scope.is_in_scope(&n)
                     {
-                        merged.insert(n.clone(), SubdomainEntry {
-                            name: n,
-                            ips: ips.iter().map(|i| i.to_string()).collect(),
-                            source: "ct_log".into(),
-                        });
+                        merged.insert(
+                            n.clone(),
+                            SubdomainEntry {
+                                name: n,
+                                ips: ips.iter().map(|i| i.to_string()).collect(),
+                                source: "ct_log".into(),
+                            },
+                        );
                     }
                 }
                 let t = cfg.timeout_ms;
@@ -133,7 +157,9 @@ async fn stage_subdomains(cfg: &RunConfig, eng: &Engagement, scope: &Scope) -> R
                     let ips = match tokio::time::timeout(
                         Duration::from_millis(t),
                         tokio::net::lookup_host(format!("{name}:0")),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(Ok(addrs)) => addrs.map(|a| a.ip()).collect(),
                         _ => vec![],
                     };
@@ -143,11 +169,14 @@ async fn stage_subdomains(cfg: &RunConfig, eng: &Engagement, scope: &Scope) -> R
             // drain any remaining in-flight resolutions
             while let Some(Ok((n, ips))) = set.join_next().await {
                 if scope.is_in_scope(&n) {
-                    merged.insert(n.clone(), SubdomainEntry {
-                        name: n,
-                        ips: ips.iter().map(|i| i.to_string()).collect(),
-                        source: "ct_log".into(),
-                    });
+                    merged.insert(
+                        n.clone(),
+                        SubdomainEntry {
+                            name: n,
+                            ips: ips.iter().map(|i| i.to_string()).collect(),
+                            source: "ct_log".into(),
+                        },
+                    );
                 }
             }
         }
@@ -155,23 +184,31 @@ async fn stage_subdomains(cfg: &RunConfig, eng: &Engagement, scope: &Scope) -> R
     }
 
     // brute-force DNS by trying wordlist prefixes; resolves IPs internally
-    let brute_results = brute::brute_force(&eng.meta.target, None, cfg.concurrency, cfg.timeout_ms).await;
+    let brute_results =
+        brute::brute_force(&eng.meta.target, None, concurrency, cfg.timeout_ms).await;
     eprintln!("  brute force: {} resolved", brute_results.len());
     for r in brute_results {
-        if !scope.is_in_scope(&r.name) { continue; }
+        if !scope.is_in_scope(&r.name) {
+            continue;
+        }
         if let Some(entry) = merged.get_mut(&r.name) {
             // host was already seen in CT logs — upgrade source tag and union IPs
             entry.source = "ct_log+brute".into();
             for ip in &r.ips {
                 let s = ip.to_string();
-                if !entry.ips.contains(&s) { entry.ips.push(s); }
+                if !entry.ips.contains(&s) {
+                    entry.ips.push(s);
+                }
             }
         } else {
-            merged.insert(r.name.clone(), SubdomainEntry {
-                name: r.name,
-                ips: r.ips.iter().map(|i| i.to_string()).collect(),
-                source: "brute".into(),
-            });
+            merged.insert(
+                r.name.clone(),
+                SubdomainEntry {
+                    name: r.name,
+                    ips: r.ips.iter().map(|i| i.to_string()).collect(),
+                    source: "brute".into(),
+                },
+            );
         }
     }
 
@@ -182,9 +219,17 @@ async fn stage_subdomains(cfg: &RunConfig, eng: &Engagement, scope: &Scope) -> R
 
     let json = serde_json::to_string_pretty(&out).context("serialize subdomain output")?;
     std::fs::write(&path, json).context("write subdomain-enum.json")?;
-    let _ = eng.audit("subdomain-enum", &eng.meta.target, Some(&format!("count={}", out.subdomains.len())));
+    let _ = eng.audit(
+        "subdomain-enum",
+        &eng.meta.target,
+        Some(&format!("count={}", out.subdomains.len())),
+    );
 
-    eprintln!("[1/4] done — {} in-scope subdomains in {:.1}s", out.subdomains.len(), elapsed.as_secs_f32());
+    eprintln!(
+        "[1/4] done — {} in-scope subdomains in {:.1}s",
+        out.subdomains.len(),
+        elapsed.as_secs_f32()
+    );
     Ok(out.subdomains)
 }
 
@@ -200,7 +245,8 @@ async fn stage_fingerprint(
     if path.exists() && !cfg.force {
         eprintln!("[2/4] fingerprint — loading cache");
         let raw = std::fs::read_to_string(&path).context("read cached fingerprint.json")?;
-        let map: HashMap<String, Fingerprint> = serde_json::from_str(&raw).context("parse fingerprint.json")?;
+        let map: HashMap<String, Fingerprint> =
+            serde_json::from_str(&raw).context("parse fingerprint.json")?;
         eprintln!("[2/4] {} cached fingerprints", map.len());
         return Ok(map);
     }
@@ -214,7 +260,8 @@ async fn stage_fingerprint(
         max_retries: 1,
         rotate_ua: true,
         max_redirects: 5,
-    }).context("build HTTP client")?;
+    })
+    .context("build HTTP client")?;
 
     let mut map: HashMap<String, Fingerprint> = HashMap::new();
 
@@ -239,7 +286,11 @@ async fn stage_fingerprint(
         Some(&format!("accessible={}/{}", map.len(), subdomains.len())),
     );
 
-    eprintln!("[2/4] done — {}/{} hosts HTTP-accessible", map.len(), subdomains.len());
+    eprintln!(
+        "[2/4] done — {}/{} hosts HTTP-accessible",
+        map.len(),
+        subdomains.len()
+    );
     Ok(map)
 }
 
@@ -266,12 +317,18 @@ async fn stage_portscan(
         let raw = std::fs::read_to_string(&path).context("read cached mg-scan.json")?;
         let scans: Vec<HostScan> = serde_json::from_str(&raw).context("parse mg-scan.json")?;
         let count = scans.len();
-        let map: HashMap<String, HostScan> = scans.into_iter().map(|s| (s.hostname.clone(), s)).collect();
+        let map: HashMap<String, HostScan> =
+            scans.into_iter().map(|s| (s.hostname.clone(), s)).collect();
         eprintln!("[3/4] {} cached scan results", count);
         return Ok(map);
     }
 
-    eprintln!("[3/4] port scan — ports {}-{} on {} hosts", cfg.port_start, cfg.port_end, subdomains.len());
+    eprintln!(
+        "[3/4] port scan — ports {}-{} on {} hosts",
+        cfg.port_start,
+        cfg.port_end,
+        subdomains.len()
+    );
 
     let scan_cfg = ScanConfig {
         port_start: cfg.port_start,
@@ -310,11 +367,13 @@ async fn stage_portscan(
         let port_results = scan_ports(ip, &scan_cfg).await;
 
         // collect only open ports for the summary
-        let open_ports: Vec<u16> = port_results.iter()
+        let open_ports: Vec<u16> = port_results
+            .iter()
             .filter(|r| r.state == PortState::Open)
             .map(|r| r.port)
             .collect();
-        let services: Vec<String> = port_results.iter()
+        let services: Vec<String> = port_results
+            .iter()
             .filter(|r| r.state == PortState::Open)
             .map(|r| r.service.to_string())
             .collect();
@@ -332,7 +391,11 @@ async fn stage_portscan(
 
     let json = serde_json::to_string_pretty(&results).context("serialize scan results")?;
     std::fs::write(&path, json).context("write mg-scan.json")?;
-    let _ = eng.audit("mg-scan", &eng.meta.target, Some(&format!("hosts={}", results.len())));
+    let _ = eng.audit(
+        "mg-scan",
+        &eng.meta.target,
+        Some(&format!("hosts={}", results.len())),
+    );
 
     // move results into map after writing
     for hs in results {
@@ -353,29 +416,33 @@ async fn stage_summarise(
 ) -> Result<()> {
     eprintln!("[4/4] building summary.json");
 
-    let generated_at = OffsetDateTime::now_utc().format(&Rfc3339)
+    let generated_at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
         .context("format timestamp")?;
 
     // one HostRecord per subdomain, joined with fingerprint and scan data
-    let hosts: Vec<HostRecord> = subdomains.iter().map(|sub| {
-        let fp = fingerprints.get(&sub.name).cloned();
-        let http_accessible = fp.is_some();
-        let (open_ports, services) = if let Some(hs) = scan_map.get(&sub.name) {
-            (hs.open_ports.clone(), hs.services.clone())
-        } else {
-            (vec![], vec![])
-        };
+    let hosts: Vec<HostRecord> = subdomains
+        .iter()
+        .map(|sub| {
+            let fp = fingerprints.get(&sub.name).cloned();
+            let http_accessible = fp.is_some();
+            let (open_ports, services) = if let Some(hs) = scan_map.get(&sub.name) {
+                (hs.open_ports.clone(), hs.services.clone())
+            } else {
+                (vec![], vec![])
+            };
 
-        HostRecord {
-            hostname: sub.name.clone(),
-            ips: sub.ips.clone(),
-            source: sub.source.clone(),
-            http_accessible,
-            fingerprint: fp,
-            open_ports,
-            services,
-        }
-    }).collect();
+            HostRecord {
+                hostname: sub.name.clone(),
+                ips: sub.ips.clone(),
+                source: sub.source.clone(),
+                http_accessible,
+                fingerprint: fp,
+                open_ports,
+                services,
+            }
+        })
+        .collect();
 
     let summary = ReconSummary {
         engagement: cfg.engagement_name.clone(),

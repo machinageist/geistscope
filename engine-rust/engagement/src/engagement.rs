@@ -10,12 +10,12 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use time::format_description::well_known::Rfc3339;
+use std::path::{Component, Path, PathBuf};
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
-use crate::scope::Scope;
 use crate::EngagementError;
+use crate::scope::Scope;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngagementMeta {
@@ -38,7 +38,7 @@ pub struct Engagement {
 impl Engagement {
     // Create a fresh engagement directory under `parent`; fails if it already exists
     pub fn init(parent: &Path, mut meta: EngagementMeta) -> Result<Self, EngagementError> {
-        let root = parent.join(&meta.name);
+        let root = engagement_path(parent, &meta.name)?;
         if root.exists() {
             return Err(EngagementError::AlreadyExists(root.display().to_string()));
         }
@@ -67,6 +67,16 @@ impl Engagement {
         Ok(Self { root, meta })
     }
 
+    // Resolve a validated engagement name under a parent directory
+    pub fn path_for_name(parent: &Path, name: &str) -> Result<PathBuf, EngagementError> {
+        engagement_path(parent, name)
+    }
+
+    // Load an existing engagement by name from a parent directory
+    pub fn load_named(parent: &Path, name: &str) -> Result<Self, EngagementError> {
+        Self::load(&engagement_path(parent, name)?)
+    }
+
     // Load an existing engagement from disk
     pub fn load(root: &Path) -> Result<Self, EngagementError> {
         let meta_path = root.join("engagement.json");
@@ -75,7 +85,10 @@ impl Engagement {
         }
         let raw = fs::read_to_string(&meta_path)?;
         let meta: EngagementMeta = serde_json::from_str(&raw)?;
-        Ok(Self { root: root.to_path_buf(), meta })
+        Ok(Self {
+            root: root.to_path_buf(),
+            meta,
+        })
     }
 
     // List all engagements under a parent directory
@@ -111,12 +124,17 @@ impl Engagement {
     }
 
     // Append an entry to audit.log: ISO-8601 timestamp + tool + target + optional detail
-    pub fn audit(&self, tool: &str, target: &str, detail: Option<&str>) -> Result<(), EngagementError> {
+    pub fn audit(
+        &self,
+        tool: &str,
+        target: &str,
+        detail: Option<&str>,
+    ) -> Result<(), EngagementError> {
         let ts = now_rfc3339()?;
-        let mut line = format!("{ts} {tool} {target}");
+        let mut line = format!("{ts} {} {}", audit_field(tool), audit_field(target));
         if let Some(d) = detail {
             line.push(' ');
-            line.push_str(d);
+            line.push_str(&audit_field(d));
         }
         line.push('\n');
         let mut f = fs::OpenOptions::new()
@@ -140,11 +158,67 @@ impl Engagement {
     }
 
     // Return path to the recon output directory
-    pub fn recon_dir(&self) -> PathBuf { self.root.join("recon") }
+    pub fn recon_dir(&self) -> PathBuf {
+        self.root.join("recon")
+    }
     // Return path to the crawl output directory
-    pub fn crawl_dir(&self) -> PathBuf { self.root.join("crawl") }
+    pub fn crawl_dir(&self) -> PathBuf {
+        self.root.join("crawl")
+    }
     // Return path to the findings directory
-    pub fn findings_dir(&self) -> PathBuf { self.root.join("findings") }
+    pub fn findings_dir(&self) -> PathBuf {
+        self.root.join("findings")
+    }
+}
+
+// Return the safe on-disk path for an engagement name under a parent directory
+fn engagement_path(parent: &Path, name: &str) -> Result<PathBuf, EngagementError> {
+    validate_engagement_name(name)?;
+    Ok(parent.join(name))
+}
+
+// Reject names that could escape the engagements directory or create ambiguous paths
+fn validate_engagement_name(name: &str) -> Result<(), EngagementError> {
+    if name.is_empty() {
+        return Err(EngagementError::Invalid(
+            "engagement name cannot be empty".into(),
+        ));
+    }
+
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => {}
+        _ => {
+            return Err(EngagementError::Invalid(
+                "engagement name must be a single path component".into(),
+            ));
+        }
+    }
+
+    if name == "." || name == ".." || name.contains('/') || name.contains('\\') {
+        return Err(EngagementError::Invalid(
+            "engagement name cannot contain path separators".into(),
+        ));
+    }
+
+    if name.chars().any(char::is_control) {
+        return Err(EngagementError::Invalid(
+            "engagement name cannot contain control characters".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// Collapse audit fields to one line so user-controlled values cannot forge log entries
+fn audit_field(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // Return the current UTC time formatted as RFC 3339
@@ -209,6 +283,23 @@ mod tests {
     }
 
     #[test]
+    fn init_rejects_path_traversal_names() {
+        let p = tmp_parent();
+        assert!(matches!(
+            Engagement::init(&p, meta("../escape", "acme.test")),
+            Err(EngagementError::Invalid(_))
+        ));
+        assert!(matches!(
+            Engagement::init(&p, meta("nested/acme", "acme.test")),
+            Err(EngagementError::Invalid(_))
+        ));
+        assert!(matches!(
+            Engagement::init(&p, meta("nested\\acme", "acme.test")),
+            Err(EngagementError::Invalid(_))
+        ));
+    }
+
+    #[test]
     fn load_round_trip() {
         let p = tmp_parent();
         let e1 = Engagement::init(&p, meta("acme", "acme.test")).unwrap();
@@ -221,11 +312,27 @@ mod tests {
     fn audit_log_appends() {
         let p = tmp_parent();
         let e = Engagement::init(&p, meta("acme", "acme.test")).unwrap();
-        e.audit("mg-scan", "api.acme.test", Some("ports=80-443")).unwrap();
+        e.audit("mg-scan", "api.acme.test", Some("ports=80-443"))
+            .unwrap();
         e.audit("subdomain-enum", "acme.test", None).unwrap();
         let log = fs::read_to_string(e.root.join("audit.log")).unwrap();
         assert!(log.contains("mg-scan api.acme.test ports=80-443"));
         assert!(log.contains("subdomain-enum acme.test"));
+    }
+
+    #[test]
+    fn audit_log_sanitizes_control_characters() {
+        let p = tmp_parent();
+        let e = Engagement::init(&p, meta("acme", "acme.test")).unwrap();
+        e.audit(
+            "mg-scan\nforged",
+            "api.acme.test",
+            Some("open=1\nforged line"),
+        )
+        .unwrap();
+        let log = fs::read_to_string(e.root.join("audit.log")).unwrap();
+        assert_eq!(log.lines().count(), 1);
+        assert!(log.contains("mg-scan forged api.acme.test open=1 forged line"));
     }
 
     #[test]

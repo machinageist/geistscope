@@ -31,7 +31,10 @@ use crate::replay::{OriginalBaseline, Verdict};
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(name = "mg-replay", about = "Replay finding curl evidence and verify exploitability")]
+#[command(
+    name = "mg-replay",
+    about = "Replay finding curl evidence and verify exploitability"
+)]
 struct Args {
     /// Engagement name
     engagement: String,
@@ -84,8 +87,7 @@ struct ReplayReport {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let eng_root = Path::new(&args.engagements_dir).join(&args.engagement);
-    let eng = Engagement::load(&eng_root)
+    let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
     // resolve the finding file: by direct path or by searching findings/ for matching ID prefix
@@ -112,7 +114,10 @@ async fn main() -> Result<()> {
     // extract curl commands from the Evidence section
     let curl_commands = parse::extract_curl_commands(&markdown);
     if curl_commands.is_empty() {
-        anyhow::bail!("no curl commands found in ## Evidence section of {}", finding_path.display());
+        anyhow::bail!(
+            "no curl commands found in ## Evidence section of {}",
+            finding_path.display()
+        );
     }
     eprintln!("  {} curl command(s) to replay", curl_commands.len());
 
@@ -141,7 +146,8 @@ async fn main() -> Result<()> {
             client.clone()
         };
 
-        let result = replay::replay(&client_for_req, &req, baseline.as_ref()).await
+        let result = replay::replay(&client_for_req, &req, baseline.as_ref())
+            .await
             .unwrap_or_else(|e| {
                 eprintln!("  [replay err] {e}");
                 replay::ReplayResult {
@@ -167,7 +173,10 @@ async fn main() -> Result<()> {
     }
 
     // compute overall verdict: worst-case across all replays
-    let overall = if results.iter().any(|r| r.verdict == Verdict::StillVulnerable) {
+    let overall = if results
+        .iter()
+        .any(|r| r.verdict == Verdict::StillVulnerable)
+    {
         "still_vulnerable"
     } else if results.iter().all(|r| r.verdict == Verdict::AppearsFixed) {
         "appears_fixed"
@@ -178,8 +187,11 @@ async fn main() -> Result<()> {
     eprintln!("  overall verdict: {overall}");
 
     // write the replay report to findings/
-    let ts = OffsetDateTime::now_utc().format(&Rfc3339).context("format timestamp")?;
-    let finding_stem = finding_path.file_stem()
+    let ts = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .context("format timestamp")?;
+    let finding_stem = finding_path
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("finding");
     let report_name = format!("{finding_stem}-replay-{}.json", &ts[..10]);
@@ -212,7 +224,9 @@ async fn main() -> Result<()> {
 // Resolve the finding path: direct file path or search findings/ by ID prefix
 fn resolve_finding_path(findings_dir: &Path, id_or_path: &str) -> Result<std::path::PathBuf> {
     let direct = Path::new(id_or_path);
-    if direct.exists() { return Ok(direct.to_path_buf()); }
+    if direct.exists() {
+        return Ok(direct.to_path_buf());
+    }
 
     // search findings/ for a file whose name starts with the given prefix
     let entries = std::fs::read_dir(findings_dir)
@@ -226,7 +240,11 @@ fn resolve_finding_path(findings_dir: &Path, id_or_path: &str) -> Result<std::pa
         }
     }
 
-    anyhow::bail!("finding '{}' not found in {} or as a direct path", id_or_path, findings_dir.display())
+    anyhow::bail!(
+        "finding '{}' not found in {} or as a direct path",
+        id_or_path,
+        findings_dir.display()
+    )
 }
 
 // Extract YAML-ish frontmatter between --- delimiters and parse known fields
@@ -238,17 +256,19 @@ fn parse_frontmatter(markdown: &str) -> FindingMeta {
 
     let mut meta = FindingMeta::default();
     for line in lines {
-        if line.trim() == "---" { break; }
+        if line.trim() == "---" {
+            break;
+        }
         // parse simple "key: value" pairs
         if let Some(colon) = line.find(':') {
             let key = line[..colon].trim();
             let val = line[colon + 1..].trim().to_string();
             match key {
-                "title"              => meta.title = Some(val),
-                "severity"           => meta.severity = Some(val),
-                "original_status"    => meta.original_status = val.parse().ok(),
+                "title" => meta.title = Some(val),
+                "severity" => meta.severity = Some(val),
+                "original_status" => meta.original_status = val.parse().ok(),
                 "original_body_hash" => meta.original_body_hash = Some(val),
-                "original_body_len"  => meta.original_body_len = val.parse().ok(),
+                "original_body_len" => meta.original_body_len = val.parse().ok(),
                 _ => {}
             }
         }

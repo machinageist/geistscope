@@ -8,11 +8,11 @@
  *******************************************************************/
 mod cli;
 
+use anyhow::{Context, Result};
+use fingerprint::fingerprint_url;
+use http_client::{Client, ClientConfig};
 use std::collections::HashMap;
 use std::path::Path;
-use anyhow::{Context, Result};
-use http_client::{Client, ClientConfig};
-use fingerprint::fingerprint_url;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -25,15 +25,15 @@ async fn main() -> Result<()> {
         max_retries: 1,
         rotate_ua: true,
         max_redirects: 5,
-    }).context("build HTTP client")?;
+    })
+    .context("build HTTP client")?;
 
     // extract the hostname for scope-checking and as the fingerprint map key
     let hostname = url_hostname(&args.url);
 
     // if engagement set, verify the target is in scope before probing
     if let Some(ref name) = args.engagement {
-        let eng_root = Path::new(&args.engagements_dir).join(name);
-        let eng = engagement::Engagement::load(&eng_root)
+        let eng = engagement::Engagement::load_named(Path::new(&args.engagements_dir), name)
             .with_context(|| format!("load engagement {name}"))?;
         let scope = eng.scope().context("load scope")?;
         if !scope.is_in_scope(&hostname) {
@@ -43,7 +43,8 @@ async fn main() -> Result<()> {
 
     eprintln!("Fingerprinting {}...", args.url);
     // send the HTTP probe and classify headers + body
-    let fp = fingerprint_url(&client, &args.url).await
+    let fp = fingerprint_url(&client, &args.url)
+        .await
         .with_context(|| format!("fingerprint {}", args.url))?;
 
     // print the result as pretty JSON to stdout
@@ -51,8 +52,7 @@ async fn main() -> Result<()> {
 
     // write into the engagement fingerprint map and audit
     if let Some(ref name) = args.engagement {
-        let eng_root = Path::new(&args.engagements_dir).join(name);
-        let eng = engagement::Engagement::load(&eng_root)
+        let eng = engagement::Engagement::load_named(Path::new(&args.engagements_dir), name)
             .with_context(|| format!("load engagement {name}"))?;
 
         let fp_path = eng.recon_dir().join("fingerprint.json");
@@ -84,5 +84,9 @@ fn url_hostname(url: &str) -> String {
         .or_else(|| url.strip_prefix("http://"))
         .unwrap_or(url);
     // drop any path/query after the host
-    without_scheme.split('/').next().unwrap_or(without_scheme).to_string()
+    without_scheme
+        .split('/')
+        .next()
+        .unwrap_or(without_scheme)
+        .to_string()
 }

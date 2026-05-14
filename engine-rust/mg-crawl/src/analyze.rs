@@ -10,6 +10,7 @@
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
 
 // One matched secret candidate
@@ -17,6 +18,7 @@ use std::sync::OnceLock;
 pub struct SecretMatch {
     pub pattern: String,
     pub value: String,
+    pub value_sha256: String,
     pub source_url: String,
 }
 
@@ -40,25 +42,53 @@ fn catalog() -> &'static Catalog {
     CATALOG.get_or_init(|| {
         let secrets = vec![
             // AWS access key ID
-            ("aws-access-key",   Regex::new(r"AKIA[0-9A-Z]{16}").unwrap()),
+            ("aws-access-key", Regex::new(r"AKIA[0-9A-Z]{16}").unwrap()),
             // AWS secret access key (heuristic — 40 base64 chars after known prefixes)
-            ("aws-secret-key",   Regex::new(r#"(?i)aws.{0,20}secret.{0,20}[=:]["']?\s*([A-Za-z0-9/+]{40})"#).unwrap()),
+            (
+                "aws-secret-key",
+                Regex::new(r#"(?i)aws.{0,20}secret.{0,20}[=:]["']?\s*([A-Za-z0-9/+]{40})"#)
+                    .unwrap(),
+            ),
             // GitHub personal / fine-grained tokens
-            ("github-token",     Regex::new(r"gh[pousr]_[A-Za-z0-9]{36,}").unwrap()),
+            (
+                "github-token",
+                Regex::new(r"gh[pousr]_[A-Za-z0-9]{36,}").unwrap(),
+            ),
             // JWT (three base64url segments)
-            ("jwt",              Regex::new(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+").unwrap()),
+            (
+                "jwt",
+                Regex::new(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+").unwrap(),
+            ),
             // Slack bot / webhook tokens
-            ("slack-token",      Regex::new(r"xox[baprs]-[0-9A-Za-z\-]{10,}").unwrap()),
+            (
+                "slack-token",
+                Regex::new(r"xox[baprs]-[0-9A-Za-z\-]{10,}").unwrap(),
+            ),
             // Generic api_key / apikey assignment
-            ("api-key",          Regex::new(r#"(?i)api[_-]?key\s*[=:]\s*["']([A-Za-z0-9_\-]{16,})"#).unwrap()),
+            (
+                "api-key",
+                Regex::new(r#"(?i)api[_-]?key\s*[=:]\s*["']([A-Za-z0-9_\-]{16,})"#).unwrap(),
+            ),
             // Hardcoded password assignment
-            ("password",         Regex::new(r#"(?i)password\s*[=:]\s*["']([^"']{8,})"#).unwrap()),
+            (
+                "password",
+                Regex::new(r#"(?i)password\s*[=:]\s*["']([^"']{8,})"#).unwrap(),
+            ),
             // Private key header (PEM)
-            ("private-key",      Regex::new(r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----").unwrap()),
+            (
+                "private-key",
+                Regex::new(r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----").unwrap(),
+            ),
             // Google API key
-            ("google-api-key",   Regex::new(r"AIza[0-9A-Za-z\-_]{35}").unwrap()),
+            (
+                "google-api-key",
+                Regex::new(r"AIza[0-9A-Za-z\-_]{35}").unwrap(),
+            ),
             // Stripe secret key
-            ("stripe-secret",    Regex::new(r"sk_(?:live|test)_[0-9A-Za-z]{24,}").unwrap()),
+            (
+                "stripe-secret",
+                Regex::new(r"sk_(?:live|test)_[0-9A-Za-z]{24,}").unwrap(),
+            ),
         ];
 
         // REST-style paths from fetch/axios/XHR calls
@@ -68,7 +98,8 @@ fn catalog() -> &'static Catalog {
             // axios.get/post/put/delete("/api/...")
             Regex::new(r#"axios\.[a-z]+\s*\(\s*["'`](/[A-Za-z0-9_/\-\.?=&%]{2,})"#).unwrap(),
             // XMLHttpRequest .open("GET", "/api/...")
-            Regex::new(r#"\.open\s*\(\s*["'][A-Z]+["']\s*,\s*["'`](/[A-Za-z0-9_/\-\.?=&%]{2,})"#).unwrap(),
+            Regex::new(r#"\.open\s*\(\s*["'][A-Z]+["']\s*,\s*["'`](/[A-Za-z0-9_/\-\.?=&%]{2,})"#)
+                .unwrap(),
             // href="/api/..." in JS template strings
             Regex::new(r#"href\s*[:=]\s*["'`](/api/[A-Za-z0-9_/\-\.?=&%]{1,})"#).unwrap(),
         ];
@@ -86,14 +117,17 @@ pub fn find_secrets(js: &str, source_url: &str) -> Vec<SecretMatch> {
     for (name, re) in &cat.secrets {
         // use the first capture group if present, otherwise the full match
         for cap in re.captures_iter(js) {
-            let value = cap.get(1)
+            let value = cap
+                .get(1)
                 .or_else(|| cap.get(0))
                 .map(|m| m.as_str().to_string())
                 .unwrap_or_default();
-            if !value.is_empty() && seen.insert(value.clone()) {
+            let value_sha256 = sha256_hex(&value);
+            if !value.is_empty() && seen.insert(value_sha256.clone()) {
                 out.push(SecretMatch {
                     pattern: name.to_string(),
-                    value,
+                    value: redact_secret(&value),
+                    value_sha256,
                     source_url: source_url.to_string(),
                 });
             }
@@ -114,12 +148,27 @@ pub fn find_endpoints(js: &str, source_url: &str) -> Vec<EndpointMatch> {
             if let Some(m) = cap.get(1) {
                 let path = m.as_str().to_string();
                 if seen.insert(path.clone()) {
-                    out.push(EndpointMatch { path, source_url: source_url.to_string() });
+                    out.push(EndpointMatch {
+                        path,
+                        source_url: source_url.to_string(),
+                    });
                 }
             }
         }
     }
     out
+}
+
+// Keep the report useful for triage without persisting live credentials to disk
+fn redact_secret(value: &str) -> String {
+    format!("<redacted:{} chars>", value.chars().count())
+}
+
+// SHA-256 hex digest used to correlate duplicate secret candidates safely
+fn sha256_hex(data: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(data.as_bytes());
+    hex::encode(h.finalize())
 }
 
 #[cfg(test)]
@@ -153,6 +202,16 @@ mod tests {
         let js = r#"function greet(name) { return "Hello " + name; }"#;
         let hits = find_secrets(js, "https://example.com/app.js");
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn redacts_secret_value_and_keeps_hash() {
+        let secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab";
+        let js = format!(r#"token: "{secret}""#);
+        let hits = find_secrets(&js, "https://example.com/app.js");
+        let hit = hits.iter().find(|h| h.pattern == "github-token").unwrap();
+        assert!(!hit.value.contains(secret));
+        assert_eq!(hit.value_sha256.len(), 64);
     }
 
     #[test]

@@ -6,15 +6,14 @@
  * Notes:           When --engagement is set, targets are scope-checked before probing
  *                  and all results are written to recon/mg-scan.json regardless of stdout format
  *******************************************************************/
-use std::net::IpAddr;
-use std::path::Path;
-use std::time::Instant;
 use ipnet::IpNet;
+use std::net::IpAddr;
+use std::time::Instant;
 use time::OffsetDateTime;
 
 mod cli;
 
-use mg_scan::{output, scanner, PortState};
+use mg_scan::{PortState, output, scanner};
 
 // Expand a host string to a list of (display_name, IpAddr) pairs
 // Accepts CIDR notation, a bare IP address, or a hostname
@@ -49,7 +48,7 @@ async fn resolve_targets(host: &str) -> Vec<(String, IpAddr)> {
 #[tokio::main]
 async fn main() {
     let args = cli::get_args();
-    let date_time = OffsetDateTime::now_local().unwrap();
+    let date_time = OffsetDateTime::now_utc();
 
     eprintln!("Starting mg-scan at {date_time}");
 
@@ -66,8 +65,8 @@ async fn main() {
 
     // load engagement and scope if --engagement was provided
     let eng_opt = if let Some(ref name) = args.engagement {
-        let eng_root = Path::new(&args.engagements_dir).join(name);
-        match engagement::Engagement::load(&eng_root) {
+        match engagement::Engagement::load_named(std::path::Path::new(&args.engagements_dir), name)
+        {
             Ok(eng) => match eng.scope() {
                 Ok(scope) => Some((eng, scope)),
                 Err(e) => {
@@ -119,7 +118,10 @@ async fn main() {
         let elapsed = start.elapsed();
 
         // count open ports before consuming results into the formatted struct
-        let open_count = results.iter().filter(|r| r.state == PortState::Open).count();
+        let open_count = results
+            .iter()
+            .filter(|r| r.state == PortState::Open)
+            .count();
         audit_notes.push((display_name.clone(), open_count));
 
         // table output is printed immediately per host; JSON is batched for end-of-run emit

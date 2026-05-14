@@ -25,7 +25,10 @@ pub enum OutputFormat {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "subdomain-enum", about = "Subdomain enumerator — CT logs + DNS brute force")]
+#[command(
+    name = "subdomain-enum",
+    about = "Subdomain enumerator — CT logs + DNS brute force"
+)]
 pub struct Args {
     /// Target domain (e.g. example.com)
     pub domain: String,
@@ -61,5 +64,10 @@ pub struct Args {
 
 // Parse and return CLI arguments
 pub fn get_args() -> Args {
-    Args::parse()
+    let args = Args::parse();
+    if args.concurrency == 0 {
+        eprintln!("Error: concurrency must be at least 1");
+        std::process::exit(1);
+    }
+    args
 }

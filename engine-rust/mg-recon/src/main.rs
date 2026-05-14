@@ -8,11 +8,14 @@
  *******************************************************************/
 mod orchestrator;
 
-use clap::Parser;
 use anyhow::Result;
+use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "mg-recon", about = "Full recon pipeline — subdomain enum → fingerprint → port scan → summary")]
+#[command(
+    name = "mg-recon",
+    about = "Full recon pipeline — subdomain enum → fingerprint → port scan → summary"
+)]
 struct Args {
     /// Engagement name (must already be initialized with mg-engagement init)
     engagement: String,
@@ -63,11 +66,16 @@ fn parse_ports(s: &str) -> (u16, u16) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if args.concurrency == 0 {
+        anyhow::bail!("concurrency must be at least 1");
+    }
     let (port_start, port_end) = parse_ports(&args.ports);
 
     // build the engagement root path and hand off to the orchestrator
-    let eng_root = std::path::Path::new(&args.engagements_dir)
-        .join(&args.engagement);
+    let eng_root = engagement::Engagement::path_for_name(
+        std::path::Path::new(&args.engagements_dir),
+        &args.engagement,
+    )?;
 
     let cfg = orchestrator::RunConfig {
         engagement_name: args.engagement.clone(),

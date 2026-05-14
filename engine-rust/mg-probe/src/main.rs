@@ -27,7 +27,10 @@ use engagement::Engagement;
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(name = "mg-probe", about = "Passive security posture checker — headers, CORS, cookies, exposure")]
+#[command(
+    name = "mg-probe",
+    about = "Passive security posture checker — headers, CORS, cookies, exposure"
+)]
 struct Args {
     /// Engagement name (must have recon/summary.json)
     engagement: String,
@@ -60,7 +63,7 @@ struct Args {
 struct HostRecord {
     hostname: String,
     http_accessible: bool,
-    #[allow(dead_code)]  // present in JSON; retained for future scheme-selection logic
+    #[allow(dead_code)] // present in JSON; retained for future scheme-selection logic
     fingerprint: Option<serde_json::Value>,
     #[allow(dead_code)]
     open_ports: Vec<u16>,
@@ -78,13 +81,15 @@ struct ReconSummary {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let eng_root = Path::new(&args.engagements_dir).join(&args.engagement);
-    let eng = Engagement::load(&eng_root)
+    let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
     let summary_path = eng.recon_dir().join("summary.json");
     if !summary_path.exists() {
-        anyhow::bail!("recon/summary.json not found — run `mg-recon {}` first", args.engagement);
+        anyhow::bail!(
+            "recon/summary.json not found — run `mg-recon {}` first",
+            args.engagement
+        );
     }
 
     // skip if already probed and not forced; probe-report.json age is not checked
@@ -109,7 +114,9 @@ async fn main() -> Result<()> {
     let raw = std::fs::read_to_string(&summary_path).context("read summary.json")?;
     let summary: ReconSummary = serde_json::from_str(&raw).context("parse summary.json")?;
 
-    let http_hosts: Vec<&HostRecord> = summary.hosts.iter()
+    let http_hosts: Vec<&HostRecord> = summary
+        .hosts
+        .iter()
         .filter(|h| h.http_accessible && scope.is_in_scope(&h.hostname))
         .collect();
 
@@ -171,13 +178,18 @@ async fn main() -> Result<()> {
         &eng.findings_dir(),
         &eng.recon_dir(),
         &args.engagement,
-    ).context("write report")?;
+    )
+    .context("write report")?;
 
     // record the run in the audit log
     let _ = eng.audit(
         "mg-probe",
         &eng.meta.target,
-        Some(&format!("hosts={} issues={}", http_hosts.len(), all_issues.len())),
+        Some(&format!(
+            "hosts={} issues={}",
+            http_hosts.len(),
+            all_issues.len()
+        )),
     );
 
     eprintln!("  written: {}", report_path.display());

@@ -21,6 +21,8 @@ use sha2::{Digest, Sha256};
 
 use crate::parse::CurlRequest;
 
+const MAX_CAPTURED_BODY_BYTES: usize = 256 * 1024;
+
 // Result of replaying one curl request
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ReplayResult {
@@ -61,8 +63,7 @@ pub async fn replay(
     let t0 = Instant::now();
 
     // build the reqwest request with the parsed method
-    let method = reqwest::Method::from_bytes(req.method.as_bytes())
-        .unwrap_or(reqwest::Method::GET);
+    let method = reqwest::Method::from_bytes(req.method.as_bytes()).unwrap_or(reqwest::Method::GET);
     let mut builder = client.request(method, &req.url);
 
     // apply all headers from the parsed curl command
@@ -79,18 +80,13 @@ pub async fn replay(
     let elapsed_ms = t0.elapsed().as_millis() as u64;
 
     let replay_status = resp.status().as_u16();
-    let body = resp.text().await.unwrap_or_default();
+    let body = read_limited_text(resp, MAX_CAPTURED_BODY_BYTES).await?;
     let body_len = body.len();
     let body_hash = sha256_hex(&body);
 
     // determine verdict using the baseline if provided
-    let (verdict, notes) = compute_verdict(
-        replay_status,
-        body_len,
-        &body_hash,
-        elapsed_ms,
-        baseline,
-    );
+    let (verdict, notes) =
+        compute_verdict(replay_status, body_len, &body_hash, elapsed_ms, baseline);
 
     Ok(ReplayResult {
         url: req.url.clone(),
@@ -103,6 +99,23 @@ pub async fn replay(
         verdict,
         notes,
     })
+}
+
+// Read at most `limit` bytes so replaying a finding cannot consume unbounded memory
+async fn read_limited_text(mut resp: reqwest::Response, limit: usize) -> Result<String> {
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.context("read response chunk")? {
+        let remaining = limit.saturating_sub(body.len());
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(chunk.len());
+        body.extend_from_slice(&chunk[..take]);
+        if take < chunk.len() {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 // Determine verdict from response metrics and baseline comparison
@@ -151,16 +164,22 @@ fn compute_verdict(
     if let Some(orig_len) = base.body_len {
         let delta = (body_len as i64 - orig_len as i64).unsigned_abs();
         if delta < 100 {
-            notes.push(format!("Body length similar ({body_len} vs {orig_len}) — likely still vulnerable"));
+            notes.push(format!(
+                "Body length similar ({body_len} vs {orig_len}) — likely still vulnerable"
+            ));
             return (Verdict::StillVulnerable, notes);
         }
-        notes.push(format!("Body length changed significantly ({body_len} vs {orig_len})"));
+        notes.push(format!(
+            "Body length changed significantly ({body_len} vs {orig_len})"
+        ));
         return (Verdict::AppearsFixed, notes);
     }
 
     // timing anomaly check: if response is very fast it may be short-circuited (fixed)
     if elapsed_ms < 50 {
-        notes.push(format!("Response was very fast ({elapsed_ms}ms) — may be cached error page"));
+        notes.push(format!(
+            "Response was very fast ({elapsed_ms}ms) — may be cached error page"
+        ));
     }
 
     notes.push("Insufficient data for confident verdict".into());
@@ -191,12 +210,22 @@ mod tests {
 
     // Baseline: original response was 200 OK
     fn base_200(hash: Option<&str>, len: Option<usize>) -> OriginalBaseline {
-        OriginalBaseline { status: 200, body_hash: hash.map(String::from), body_len: len }
+        OriginalBaseline {
+            status: 200,
+            body_hash: hash.map(String::from),
+            body_len: len,
+        }
     }
 
     #[test]
     fn still_vulnerable_on_hash_match() {
-        let (v, notes) = compute_verdict(200, 100, "abc123", 200, Some(&base_200(Some("abc123"), Some(100))));
+        let (v, notes) = compute_verdict(
+            200,
+            100,
+            "abc123",
+            200,
+            Some(&base_200(Some("abc123"), Some(100))),
+        );
         assert_eq!(v, Verdict::StillVulnerable);
         assert!(notes.iter().any(|n| n.contains("hash matches")));
     }
@@ -209,13 +238,25 @@ mod tests {
 
     #[test]
     fn still_vulnerable_when_length_similar() {
-        let (v, _) = compute_verdict(200, 1010, "different_hash", 100, Some(&base_200(Some("orig_hash"), Some(1000))));
+        let (v, _) = compute_verdict(
+            200,
+            1010,
+            "different_hash",
+            100,
+            Some(&base_200(Some("orig_hash"), Some(1000))),
+        );
         assert_eq!(v, Verdict::StillVulnerable);
     }
 
     #[test]
     fn appears_fixed_when_length_very_different() {
-        let (v, _) = compute_verdict(200, 5000, "diff", 100, Some(&base_200(Some("orig"), Some(200))));
+        let (v, _) = compute_verdict(
+            200,
+            5000,
+            "diff",
+            100,
+            Some(&base_200(Some("orig"), Some(200))),
+        );
         assert_eq!(v, Verdict::AppearsFixed);
     }
 

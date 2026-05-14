@@ -30,7 +30,10 @@ use llm_client::LlmClient;
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(name = "ai-prioritize", about = "Rank attack surface using recon data and bug-hunting skills")]
+#[command(
+    name = "ai-prioritize",
+    about = "Rank attack surface using recon data and bug-hunting skills"
+)]
 struct Args {
     /// Engagement name (must have recon/summary.json)
     engagement: String,
@@ -40,7 +43,11 @@ struct Args {
     engagements_dir: String,
 
     /// Path to bug-hunting skills directory
-    #[arg(long, env = "MG_SKILLS_DIR", default_value = "~/.claude/bug-hunting-skills")]
+    #[arg(
+        long,
+        env = "MG_SKILLS_DIR",
+        default_value = "~/.claude/bug-hunting-skills"
+    )]
     skills_dir: String,
 
     /// Claude model ID to use (Anthropic backend)
@@ -100,10 +107,9 @@ async fn main() -> Result<()> {
 
     // resolve ~ in skills_dir path
     let skills_dir = expand_tilde(&args.skills_dir);
-    let eng_root = Path::new(&args.engagements_dir).join(&args.engagement);
-
-    let eng = engagement::Engagement::load(&eng_root)
-        .with_context(|| format!("load engagement {}", args.engagement))?;
+    let eng =
+        engagement::Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
+            .with_context(|| format!("load engagement {}", args.engagement))?;
 
     let summary_path = eng.recon_dir().join("summary.json");
     if !summary_path.exists() {
@@ -135,8 +141,7 @@ async fn main() -> Result<()> {
     );
 
     // load and trim skill files
-    let skill_list = skills::load_skills(Path::new(&skills_dir))
-        .context("load skills")?;
+    let skill_list = skills::load_skills(Path::new(&skills_dir)).context("load skills")?;
     if skill_list.is_empty() {
         anyhow::bail!("no skills found at {} — check MG_SKILLS_DIR", skills_dir);
     }
@@ -149,7 +154,9 @@ async fn main() -> Result<()> {
     let system = prompt::system_prompt();
     let user = prompt::user_prompt(&summary, &skill_list);
 
-    let llm_response = client.complete(system, &user).await
+    let llm_response = client
+        .complete(system, &user)
+        .await
         .context("LLM call failed")?;
 
     // parse structured priorities from the LLM markdown
@@ -157,7 +164,8 @@ async fn main() -> Result<()> {
     eprintln!("  parsed {} priority entries", parsed.priorities.len());
 
     // timestamps for the run record
-    let run_ts = OffsetDateTime::now_utc().format(&Rfc3339)
+    let run_ts = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
         .context("format run timestamp")?;
     let recon_ts = summary.generated_at.clone();
 
@@ -180,7 +188,11 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&pf).context("serialize priorities")?;
     std::fs::write(&priorities_json_path, json).context("write priorities.json")?;
 
-    let _ = eng.audit("ai-prioritize", &summary.target, Some(&format!("run={run_ts}")));
+    let _ = eng.audit(
+        "ai-prioritize",
+        &summary.target,
+        Some(&format!("run={run_ts}")),
+    );
 
     eprintln!("  written: {}", priorities_path.display());
     eprintln!("  written: {}", priorities_json_path.display());
@@ -191,14 +203,17 @@ async fn main() -> Result<()> {
 
 // Decide whether the existing priorities.md is still valid
 fn is_fresh(priorities_path: &Path, summary_path: &Path, stale_hours: u64) -> bool {
-    if !priorities_path.exists() { return false; }
+    if !priorities_path.exists() {
+        return false;
+    }
 
     // parse the most recent run timestamp from the HTML comment markers we write
     let last_run = parse_last_run_time(priorities_path);
     let now = SystemTime::now();
 
     // stale if the recon summary is newer than when we last ran
-    if let (Ok(summary_mtime), Some(lr)) = (summary_path.metadata().and_then(|m| m.modified()), last_run)
+    if let (Ok(summary_mtime), Some(lr)) =
+        (summary_path.metadata().and_then(|m| m.modified()), last_run)
         && summary_mtime > lr
     {
         return false;
@@ -208,7 +223,9 @@ fn is_fresh(priorities_path: &Path, summary_path: &Path, stale_hours: u64) -> bo
     match last_run {
         Some(lr) => {
             let age = now.duration_since(lr).unwrap_or(Duration::MAX);
-            if age > Duration::from_secs(stale_hours * 3600) { return false; }
+            if age > Duration::from_secs(stale_hours * 3600) {
+                return false;
+            }
         }
         None => return false,
     }
@@ -283,7 +300,10 @@ fn build_client(args: &Args) -> Result<LlmClient> {
         eprintln!("  backend: Anthropic ({})", args.model);
         LlmClient::anthropic(key, &args.model).context("build Anthropic client")
     } else {
-        eprintln!("  backend: Ollama ({}) — set ANTHROPIC_API_KEY for better results", args.ollama_model);
+        eprintln!(
+            "  backend: Ollama ({}) — set ANTHROPIC_API_KEY for better results",
+            args.ollama_model
+        );
         LlmClient::ollama(&args.ollama_model).context("build Ollama client")
     }
 }

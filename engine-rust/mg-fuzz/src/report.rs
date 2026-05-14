@@ -40,7 +40,11 @@ pub struct FuzzReport {
 // Emit a single result line to stderr — called during the fuzzing loop for live feedback
 pub fn print_result(result: &FuzzResult) {
     let d = &result.diff;
-    let flag = if result.diff.interesting { "*** " } else { "    " };
+    let flag = if result.diff.interesting {
+        "*** "
+    } else {
+        "    "
+    };
     eprintln!(
         "{flag}{:>5} | {:>6} | {:>+7}B | {:>6}ms | {}",
         d.probe_status,
@@ -54,13 +58,19 @@ pub fn print_result(result: &FuzzResult) {
 // Print column headers once before the fuzzing loop begins
 pub fn print_header() {
     eprintln!("  *** = interesting (status change / body delta > 50B / timing anomaly)");
-    eprintln!(" {:>5} | {:>6} | {:>7} | {:>6} | label", "status", "body", "delta", "time");
+    eprintln!(
+        " {:>5} | {:>6} | {:>7} | {:>6} | label",
+        "status", "body", "delta", "time"
+    );
     eprintln!(" {}", "-".repeat(60));
 }
 
 // Write the complete fuzz report to JSON; file is named with the provided timestamp
 pub fn write_report(report: &FuzzReport, out_dir: &Path) -> Result<()> {
-    let filename = format!("fuzz-{}.json", report.generated_at.replace(':', "-").replace(' ', "T"));
+    let filename = format!(
+        "fuzz-{}.json",
+        report.generated_at.replace(':', "-").replace(' ', "T")
+    );
     let path = out_dir.join(filename);
     let json = serde_json::to_string_pretty(report)?;
     std::fs::write(&path, json)?;
@@ -74,7 +84,7 @@ mod tests {
     use crate::diff::ResponseRecord;
 
     // Build a minimal FuzzResult for testing
-    fn make_result(interesting: bool) -> FuzzResult {
+    fn make_result(_interesting: bool) -> FuzzResult {
         let rec = ResponseRecord::new(200, "body".to_string(), 100, None, None);
         let base = ResponseRecord::new(200, "body".to_string(), 100, None, None);
         FuzzResult {

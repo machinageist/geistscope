@@ -7,10 +7,10 @@
  *                  randomised order, timing control, and
  *                  optional source port binding
  *************************************************************/
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::Duration;
 use rand::Rng;
 use rand::seq::SliceRandom;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::task::JoinSet;
@@ -95,7 +95,12 @@ async fn probe_port(
     match timeout(timeout_duration, connect(target, source_port)).await {
         Ok(Ok(mut stream)) => {
             let banner = grab_banner(&mut stream, timeout_duration).await;
-            PortResult { port, state: PortState::Open, service: service_name(port), banner }
+            PortResult {
+                port,
+                state: PortState::Open,
+                service: service_name(port),
+                banner,
+            }
         }
         Ok(Err(_)) => PortResult {
             port,
@@ -131,6 +136,7 @@ pub struct ScanConfig {
 // - source_port: optional source port binding for firewall evasion
 pub async fn scan_ports(ip: IpAddr, cfg: &ScanConfig) -> Vec<PortResult> {
     let timeout_duration = Duration::from_millis(cfg.timeout_ms);
+    let concurrency = cfg.concurrency.max(1);
     let mut rng = rand::thread_rng();
 
     let mut ports: Vec<u16> = (cfg.port_start..=cfg.port_end).collect();
@@ -144,13 +150,17 @@ pub async fn scan_ports(ip: IpAddr, cfg: &ScanConfig) -> Vec<PortResult> {
 
     for port in ports {
         if cfg.delay_ms > 0 || cfg.jitter_ms > 0 {
-            let j = if cfg.jitter_ms > 0 { rng.gen_range(0..=cfg.jitter_ms) } else { 0 };
+            let j = if cfg.jitter_ms > 0 {
+                rng.gen_range(0..=cfg.jitter_ms)
+            } else {
+                0
+            };
             tokio::time::sleep(Duration::from_millis(cfg.delay_ms + j)).await;
         }
 
         // When at concurrency limit, harvest one completed result before spawning;
         // this replaces Arc<Semaphore> — no clones or permit allocations per port
-        while set.len() >= cfg.concurrency {
+        while set.len() >= concurrency {
             if let Some(Ok(r)) = set.join_next().await {
                 results.push(r);
             }

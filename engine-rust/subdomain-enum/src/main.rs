@@ -10,25 +10,26 @@ mod cli;
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::path::Path;
 use std::time::{Duration, Instant};
+use subdomain_enum::{brute, ct_logs, output};
 use time::OffsetDateTime;
 use tokio::task::JoinSet;
-use subdomain_enum::{brute, ct_logs, output};
 
 // Resolve a hostname to IPs concurrently; returns empty vec on failure or timeout
 async fn resolve_name(name: String, timeout: Duration) -> (String, Vec<IpAddr>) {
-    let ips = match tokio::time::timeout(timeout, tokio::net::lookup_host(format!("{name}:0"))).await {
-        Ok(Ok(addrs)) => addrs.map(|a| a.ip()).collect(),
-        _ => vec![],
-    };
+    let ips =
+        match tokio::time::timeout(timeout, tokio::net::lookup_host(format!("{name}:0"))).await {
+            Ok(Ok(addrs)) => addrs.map(|a| a.ip()).collect(),
+            _ => vec![],
+        };
     (name, ips)
 }
 
 #[tokio::main]
 async fn main() {
     let args = cli::get_args();
-    let date_time = OffsetDateTime::now_local().unwrap();
+    let date_time = OffsetDateTime::now_utc();
+    let concurrency = args.concurrency.max(1);
     eprintln!("Starting subdomain-enum at {date_time}");
     eprintln!("Target: {}", args.domain);
 
@@ -49,13 +50,16 @@ async fn main() {
 
                 for name in names {
                     // drain one result before spawning when at the concurrency ceiling
-                    while set.len() >= args.concurrency {
+                    while set.len() >= concurrency {
                         if let Some(Ok((n, ips))) = set.join_next().await {
-                            merged.insert(n.clone(), output::SubdomainEntry {
-                                name: n,
-                                ips: ips.iter().map(|ip| ip.to_string()).collect(),
-                                source: "ct_log".into(),
-                            });
+                            merged.insert(
+                                n.clone(),
+                                output::SubdomainEntry {
+                                    name: n,
+                                    ips: ips.iter().map(|ip| ip.to_string()).collect(),
+                                    source: "ct_log".into(),
+                                },
+                            );
                         }
                     }
                     let t = timeout;
@@ -64,11 +68,14 @@ async fn main() {
 
                 // drain remaining in-flight resolution tasks
                 while let Some(Ok((n, ips))) = set.join_next().await {
-                    merged.insert(n.clone(), output::SubdomainEntry {
-                        name: n,
-                        ips: ips.iter().map(|ip| ip.to_string()).collect(),
-                        source: "ct_log".into(),
-                    });
+                    merged.insert(
+                        n.clone(),
+                        output::SubdomainEntry {
+                            name: n,
+                            ips: ips.iter().map(|ip| ip.to_string()).collect(),
+                            source: "ct_log".into(),
+                        },
+                    );
                 }
             }
             Err(e) => eprintln!("CT log query failed: {e}"),
@@ -77,11 +84,11 @@ async fn main() {
 
     // Active: brute-force DNS by trying wordlist prefixes under the target domain
     if matches!(args.mode, cli::Mode::Active | cli::Mode::All) {
-        eprintln!("Running DNS brute force (concurrency={})...", args.concurrency);
+        eprintln!("Running DNS brute force (concurrency={concurrency})...");
         let results = brute::brute_force(
             &args.domain,
             args.wordlist.as_deref(),
-            args.concurrency,
+            concurrency,
             args.timeout_ms,
         )
         .await;
@@ -99,11 +106,14 @@ async fn main() {
                     }
                 }
             } else {
-                merged.insert(r.name.clone(), output::SubdomainEntry {
-                    name: r.name,
-                    ips: r.ips.iter().map(|ip| ip.to_string()).collect(),
-                    source: "brute".into(),
-                });
+                merged.insert(
+                    r.name.clone(),
+                    output::SubdomainEntry {
+                        name: r.name,
+                        ips: r.ips.iter().map(|ip| ip.to_string()).collect(),
+                        source: "brute".into(),
+                    },
+                );
             }
         }
     }
@@ -114,8 +124,8 @@ async fn main() {
 
     // Engagement mode: drop out-of-scope hosts before output
     let eng_opt = if let Some(ref name) = args.engagement {
-        let eng_root = Path::new(&args.engagements_dir).join(name);
-        match engagement::Engagement::load(&eng_root) {
+        match engagement::Engagement::load_named(std::path::Path::new(&args.engagements_dir), name)
+        {
             Ok(eng) => {
                 match eng.scope() {
                     Ok(scope) => {
@@ -157,7 +167,11 @@ async fn main() {
         let recon_path = eng.recon_dir().join("subdomain-enum.json");
         match serde_json::to_string_pretty(&out) {
             Ok(json) => match std::fs::write(&recon_path, json) {
-                Ok(()) => eprintln!("wrote {} subdomains to {}", out.subdomains.len(), recon_path.display()),
+                Ok(()) => eprintln!(
+                    "wrote {} subdomains to {}",
+                    out.subdomains.len(),
+                    recon_path.display()
+                ),
                 Err(e) => eprintln!("warning: could not write recon file: {e}"),
             },
             Err(e) => eprintln!("warning: JSON serialization failed: {e}"),

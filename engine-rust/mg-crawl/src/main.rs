@@ -66,8 +66,7 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let eng_root = Path::new(&args.engagements_dir).join(&args.engagement);
-    let eng = Engagement::load(&eng_root)
+    let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
     // build scope checker closure from the engagement's scope.json
@@ -84,16 +83,24 @@ async fn main() -> Result<()> {
     }
 
     // build the shared HTTP client with configured rate limit
-    let rate_ms = if args.rate_ms > 0 { Some(args.rate_ms) } else { None };
+    let rate_ms = if args.rate_ms > 0 {
+        Some(args.rate_ms)
+    } else {
+        None
+    };
     let client = Client::new(ClientConfig {
         timeout_ms: args.timeout_ms,
         rate_limit_ms: rate_ms,
         ..Default::default()
-    }).context("build HTTP client")?;
+    })
+    .context("build HTTP client")?;
 
     eprintln!(
         "mg-crawl: {} start URL(s), depth={}, rate={}ms, ignore-robots={}",
-        args.urls.len(), args.depth, args.rate_ms, args.ignore_robots
+        args.urls.len(),
+        args.depth,
+        args.rate_ms,
+        args.ignore_robots
     );
 
     let cfg = crawl::CrawlConfig {

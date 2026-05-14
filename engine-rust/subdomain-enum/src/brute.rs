@@ -21,6 +21,7 @@ pub async fn brute_force(
     timeout_ms: u64,
 ) -> Vec<BruteResult> {
     let words = load_wordlist(wordlist_path);
+    let concurrency = concurrency.max(1);
     let timeout = Duration::from_millis(timeout_ms);
     let mut set: JoinSet<Option<BruteResult>> = JoinSet::new();
     let mut results: Vec<BruteResult> = Vec::new();
