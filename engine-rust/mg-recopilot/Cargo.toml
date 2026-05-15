@@ -1,11 +1,15 @@
 [package]
-name = "mg-report"
+name = "mg-recopilot"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "mg-report"
+name = "mg-recopilot"
 path = "src/main.rs"
+
+[lib]
+name = "mg_recopilot"
+path = "src/lib.rs"
 
 [dependencies]
 engagement = { path = "../engagement" }
@@ -13,6 +17,6 @@ llm-client = { path = "../llm-client" }
 anyhow = "1"
 clap = { version = "4.5", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
-time = { version = "0.3", features = ["formatting", "macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

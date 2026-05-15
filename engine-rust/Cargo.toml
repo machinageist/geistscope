@@ -18,5 +18,8 @@ members = [
     "mg-report",
     "session",
     "payload-engine",
+    "mg-recopilot",
+    "mg-aifuzz",
+    "mg-exploitgen",
 ]
 resolver = "2"

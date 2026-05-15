@@ -8,6 +8,7 @@
  *******************************************************************/
 
 pub mod cvss;
+pub mod disclosure;
 mod prompt;
 
 use std::fs;
@@ -17,10 +18,13 @@ use engagement::Engagement;
 use llm_client::{LlmClient, LlmError};
 use serde::Serialize;
 use thiserror::Error;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 const FINDING_MAX_BYTES: usize = 128 * 1024;
 const CONTEXT_MAX_BYTES: usize = 64 * 1024;
 const FINGERPRINT_MAX_BYTES: usize = 128 * 1024;
+const DISCLOSURE_DEFAULT_DAYS: u32 = 90;
 
 #[derive(Debug, Error)]
 pub enum ReportError {
@@ -55,6 +59,41 @@ pub struct ReportOutput {
     pub cvss_vector: String,
     pub cvss_score: f64,
     pub severity: String,
+    pub generated: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscloseConfig {
+    pub engagements_dir: PathBuf,
+    pub engagement: String,
+    pub finding_id: String,
+    pub vendor: String,
+    pub contact: String,
+    pub timeline_days: u32,
+    pub model: String,
+    pub ollama_model: String,
+    pub offline: bool,
+    pub force: bool,
+}
+
+impl DiscloseConfig {
+    // Return the default disclosure timeline used when none is supplied
+    pub const fn default_timeline_days() -> u32 {
+        DISCLOSURE_DEFAULT_DAYS
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscloseOutput {
+    pub finding_id: String,
+    pub finding_path: PathBuf,
+    pub cve_writeup_path: PathBuf,
+    pub disclosure_email_path: PathBuf,
+    pub cvss_vector: String,
+    pub cvss_score: f64,
+    pub severity: String,
+    pub timeline_days: u32,
+    pub reported_on: String,
     pub generated: bool,
 }
 
@@ -128,6 +167,86 @@ pub async fn generate_report(config: &ReportConfig) -> Result<ReportOutput, Repo
     })
 }
 
+// Generate a CVE writeup + disclosure email pair for one finding
+pub async fn disclose_finding(config: &DiscloseConfig) -> Result<DiscloseOutput, ReportError> {
+    validate_finding_id(&config.finding_id)?;
+    validate_vendor_metadata(&config.vendor, &config.contact)?;
+    let eng = Engagement::load_named(&config.engagements_dir, &config.engagement)?;
+    let finding_path = find_finding_path(&eng.findings_dir(), &config.finding_id)?;
+    let cve_path = artifact_path_for(&finding_path, "-cve.md")?;
+    let email_path = artifact_path_for(&finding_path, "-disclosure.eml")?;
+    let finding_raw = fs::read_to_string(&finding_path)?;
+    let meta = parse_finding_meta(&finding_raw, &config.finding_id);
+    let reported_on = today_iso_date();
+
+    if cve_path.exists() && email_path.exists() && !config.force {
+        return existing_disclose_output(
+            &finding_path,
+            &cve_path,
+            &email_path,
+            &meta,
+            config.timeline_days,
+            &reported_on,
+        );
+    }
+
+    let fingerprint_json = read_optional_bounded(
+        &eng.recon_dir().join("fingerprint.json"),
+        FINGERPRINT_MAX_BYTES,
+    )?
+    .unwrap_or_else(|| "(recon/fingerprint.json not present)".into());
+    let finding_markdown = bounded_text(&finding_raw, FINDING_MAX_BYTES);
+    let body = if config.offline {
+        fallback_cve_body(&finding_raw, &meta)
+    } else {
+        run_model_cve(config, &finding_markdown, &fingerprint_json).await?
+    };
+    let vector = cvss::find_vector(&body)
+        .unwrap_or_else(|| cvss::default_vector_for_severity(&meta.severity).into());
+    let clean_body = strip_cvss_comment(&body);
+    let score = cvss::score_vector(&vector)?;
+    let severity = cvss::severity_label(score).to_string();
+    let cve_doc = render_cve_writeup(&meta.title, &severity, score, &vector, &clean_body);
+    fs::write(&cve_path, cve_doc)?;
+
+    let email_doc = render_disclosure_email(&DisclosureEnvelope {
+        title: &meta.title,
+        severity: &severity,
+        score,
+        vendor: &config.vendor,
+        contact: &config.contact,
+        timeline_days: config.timeline_days,
+        reported_on: &reported_on,
+        cve_path: &cve_path,
+    });
+    fs::write(&email_path, email_doc)?;
+
+    let _ = eng.audit(
+        "mg-report",
+        &meta.target,
+        Some(&format!(
+            "disclose finding={} cve={} email={} timeline={}d",
+            meta.id,
+            cve_path.display(),
+            email_path.display(),
+            config.timeline_days,
+        )),
+    );
+
+    Ok(DiscloseOutput {
+        finding_id: meta.id,
+        finding_path,
+        cve_writeup_path: cve_path,
+        disclosure_email_path: email_path,
+        cvss_vector: vector,
+        cvss_score: score,
+        severity,
+        timeline_days: config.timeline_days,
+        reported_on,
+        generated: true,
+    })
+}
+
 // List finding IDs that can be bulk-reported
 pub fn list_reportable_findings(
     engagements_dir: &Path,
@@ -196,6 +315,183 @@ fn existing_report_output(
         severity: cvss::severity_label(score).into(),
         generated: false,
     })
+}
+
+// Build an LLM CVE writeup body from local evidence
+async fn run_model_cve(
+    config: &DiscloseConfig,
+    finding_markdown: &str,
+    fingerprint_json: &str,
+) -> Result<String, ReportError> {
+    let client = build_client_for_disclose(config)?;
+    let system = disclosure::cve_writeup_system_prompt();
+    let user = disclosure::cve_writeup_user_prompt(finding_markdown, fingerprint_json);
+    Ok(client.complete(system, &user).await?)
+}
+
+// Build an LLM client using the disclose config
+fn build_client_for_disclose(config: &DiscloseConfig) -> Result<LlmClient, ReportError> {
+    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        return Ok(LlmClient::anthropic(key, &config.model)?);
+    }
+    Ok(LlmClient::ollama(&config.ollama_model)?)
+}
+
+// Return metadata for existing disclosure artifacts without rewriting them
+fn existing_disclose_output(
+    finding_path: &Path,
+    cve_path: &Path,
+    email_path: &Path,
+    meta: &FindingMeta,
+    timeline_days: u32,
+    reported_on: &str,
+) -> Result<DiscloseOutput, ReportError> {
+    let raw = fs::read_to_string(cve_path)?;
+    let vector = cvss::find_vector(&raw)
+        .unwrap_or_else(|| cvss::default_vector_for_severity(&meta.severity).into());
+    let score = cvss::score_vector(&vector)?;
+    Ok(DiscloseOutput {
+        finding_id: meta.id.clone(),
+        finding_path: finding_path.to_path_buf(),
+        cve_writeup_path: cve_path.to_path_buf(),
+        disclosure_email_path: email_path.to_path_buf(),
+        cvss_vector: vector,
+        cvss_score: score,
+        severity: cvss::severity_label(score).into(),
+        timeline_days,
+        reported_on: reported_on.to_string(),
+        generated: false,
+    })
+}
+
+// Build a deterministic CVE writeup body when the operator requests offline mode
+fn fallback_cve_body(finding_raw: &str, meta: &FindingMeta) -> String {
+    let body = strip_frontmatter(finding_raw);
+    let description = section_or_default(
+        body,
+        "Summary",
+        "See the original finding summary for the vulnerability description.",
+    );
+    let steps = section_or_default(
+        body,
+        "Steps to reproduce",
+        "1. Re-run the evidence commands from the finding.",
+    );
+    let impact = section_or_default(
+        body,
+        "Impact",
+        "Impact should be confirmed manually before publication.",
+    );
+    let remediation = section_or_default(
+        body,
+        "Remediation",
+        "Apply a fix specific to the vulnerable component and add regression tests.",
+    );
+    let vector = cvss::default_vector_for_severity(&meta.severity);
+    format!(
+        "<!-- cvss_vector: {vector} -->\n\n\
+         ## Affected Versions\n\nUnknown — confirm before publication.\n\n\
+         ## Vulnerability Type\n\nSee the finding title and CWE mapping.\n\n\
+         ## Technical Description\n\n{description}\n\n\
+         ## Reproduction Steps\n\n{steps}\n\n\
+         ## Impact\n\n{impact}\n\n\
+         ## CWE\n\nCWE mapping should be selected after manual validation.\n\n\
+         ## Patch Guidance\n\n{remediation}\n"
+    )
+}
+
+// Render the CVE writeup wrapper with locally computed severity and score
+fn render_cve_writeup(title: &str, severity: &str, score: f64, vector: &str, body: &str) -> String {
+    format!(
+        "# CVE Writeup — {title}\n\n\
+         ## Severity\n\n\
+         {severity} (CVSS 3.1: {score:.1})\n\n\
+         CVSS Vector: `{vector}`\n\n\
+         {}\n",
+        body.trim()
+    )
+}
+
+// Bundled inputs for the deterministic disclosure email renderer
+struct DisclosureEnvelope<'a> {
+    title: &'a str,
+    severity: &'a str,
+    score: f64,
+    vendor: &'a str,
+    contact: &'a str,
+    timeline_days: u32,
+    reported_on: &'a str,
+    cve_path: &'a Path,
+}
+
+// Render a deterministic disclosure email envelope for the operator to send
+fn render_disclosure_email(env: &DisclosureEnvelope<'_>) -> String {
+    let cve_name = env
+        .cve_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("cve-writeup.md");
+    let safe_vendor = sanitize_header(env.vendor);
+    let safe_contact = sanitize_header(env.contact);
+    let safe_title = sanitize_header(env.title);
+    let severity = env.severity;
+    let score = env.score;
+    let timeline_days = env.timeline_days;
+    let reported_on = env.reported_on;
+    format!(
+        "X-GeistScope-Meta: vendor={safe_vendor}; timeline_days={timeline_days}; reported_on={reported_on}\n\
+         Subject: Responsible disclosure: {safe_title}\n\
+         To: {safe_contact}\n\
+         From: GeistScope authorized researcher\n\
+         \n\
+         Hello {safe_vendor} security team,\n\
+         \n\
+         I am reporting a security vulnerability I identified during authorized\n\
+         testing. The severity computed locally is {severity} (CVSS 3.1: {score:.1}).\n\
+         \n\
+         A technical writeup is attached as `{cve_name}` and contains the affected\n\
+         component, reproduction steps, impact analysis, and suggested patch\n\
+         guidance.\n\
+         \n\
+         I am requesting a coordinated disclosure timeline of {timeline_days} days\n\
+         starting on {reported_on}. Please confirm receipt at your earliest\n\
+         convenience and identify a coordination contact on your side.\n\
+         \n\
+         Thanks,\n\
+         GeistScope authorized researcher\n"
+    )
+}
+
+// Return today's UTC date as ISO-8601 (YYYY-MM-DD)
+fn today_iso_date() -> String {
+    let now = OffsetDateTime::now_utc();
+    now.format(&Rfc3339)
+        .ok()
+        .and_then(|s| s.split('T').next().map(str::to_string))
+        .unwrap_or_else(|| "0000-00-00".into())
+}
+
+// Reject vendor and contact strings that would break RFC-822 headers
+fn validate_vendor_metadata(vendor: &str, contact: &str) -> Result<(), ReportError> {
+    if vendor.trim().is_empty() {
+        return Err(ReportError::InvalidArgs("vendor must not be empty".into()));
+    }
+    if contact.trim().is_empty() {
+        return Err(ReportError::InvalidArgs("contact must not be empty".into()));
+    }
+    for (label, value) in [("vendor", vendor), ("contact", contact)] {
+        if value.chars().any(|c| c == '\n' || c == '\r') {
+            return Err(ReportError::InvalidArgs(format!(
+                "{label} must not contain newlines"
+            )));
+        }
+    }
+    Ok(())
+}
+
+// Strip newlines from a string before embedding it in an RFC-822 header
+fn sanitize_header(value: &str) -> String {
+    value.replace(['\n', '\r'], " ")
 }
 
 // Render the final local report wrapper with computed CVSS score
@@ -308,11 +604,16 @@ fn find_finding_path(findings_dir: &Path, finding_id: &str) -> Result<PathBuf, R
 
 // Return the report path for a finding markdown path
 fn report_path_for(finding_path: &Path) -> Result<PathBuf, ReportError> {
+    artifact_path_for(finding_path, "-report.md")
+}
+
+// Build a sibling artifact path for a finding markdown by suffix
+fn artifact_path_for(finding_path: &Path, suffix: &str) -> Result<PathBuf, ReportError> {
     let stem = finding_path
         .file_stem()
         .and_then(|stem| stem.to_str())
         .ok_or_else(|| ReportError::InvalidArgs("finding path has no valid filename".into()))?;
-    Ok(finding_path.with_file_name(format!("{stem}-report.md")))
+    Ok(finding_path.with_file_name(format!("{stem}{suffix}")))
 }
 
 // Validate a finding ID before matching local files
@@ -474,5 +775,62 @@ mod tests {
         let (parent, _) = fixture();
         let ids = list_reportable_findings(&parent, "acme").unwrap();
         assert_eq!(ids, vec!["2026-05-15-001"]);
+    }
+
+    #[tokio::test]
+    async fn disclose_writes_cve_and_email_offline() {
+        let (parent, finding_id) = fixture();
+        let config = DiscloseConfig {
+            engagements_dir: parent,
+            engagement: "acme".into(),
+            finding_id,
+            vendor: "Acme Corp".into(),
+            contact: "security@acme.example".into(),
+            timeline_days: DiscloseConfig::default_timeline_days(),
+            model: "claude-sonnet-4-6".into(),
+            ollama_model: "llama3.2".into(),
+            offline: true,
+            force: true,
+        };
+
+        let output = disclose_finding(&config).await.unwrap();
+
+        assert!(output.generated);
+        assert!(output.cve_writeup_path.exists());
+        assert!(output.disclosure_email_path.exists());
+        let cve = fs::read_to_string(&output.cve_writeup_path).unwrap();
+        assert!(cve.contains("# CVE Writeup"));
+        assert!(cve.contains("## Severity"));
+        assert!(cve.contains("## Reproduction Steps"));
+        assert!(cve.contains("## CWE"));
+        let email = fs::read_to_string(&output.disclosure_email_path).unwrap();
+        assert!(email.starts_with("X-GeistScope-Meta: vendor=Acme Corp; timeline_days=90;"));
+        assert!(email.contains("Subject: Responsible disclosure: Reflected XSS on search"));
+        assert!(email.contains("To: security@acme.example"));
+        assert!(email.contains("coordinated disclosure timeline of 90 days"));
+        assert_eq!(output.timeline_days, 90);
+    }
+
+    #[tokio::test]
+    async fn disclose_rejects_header_injection_in_vendor() {
+        let (parent, finding_id) = fixture();
+        let config = DiscloseConfig {
+            engagements_dir: parent,
+            engagement: "acme".into(),
+            finding_id,
+            vendor: "Acme\r\nBcc: attacker@example".into(),
+            contact: "security@acme.example".into(),
+            timeline_days: 30,
+            model: "claude-sonnet-4-6".into(),
+            ollama_model: "llama3.2".into(),
+            offline: true,
+            force: true,
+        };
+
+        let err = disclose_finding(&config).await.unwrap_err();
+        match err {
+            ReportError::InvalidArgs(msg) => assert!(msg.contains("vendor")),
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
     }
 }

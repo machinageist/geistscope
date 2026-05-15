@@ -69,6 +69,10 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 - 2026-05-15: Implemented the §7 `mg-crawl` JS analyzer slice. Added `js_analyzer.rs`, enriched `endpoints.json` rows with method/source/body/params/GraphQL flags, writes `internal-refs.json`, `vulnerable-libraries.json`, and `graphql-candidates.json`, and performs a bounded in-scope GraphQL introspection POST when JS signals GraphQL. Cross-host absolute URLs are kept out of active endpoint rows and retained only as reference evidence.
 - 2026-05-15: Added the §10 integration harness and CI wiring. `tests/target/docker-compose.yml` starts a local Python vulnerable target with reflected input, SQL-error, open-redirect, GraphQL, internal-ref, and vulnerable-library signals. `tests/integration/pipeline-smoke.sh` initializes an engagement, writes a localhost summary, runs `mg-crawl`, `mg-probe --active`, and `mg-report --offline`, then asserts the expected artifacts and known bug signals. `.github/workflows/ci.yml` runs workspace build, tests, clippy, and the Docker smoke test. `mg-probe` now selects nonstandard HTTP ports from recon summaries so the local target is probeable.
 - 2026-05-15: Updated the standalone `~/mg-server/content/pages/geistscope-tool-suite.md` wiki page and README with the new `mg-report`, `mg-harness`, chain analysis, JS analyzer, and integration-smoke-test workflow. The wiki remains a page under `content/pages`, not a blog post, and the existing header nav link points to `/wiki/geistscope-tool-suite`.
+- 2026-05-15: Shipped §14 S4. New `mg-exploitgen` crate scaffolds a four-stage Rust exploit project (`scanner` / `validator` / `payload` / `cleanup` + runbook + smoke test) under `engagements/<name>/exploits/<cve>/`. Directory and `Cargo.toml` come from static `include_str!` templates; the LLM only fills guidance fields that get pasted into file-header comments and a numbered runbook. CVE id is normalized to uppercase and rejected if it contains anything outside `[A-Za-z0-9-]`; the resulting Rust crate name is derived deterministically. `runbook.md` always opens with the `> Authorized testing only.` banner. Harness exposes `exploit.scaffold` (ReadOnly). Verified the generated scaffold passes `cargo check` end to end; 6 mg-exploitgen tests + a new harness round-trip test cover the offline path and invalid-CVE rejection.
+- 2026-05-15: Shipped §14 S3. Added `PayloadSet::PromptInjection` with five categories (RoleConfusion, IndirectInjection, SystemPromptLeak, ToolAbuse, PolicyBypass) and a curated 15-payload corpus in `payload-engine`. New `mg-aifuzz` crate parses `§INJECT§` templates, JSON-escapes payloads when the body is JSON, scope-checks every request, gates execution behind a per-engagement `aifuzz/CONSENT` marker, applies a regex success-signal rubric (plus optional sentinels file) and writes JSONL rows under `aifuzz/<run-id>.jsonl`. Harness now exposes `aifuzz.consent` (StateChange) and `aifuzz.run` (HighActive, confirmation-gated). 11 mg-aifuzz tests, 7 payload-engine tests, and two new harness tests cover the consent gate and out-of-scope refusal.
+- 2026-05-15: Shipped §14 S2. New `mg-recopilot` crate reads `engagements/<name>/re/<binary>/raw/<func>.c`, optionally consumes `manifest.json`, and writes `<func>.md` + `<func>.json` with sections `function_purpose`, `variable_map`, `control_flow_notes`, `suspicious_logic`, `exploit_primitives`, `suggested_next_steps`. Pseudocode and manifest are wrapped as untrusted evidence in the prompt, and binary/function arguments are rejected if they contain path separators, control chars, or `..`. Added matching harness endpoints `re.analyze` and `re.read`, `Engagement::re_dir()` helper, six lib tests, and a harness round-trip test.
+- 2026-05-15: Triaged `CYBERPUNK_WISHLIST.md` into the new §14 Phase 2 roadmap and shipped §14 S1. `mg-report disclose` drafts a CVE writeup (`<id>-cve.md`) using a new `disclosure.rs` prompt module, locally computes CVSS, and renders a deterministic `<id>-disclosure.eml` form letter with an `X-GeistScope-Meta` header. Vendor/contact strings reject CR/LF to prevent RFC-822 header injection. Added matching harness endpoint `report.disclose` and unit tests for both the offline path and the header-injection guard.
 
 ---
 
@@ -820,3 +824,304 @@ New binaries must be added to the install loop in `README.md` and the wiki.
 - [x] `mg-tui` Harness tab showing audit log tail and active endpoint
 - [x] All new crates in workspace `Cargo.toml`
 - [x] `README.md` and wiki updated with new binaries and workflow
+
+---
+
+## §14 — Cyberpunk Wishlist — Phase 2 Roadmap
+
+`CYBERPUNK_WISHLIST.md` enumerates 20 module ideas. They are triaged below by
+**impact on the GeistScope mission (authorized bug bounty + red team work) vs
+implementation effort**. The autonomous engagement loop (§§1–11) is the
+prerequisite — do not start Phase 2 modules until the §13 completion checklist
+has been finished.
+
+All Phase 2 modules MUST:
+
+- be added as crates under `engine-rust/<crate-name>/`
+- live behind `mg-harness` endpoints with a declared risk class
+- pass `cargo clippy -- -D warnings`
+- follow the §12 file header + comment conventions
+- treat any third-party feed (LinkedIn, GitHub, PACER, SEC, breach data, Tor
+  forums, on-chain data) as **untrusted input** wrapped in tagged blocks before
+  it reaches an LLM, matching the pattern used in `mg-report/src/prompt.rs`
+- never operate outside `scope.json` for the active engagement when the module
+  sends any outbound request
+
+### Triage tiers
+
+| Tier | Items | Selection rule |
+|---|---|---|
+| **S — build next** | #04, #08, #11, #18 | Highest impact on the exploit-research loop, cleanest extension of existing crates |
+| **A — high-value follow-on** | #01, #10, #15, #12 | Strong recon/threat-intel value, moderate effort |
+| **B — niche or ethics-heavy** | #02, #07, #14, #16, #17 | Useful for specific engagements but tightly scope-gated |
+| **C — specialized** | #03, #05, #06, #09, #13, #19 | Out-of-band tooling that does not slot into the web bug-bounty loop |
+| **X — declined** | #20 | Memetic warfare — declined as the offensive form of this work is harmful outside research; only its defensive counterpart (detection) is in scope, and that is covered by §15 (item #15) |
+
+### Tier S — Build first
+
+#### S1. Item #04 — CVE write-up + disclosure ghostwriter (extend `mg-report`)
+
+**What it is:** A second mode in `mg-report` that consumes raw PoC notes,
+crash traces, and finding text, then produces (a) a CVE-style write-up, (b) a
+CVSS 3.1 score, and (c) a responsible-disclosure email draft.
+
+**Why simplest first:** `mg-report` already has the prompt scaffolding, CVSS
+calculator (`mg-report/src/cvss.rs`), and untrusted-evidence wrapping. We need
+two new prompt variants and one extra CLI subcommand.
+
+**Specification (as implemented):**
+
+- `mg-report disclose <engagement> <finding-id> --vendor "Acme Corp" --contact
+  security@acme.example [--timeline-days N] [--offline] [--force]`.
+- New file `mg-report/src/disclosure.rs` with one prompt-builder pair:
+  - `cve_writeup_system_prompt()` — requires a `<!-- cvss_vector: ... -->`
+    first line and the sections **Affected Versions**, **Vulnerability Type**,
+    **Technical Description**, **Reproduction Steps**, **Impact**, **CWE**,
+    **Patch Guidance**.
+  - `cve_writeup_user_prompt(finding_markdown, fingerprint_json)` — wraps both
+    as untrusted `<finding_markdown>` / `<fingerprint>` blocks.
+- The disclosure **email is rendered locally as a deterministic form letter**
+  (vendor, contact, timeline, reported_on, CVE-writeup filename). The LLM has
+  no role in the email body — fewer code paths and no surprises in an RFC-822
+  artifact.
+- Email metadata travels as a custom RFC-822 header
+  `X-GeistScope-Meta: vendor=...; timeline_days=...; reported_on=...` so the
+  `.eml` parses correctly in mail clients.
+- Output files:
+  - `findings/<id>-<slug>-cve.md`
+  - `findings/<id>-<slug>-disclosure.eml`
+- Harness endpoint `report.disclose` mirrors the CLI with bounded JSON output.
+- Risk class: `read` (no network). Disclosure emails are drafts only — the
+  human sends them.
+- Header-injection guard: vendor and contact strings reject `\r`/`\n` so a
+  malicious finding cannot smuggle extra headers into the `.eml`.
+
+**Done.** Unit tests in `mg-report` cover the offline path and the
+header-injection guard; the matching `report.disclose` harness test asserts
+that both artifacts are written with the expected headers.
+
+#### S2. Item #08 — Binary RE copilot (new crate `mg-recopilot`)
+
+**What it is:** Operator pastes decompiled pseudocode (from Ghidra, Binary
+Ninja, IDA, radare2) into a file; the tool produces (a) a function-purpose
+summary, (b) reconstructed variable intent, (c) suspicious-logic flags, and
+(d) candidate exploit primitives, all written into the engagement's
+`re/<binary>/<func>.md`.
+
+**Specification:**
+
+- New crate `engine-rust/mg-recopilot/` (lib + bin).
+- Inputs:
+  - `re/<binary>/raw/<func>.c` — pseudocode dropped by the operator.
+  - Optional `re/<binary>/manifest.json` with `{ binary_name, arch, mitigations[], notes }`.
+- New engagement subdirectory: `engagements/<name>/re/`. Add to the
+  engagement-layout table in `CLAUDE.md`.
+- `mg-recopilot analyze <engagement> <binary> <func>` reads the pseudocode,
+  builds an LLM prompt using `llm-client`, and writes:
+  - `re/<binary>/<func>.md` with sections: **Function Purpose**, **Variable
+    Map**, **Control Flow Notes**, **Suspicious Logic**, **Exploit Primitives**,
+    **Suggested Next Steps**.
+  - `re/<binary>/<func>.json` with the same fields structured for the harness.
+- Pseudocode is wrapped as `<pseudocode>…</pseudocode>` untrusted data.
+- The prompt must enumerate the architectural mitigations from the manifest so
+  the model does not suggest impossible primitives (e.g. JIT spray on a
+  W^X-enforced target).
+- Harness endpoints: `re.analyze` (active risk class because it triggers an LLM
+  call but no network targeting; treat as `passive` since no payloads leave the
+  box — runs always, no confirmation), `re.read` (bounded read of result).
+
+**Done when:** `mg-recopilot analyze` against a sample pseudocode fixture
+produces both files and a unit test asserts the section headers exist.
+
+#### S3. Item #11 — Adversarial prompt-injection fuzzer (new crate `mg-aifuzz`)
+
+**What it is:** Fuzz harness for LLM-backed endpoints. Reuses `payload-engine`
+patterns to ship a curated jailbreak/injection corpus, then iterates with a
+mutator that scores success against rubric prompts.
+
+**Specification:**
+
+- New crate `engine-rust/mg-aifuzz/` (lib + bin).
+- New payload set in `payload-engine`: `PayloadSet::PromptInjection` with
+  sub-categories `RoleConfusion`, `IndirectInjection`, `SystemPromptLeak`,
+  `ToolAbuse`, `PolicyBypass`.
+- Template format (Burp-Intruder style, matches `mg-fuzz` template grammar):
+  ```
+  POST /chat HTTP/1.1
+  Host: api.target.example
+  Authorization: Bearer {{TOKEN}}
+  Content-Type: application/json
+
+  {"messages":[{"role":"user","content":"$$INJECT$$"}]}
+  ```
+- Output: `engagements/<name>/aifuzz/<run-id>.jsonl`, one row per attempt with
+  `{ payload_category, payload_id, request_excerpt, response_excerpt, success_signal }`.
+- Success-signal rubric: configurable regex list per category. Default rubric
+  for `SystemPromptLeak` looks for `"system prompt"`, `"You are an AI"`,
+  and any reproduction of a known system-prompt sentinel set in
+  `aifuzz/sentinels.txt`.
+- Harness endpoint `aifuzz.run` is `active`-class; runs only after the
+  per-engagement confirmation flag in `engagement.json`.
+- Honors the §11 `RateGovernor` once that lands.
+
+**Done when:** `mg-aifuzz run` against a local LLM mock (use `cargo test
+--features mock` with a small in-process HTTP server) produces the JSONL
+output and at least one classified hit.
+
+#### S4. Item #18 — Exploit-as-a-service scaffolding (new crate `mg-exploitgen`)
+
+**What it is:** Given a CVE ID and a target-environment JSON, produces a
+modular Rust exploit project skeleton with stages: `scanner/`, `validator/`,
+`payload/`, `cleanup/`, plus a `runbook.md`.
+
+**Specification:**
+
+- New crate `engine-rust/mg-exploitgen/` (lib + bin).
+- Inputs:
+  - `--cve CVE-YYYY-NNNNN`
+  - `--target-env <path>` — JSON file describing target stack, mitigations,
+    network reachability, and constraints (no internet exfil, etc.).
+- The CVE itself is **not** fetched from the network in the first slice. The
+  operator pastes the CVE description into `--cve-description <path>`. A
+  follow-on slice may add an opt-in NVD lookup behind `--fetch-nvd` once we
+  decide how to cache the NIST schema.
+- Output: a directory tree at `engagements/<name>/exploits/<cve>/`:
+  ```
+  exploits/<cve>/
+  ├── Cargo.toml
+  ├── runbook.md
+  ├── src/
+  │   ├── main.rs        // thin orchestrator
+  │   ├── scanner.rs     // version detection
+  │   ├── validator.rs   // proves the precondition without firing payload
+  │   ├── payload.rs     // payload primitive stub + comments on legality scope
+  │   └── cleanup.rs     // revert artifacts the exploit leaves
+  └── tests/
+      └── smoke.rs
+  ```
+- LLM is used **only** to fill the in-file `// TODO:` blocks and the runbook.
+  The directory and Cargo skeleton come from a static template embedded in the
+  crate via `include_str!`.
+- `runbook.md` always carries a top banner:
+  `> Authorized testing only. Confirm scope before running.`
+- Harness endpoint `exploit.scaffold` mirrors the CLI; risk class is `read`
+  because no traffic leaves the box.
+
+**Done when:** scaffold produces a tree that `cargo check` accepts inside the
+generated directory.
+
+### Tier A — High-value follow-on
+
+#### A1. Item #01 — OSINT dossier engine (extend `mg-recon`)
+
+Add new stages to `mg-recon`:
+
+- **WHOIS** — use the existing `http-client` to query a configurable RDAP
+  endpoint (no third-party paid APIs in the default build).
+- **HIBP-style breach lookup** — optional, gated by `HIBP_API_KEY`. Read-only,
+  passive risk class.
+- **GitHub org & member enumeration** — gated by `GH_TOKEN`. Use the public
+  REST API; record repos, top contributors, and any leaked-secret hits via the
+  existing `corpus-builder`.
+- **Paste-site search** — pluggable provider trait; ship with a noop default.
+- New output: `recon/osint-dossier.json` + Markdown view in `mg-tui`.
+
+Risk class: `passive` across the board. Aggregator must record every external
+call into `audit.log` with the source name.
+
+#### A2. Item #10 — Supply-chain infiltration mapper (new crate `mg-supplychain`)
+
+Given an org's public GitHub repos and a job-listing URL list:
+
+1. Walk repos via the GitHub API, harvesting `Cargo.toml`, `package.json`,
+   `requirements.txt`, `go.mod`, `pom.xml`.
+2. Cluster dependencies with version pins; output a `supplychain/deps.json`
+   ranked by `repos_using × external_distance`.
+3. For each top-N high-value dep, generate typosquat candidates and check
+   public-registry availability (read-only). Output `supplychain/typosquat-candidates.json`.
+4. Parse job-listing text for tech-stack mentions to corroborate the dep graph.
+
+Risk class: `passive`. No registry publish actions, ever.
+
+#### A3. Item #15 — Network traffic behavioral fingerprinter (new crate `mg-trafficint`)
+
+Reads `.pcap` or NetFlow CSV and produces:
+
+- Flow clusters with named profiles (`shadow_saas`, `internal_db`, `unknown`).
+- An LLM-generated narrative summary at `intel/traffic-summary.md`, with raw
+  flow data wrapped as `<pcap_summary>` untrusted evidence.
+- Per-host outbound endpoint heatmap.
+
+The pcap parser is the heavy lift — use `etherparse` or `pcap-parser` rather
+than hand-rolling. Risk class: `read` (no network).
+
+#### A4. Item #12 — Judicial / corporate record excavator (extend `mg-recon` OSINT stage)
+
+Adds two optional sources to the dossier:
+
+- **SEC EDGAR** — parses public XBRL filings via the documented JSON endpoints
+  (no scraping).
+- **PACER** — only via the documented RSS feeds for free dockets; **do not**
+  scrape behind paywalled record fetches.
+
+Both stages must be off by default and require an explicit
+`--sources sec,pacer` flag. Risk class: `passive`.
+
+### Tier B — Niche or ethics-heavy
+
+These modules ship behind a per-engagement consent flag in `engagement.json`
+(`"phase2_consent": ["persona_forge", "phishing", "stylometry_strip", ...]`).
+Harness endpoints refuse to run them without the matching consent entry.
+
+- **#02 Persona forge / #07 Phishing architect (`mg-personaforge`, `mg-phishkit`).**
+  Limit output to text artifacts (no auto-posting, no auto-send). Every
+  generated persona/lure carries a `WATERMARK: GeistScope authorized test —
+  <engagement-id> — <iso-timestamp>` line so the artifacts are
+  field-recognizable in case of incident review.
+- **#14 Contract / EULA auditor (`mg-legal`).** Pure offline LLM tool reading
+  a Markdown/PDF and outputting a clause-by-clause risk table. Useful but
+  low-priority for the bug-bounty loop. Easy build (single binary, single
+  prompt).
+- **#16 Sovereign AI stack builder.** Mostly documentation under
+  `docs/SOVEREIGN_STACK.md` plus a `setup-sovereign-stack.sh` provisioner.
+  Not a Rust crate.
+- **#17 Whistleblower redaction (`mg-redact`).** Offline only. Strips EXIF and
+  document metadata (deterministic) and runs a stylometric-rewrite LLM pass
+  flagged as **experimental** — stylometric stripping is research-quality and
+  must not be presented as a guarantee.
+
+### Tier C — Specialized
+
+Tracked but **not scheduled**. If we pick them up later, each gets its own
+specification block here first. None of them block the bug-bounty loop.
+
+- #03 Surveillance-countermeasure / opt-out generator (`mg-optout`).
+- #05 Linguistic-fingerprint generator (paired with #02; defer until #02 is
+  validated in a real engagement).
+- #06 Darknet market intelligence parser — needs a Tor scraping pipeline that
+  GeistScope does not currently host.
+- #09 Steganographic dead-drop — explicitly out of scope for the bug-bounty
+  product; revisit only if a defensive detection use case appears.
+- #13 RF / hardware-capture interpreter — different track entirely; spin off
+  into a sibling repo rather than adding here.
+- #19 Crypto mixer transaction graph — needs on-chain data plumbing that does
+  not yet exist in GeistScope.
+
+### Tier X — Declined
+
+- **#20 Memetic warfare lab.** GeistScope will not ship an offensive influence-
+  ops generator. The **defensive twin** — detection of coordinated content —
+  is already partially addressed by §15 / Item #15 (traffic + content
+  behavioral fingerprinting) and that is where any work in this space goes.
+
+### Phase 2 completion checklist
+
+- [x] §14 S1 — `mg-report disclose` + harness `report.disclose`
+- [x] §14 S2 — `mg-recopilot` crate + harness `re.analyze` / `re.read`
+- [x] §14 S3 — `mg-aifuzz` crate + `PayloadSet::PromptInjection` + harness `aifuzz.run` / `aifuzz.consent`
+- [x] §14 S4 — `mg-exploitgen` crate + harness `exploit.scaffold`
+- [ ] §14 A1 — `mg-recon` OSINT stage (WHOIS, HIBP, GitHub, paste-site)
+- [ ] §14 A2 — `mg-supplychain` crate
+- [ ] §14 A3 — `mg-trafficint` crate
+- [ ] §14 A4 — `mg-recon` SEC / PACER sources
+- [ ] §14 B — Per-engagement `phase2_consent` flag + Tier B crates as needed

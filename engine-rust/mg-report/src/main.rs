@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use mg_report::{ReportConfig, generate_report, list_reportable_findings};
+use mg_report::{
+    DiscloseConfig, ReportConfig, disclose_finding, generate_report, list_reportable_findings,
+};
 
 // CLI root
 #[derive(Parser, Debug)]
@@ -55,6 +57,47 @@ enum Command {
         /// Generate reports for all findings except explicit unconfirmed ones
         #[arg(long)]
         all_unconfirmed: bool,
+    },
+
+    /// Draft a CVE writeup + disclosure email for one finding
+    Disclose {
+        /// Engagement name
+        engagement: String,
+
+        /// Finding ID prefix, such as 2026-05-15-001
+        finding_id: String,
+
+        /// Vendor name, used in the email subject and salutation
+        #[arg(long)]
+        vendor: String,
+
+        /// Vendor security contact, used in the To: header
+        #[arg(long)]
+        contact: String,
+
+        /// Disclosure timeline in days
+        #[arg(long, default_value_t = DiscloseConfig::default_timeline_days())]
+        timeline_days: u32,
+
+        /// Engagements root directory
+        #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
+        engagements_dir: PathBuf,
+
+        /// Claude model ID to use when ANTHROPIC_API_KEY is set
+        #[arg(long, default_value = "claude-sonnet-4-6")]
+        model: String,
+
+        /// Ollama model to use when ANTHROPIC_API_KEY is absent
+        #[arg(long, default_value = "llama3.2")]
+        ollama_model: String,
+
+        /// Generate a deterministic writeup without calling an LLM
+        #[arg(long)]
+        offline: bool,
+
+        /// Rewrite existing CVE writeup and disclosure files
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -108,6 +151,35 @@ async fn main() -> Result<()> {
             .await
             .context("generate report")?;
             println!("{}", output.report_path.display());
+        }
+        Command::Disclose {
+            engagement,
+            finding_id,
+            vendor,
+            contact,
+            timeline_days,
+            engagements_dir,
+            model,
+            ollama_model,
+            offline,
+            force,
+        } => {
+            let output = disclose_finding(&DiscloseConfig {
+                engagements_dir,
+                engagement,
+                finding_id,
+                vendor,
+                contact,
+                timeline_days,
+                model,
+                ollama_model,
+                offline,
+                force,
+            })
+            .await
+            .context("draft disclosure")?;
+            println!("{}", output.cve_writeup_path.display());
+            println!("{}", output.disclosure_email_path.display());
         }
     }
     Ok(())

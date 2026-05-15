@@ -117,6 +117,12 @@ pub enum HarnessError {
     Recon(#[from] anyhow::Error),
     #[error("report: {0}")]
     Report(#[from] mg_report::ReportError),
+    #[error("recopilot: {0}")]
+    Recopilot(#[from] mg_recopilot::RecopilotError),
+    #[error("aifuzz: {0}")]
+    AiFuzz(#[from] mg_aifuzz::AiFuzzError),
+    #[error("exploitgen: {0}")]
+    ExploitGen(#[from] mg_exploitgen::ExploitGenError),
     #[error("session: {0}")]
     Session(#[from] session::SessionError),
 }
@@ -196,6 +202,12 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "session.get_headers" => handle_session_get_headers(cfg, &invocation).await,
         "chain.read" => handle_chain_read(cfg, &invocation).await,
         "report.generate" => handle_report_generate(cfg, &invocation).await,
+        "report.disclose" => handle_report_disclose(cfg, &invocation).await,
+        "re.analyze" => handle_re_analyze(cfg, &invocation).await,
+        "re.read" => handle_re_read(cfg, &invocation).await,
+        "aifuzz.run" => handle_aifuzz_run(cfg, &invocation).await,
+        "aifuzz.consent" => handle_aifuzz_consent(cfg, &invocation).await,
+        "exploit.scaffold" => handle_exploit_scaffold(cfg, &invocation).await,
         "finding.read" => handle_finding_read(cfg, &invocation).await,
         "finding.create" => handle_finding_create(cfg, &invocation).await,
         _ => Ok(result_blocked(
@@ -328,6 +340,42 @@ pub fn registry() -> Vec<EndpointSpec> {
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Generate a bounty report from one local finding.",
+        },
+        EndpointSpec {
+            name: "report.disclose",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Draft a CVE writeup and disclosure email for one finding.",
+        },
+        EndpointSpec {
+            name: "re.analyze",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Analyze decompiled pseudocode and write a Markdown + JSON pair.",
+        },
+        EndpointSpec {
+            name: "re.read",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Read a previously generated RE analysis for one function.",
+        },
+        EndpointSpec {
+            name: "aifuzz.consent",
+            risk: RiskClass::StateChange,
+            implemented: true,
+            description: "Record adversarial AI-fuzz consent for one engagement.",
+        },
+        EndpointSpec {
+            name: "aifuzz.run",
+            risk: RiskClass::HighActive,
+            implemented: true,
+            description: "Run a bounded prompt-injection fuzz pass against a scoped LLM endpoint.",
+        },
+        EndpointSpec {
+            name: "exploit.scaffold",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Generate a Rust exploit project skeleton for one CVE under the engagement.",
         },
         EndpointSpec {
             name: "risk.rank",
@@ -928,6 +976,303 @@ async fn handle_report_generate(
     })
 }
 
+// Handle report.disclose
+async fn handle_report_disclose(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let finding_id = required_string(&invocation.args, "finding_id")?;
+    let vendor = required_string(&invocation.args, "vendor")?;
+    let contact = required_string(&invocation.args, "contact")?;
+    let model = optional_string(&invocation.args, "model", "claude-sonnet-4-6")?;
+    let ollama_model = optional_string(&invocation.args, "ollama_model", "llama3.2")?;
+    let offline = optional_bool(&invocation.args, "offline", false)?;
+    let force = optional_bool(&invocation.args, "force", false)?;
+    let timeline_days = optional_u32(
+        &invocation.args,
+        "timeline_days",
+        mg_report::DiscloseConfig::default_timeline_days(),
+    )?;
+
+    let output = mg_report::disclose_finding(&mg_report::DiscloseConfig {
+        engagements_dir: cfg.engagements_dir.clone(),
+        engagement: invocation.engagement.clone(),
+        finding_id: finding_id.clone(),
+        vendor,
+        contact,
+        timeline_days,
+        model,
+        ollama_model,
+        offline,
+        force,
+    })
+    .await?;
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!(
+            "disclosure drafted for finding {finding_id} ({} day window)",
+            output.timeline_days
+        )),
+        output_files: vec![
+            display_path(&output.cve_writeup_path),
+            display_path(&output.disclosure_email_path),
+        ],
+        evidence_refs: vec![format!(
+            "evidence://{}/disclosure/{}",
+            invocation.engagement, output.finding_id
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "finding_id": output.finding_id,
+            "finding_path": display_path(&output.finding_path),
+            "cve_writeup_path": display_path(&output.cve_writeup_path),
+            "disclosure_email_path": display_path(&output.disclosure_email_path),
+            "cvss_vector": output.cvss_vector,
+            "cvss_score": output.cvss_score,
+            "severity": output.severity,
+            "timeline_days": output.timeline_days,
+            "reported_on": output.reported_on,
+            "generated": output.generated,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle re.analyze
+async fn handle_re_analyze(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let binary = required_string(&invocation.args, "binary")?;
+    let function = required_string(&invocation.args, "function")?;
+    let model = optional_string(&invocation.args, "model", "claude-sonnet-4-6")?;
+    let ollama_model = optional_string(&invocation.args, "ollama_model", "llama3.2")?;
+    let offline = optional_bool(&invocation.args, "offline", false)?;
+    let force = optional_bool(&invocation.args, "force", false)?;
+
+    let output = mg_recopilot::analyze_function(&mg_recopilot::AnalyzeConfig {
+        engagements_dir: cfg.engagements_dir.clone(),
+        engagement: invocation.engagement.clone(),
+        binary: binary.clone(),
+        function: function.clone(),
+        model,
+        ollama_model,
+        offline,
+        force,
+    })
+    .await?;
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("re analysis written for {binary}/{function}")),
+        output_files: vec![
+            display_path(&output.markdown_path),
+            display_path(&output.json_path),
+        ],
+        evidence_refs: vec![format!(
+            "evidence://{}/re/{}/{}",
+            invocation.engagement, output.binary, output.function
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "binary": output.binary,
+            "function": output.function,
+            "raw_pseudocode_path": display_path(&output.raw_pseudocode_path),
+            "markdown_path": display_path(&output.markdown_path),
+            "json_path": display_path(&output.json_path),
+            "generated": output.generated,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle re.read
+async fn handle_re_read(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let binary = required_string(&invocation.args, "binary")?;
+    let function = required_string(&invocation.args, "function")?;
+    let read = mg_recopilot::read_analysis(
+        &cfg.engagements_dir,
+        &invocation.engagement,
+        &binary,
+        &function,
+    )?;
+    let (markdown, truncated) = truncate_model_visible(&read.markdown);
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("re analysis read for {binary}/{function}")),
+        output_files: Vec::new(),
+        evidence_refs: vec![format!(
+            "evidence://{}/re/{}/{}",
+            invocation.engagement, read.binary, read.function
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "binary": read.binary,
+            "function": read.function,
+            "markdown": markdown,
+            "markdown_truncated": truncated,
+            "json": read.json,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle aifuzz.consent
+async fn handle_aifuzz_consent(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let path = mg_aifuzz::record_consent(&cfg.engagements_dir, &invocation.engagement)?;
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::StateChange,
+        summary: Some(format!("aifuzz consent recorded for {}", invocation.engagement)),
+        output_files: vec![display_path(&path)],
+        evidence_refs: Vec::new(),
+        redactions: BTreeMap::new(),
+        data: Some(json!({ "consent_path": display_path(&path) })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle aifuzz.run
+async fn handle_aifuzz_run(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let template = required_string(&invocation.args, "template")?;
+    let base_url = required_string(&invocation.args, "base_url")?;
+    let sentinels = optional_string_opt(&invocation.args, "sentinels")?;
+    let max_attempts = optional_usize(
+        &invocation.args,
+        "max_attempts",
+        mg_aifuzz::FuzzConfig::default_max_attempts(),
+    )?;
+    let rate_ms = optional_u64(
+        &invocation.args,
+        "rate_ms",
+        mg_aifuzz::FuzzConfig::default_rate_ms(),
+    )?;
+    let timeout_ms = optional_u64(
+        &invocation.args,
+        "timeout_ms",
+        mg_aifuzz::FuzzConfig::default_timeout_ms(),
+    )?;
+    let raw_categories = optional_string_array(&invocation.args, "categories")?;
+    let mut categories = Vec::new();
+    for raw in raw_categories {
+        let parsed = payload_engine::PromptInjectionCategory::from_name(&raw).ok_or_else(|| {
+            HarnessError::InvalidArgs(format!("unknown prompt-injection category `{raw}`"))
+        })?;
+        categories.push(parsed);
+    }
+
+    let output = mg_aifuzz::run(&mg_aifuzz::FuzzConfig {
+        engagements_dir: cfg.engagements_dir.clone(),
+        engagement: invocation.engagement.clone(),
+        template_path: PathBuf::from(template),
+        base_url,
+        categories,
+        max_attempts,
+        rate_ms,
+        timeout_ms,
+        sentinels_path: sentinels.map(PathBuf::from),
+    })
+    .await?;
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::HighActive,
+        summary: Some(format!(
+            "aifuzz run {} attempts={} hits={}",
+            output.run_id, output.attempts, output.hits
+        )),
+        output_files: vec![display_path(&output.output_path)],
+        evidence_refs: vec![format!(
+            "evidence://{}/aifuzz/{}",
+            invocation.engagement, output.run_id
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "run_id": output.run_id,
+            "output_path": display_path(&output.output_path),
+            "attempts": output.attempts,
+            "hits": output.hits,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle exploit.scaffold
+async fn handle_exploit_scaffold(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let cve = required_string(&invocation.args, "cve")?;
+    let cve_description = required_string(&invocation.args, "cve_description")?;
+    let target_env = required_string(&invocation.args, "target_env")?;
+    let model = optional_string(&invocation.args, "model", "claude-sonnet-4-6")?;
+    let ollama_model = optional_string(&invocation.args, "ollama_model", "llama3.2")?;
+    let offline = optional_bool(&invocation.args, "offline", false)?;
+    let force = optional_bool(&invocation.args, "force", false)?;
+
+    let output = mg_exploitgen::scaffold_exploit(&mg_exploitgen::ScaffoldConfig {
+        engagements_dir: cfg.engagements_dir.clone(),
+        engagement: invocation.engagement.clone(),
+        cve,
+        cve_description_path: PathBuf::from(cve_description),
+        target_env_path: PathBuf::from(target_env),
+        model,
+        ollama_model,
+        offline,
+        force,
+    })
+    .await?;
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("scaffold ready for {}", output.cve)),
+        output_files: vec![
+            display_path(&output.exploit_dir),
+            display_path(&output.runbook_path),
+        ],
+        evidence_refs: vec![format!(
+            "evidence://{}/exploits/{}",
+            invocation.engagement, output.cve
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "cve": output.cve,
+            "crate_name": output.crate_name,
+            "exploit_dir": display_path(&output.exploit_dir),
+            "runbook_path": display_path(&output.runbook_path),
+            "generated": output.generated,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
 // Load engagement by name
 fn load_engagement(cfg: &HarnessConfig, name: &str) -> Result<Engagement, HarnessError> {
     Ok(Engagement::load_named(&cfg.engagements_dir, name)?)
@@ -1020,6 +1365,13 @@ fn optional_u64(args: &Value, key: &str, default: u64) -> Result<u64, HarnessErr
 fn optional_usize(args: &Value, key: &str, default: usize) -> Result<usize, HarnessError> {
     let value = optional_u64(args, key, default as u64)?;
     usize::try_from(value)
+        .map_err(|_| HarnessError::InvalidArgs(format!("arg `{key}` is too large")))
+}
+
+// Extract an optional u32 argument
+fn optional_u32(args: &Value, key: &str, default: u32) -> Result<u32, HarnessError> {
+    let value = optional_u64(args, key, default as u64)?;
+    u32::try_from(value)
         .map_err(|_| HarnessError::InvalidArgs(format!("arg `{key}` is too large")))
 }
 
@@ -1539,6 +1891,139 @@ mod tests {
         let report_path = data["report_path"].as_str().unwrap();
         assert!(Path::new(report_path).exists());
         assert!(data["cvss_score"].as_f64().unwrap() > 0.0);
+    }
+
+    #[tokio::test]
+    async fn report_disclose_writes_cve_and_email() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        let finding = Finding {
+            id: "2026-05-15-002".into(),
+            title: "SQL error on search".into(),
+            severity: Severity::High,
+            status: Status::Confirmed,
+            target: "www.example.com".into(),
+            created: "2026-05-15T00:00:00Z".into(),
+            body: "## Summary\n\nSearch leaks SQL errors.\n\n## Steps to reproduce\n\n1. GET /search?q='\n\n## Impact\n\nSchema disclosure.\n\n## Evidence\n\n```\ncurl /search?q='\n```\n\n## Remediation\n\nUse parameterized queries.\n".into(),
+        };
+        finding.write_to(&eng.findings_dir()).unwrap();
+        let mut inv = invocation("report.disclose");
+        inv.args = json!({
+            "finding_id": "2026-05-15-002",
+            "vendor": "Acme Corp",
+            "contact": "security@acme.example",
+            "timeline_days": 60,
+            "offline": true,
+            "force": true,
+        });
+
+        let result = dispatch(&cfg, inv).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        let cve_path = data["cve_writeup_path"].as_str().unwrap();
+        let email_path = data["disclosure_email_path"].as_str().unwrap();
+        assert!(Path::new(cve_path).exists());
+        assert!(Path::new(email_path).exists());
+        assert_eq!(data["timeline_days"].as_u64().unwrap(), 60);
+        let email = fs::read_to_string(email_path).unwrap();
+        assert!(email.contains("X-GeistScope-Meta: vendor=Acme Corp; timeline_days=60;"));
+        assert!(email.contains("To: security@acme.example"));
+    }
+
+    #[tokio::test]
+    async fn re_analyze_and_read_round_trip_offline() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        let raw_dir = eng.re_dir().join("libfoo").join("raw");
+        fs::create_dir_all(&raw_dir).unwrap();
+        fs::write(raw_dir.join("parse_header.c"), "int parse_header(buf *p) { return p->len; }").unwrap();
+
+        let mut analyze = invocation("re.analyze");
+        analyze.args = json!({
+            "binary": "libfoo",
+            "function": "parse_header",
+            "offline": true,
+            "force": true,
+        });
+        let analyze_result = dispatch(&cfg, analyze).await;
+        assert_eq!(analyze_result.status, EndpointStatus::Ok);
+        let data = analyze_result.data.unwrap();
+        assert!(Path::new(data["markdown_path"].as_str().unwrap()).exists());
+        assert!(Path::new(data["json_path"].as_str().unwrap()).exists());
+
+        let mut read = invocation("re.read");
+        read.args = json!({ "binary": "libfoo", "function": "parse_header" });
+        let read_result = dispatch(&cfg, read).await;
+        assert_eq!(read_result.status, EndpointStatus::Ok);
+        let read_data = read_result.data.unwrap();
+        assert!(read_data["markdown"].as_str().unwrap().contains("RE Analysis"));
+        assert_eq!(read_data["json"]["function"], "parse_header");
+        assert_eq!(read_data["markdown_truncated"], false);
+    }
+
+    #[tokio::test]
+    async fn aifuzz_consent_writes_marker_file() {
+        let cfg = test_config();
+        let mut inv = invocation("aifuzz.consent");
+        inv.confirmed = true;
+        let result = dispatch(&cfg, inv).await;
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let path = result.output_files.first().unwrap();
+        assert!(Path::new(path).exists());
+    }
+
+    #[tokio::test]
+    async fn aifuzz_run_rejects_out_of_scope_base_url() {
+        let cfg = test_config();
+        // Pre-record consent so the call gets past that check
+        mg_aifuzz::record_consent(&cfg.engagements_dir, "acme").unwrap();
+        let template_path = cfg.engagements_dir.join("aifuzz-template.txt");
+        fs::write(
+            &template_path,
+            "POST /chat HTTP/1.1\nHost: out.invalid\nContent-Type: application/json\n\n{\"q\":\"§INJECT§\"}",
+        )
+        .unwrap();
+        let mut inv = invocation("aifuzz.run");
+        inv.confirmed = true;
+        inv.args = json!({
+            "template": template_path.display().to_string(),
+            "base_url": "https://out.invalid",
+            "max_attempts": 1,
+            "rate_ms": 0,
+            "timeout_ms": 500,
+        });
+        let result = dispatch(&cfg, inv).await;
+        assert_eq!(result.status, EndpointStatus::Error);
+        assert!(result.reason.unwrap().contains("out.invalid"));
+    }
+
+    #[tokio::test]
+    async fn exploit_scaffold_writes_tree_offline() {
+        let cfg = test_config();
+        let desc_path = cfg.engagements_dir.join("cve-desc.md");
+        fs::write(&desc_path, "Test CVE: example bug in libxyz < 1.2.3.").unwrap();
+        let env_path = cfg.engagements_dir.join("target-env.json");
+        fs::write(&env_path, r#"{"product":"libxyz","version":"1.2.0"}"#).unwrap();
+
+        let mut inv = invocation("exploit.scaffold");
+        inv.args = json!({
+            "cve": "CVE-2026-9999",
+            "cve_description": desc_path.display().to_string(),
+            "target_env": env_path.display().to_string(),
+            "offline": true,
+            "force": true,
+        });
+
+        let result = dispatch(&cfg, inv).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        let exploit_dir = data["exploit_dir"].as_str().unwrap();
+        let runbook = data["runbook_path"].as_str().unwrap();
+        assert!(Path::new(exploit_dir).join("src").join("scanner.rs").exists());
+        assert!(Path::new(runbook).exists());
+        assert_eq!(data["crate_name"], "exploit_cve_2026_9999");
     }
 
     #[test]

@@ -34,6 +34,9 @@ geistscope/
 │   ├── mg-fuzz/           # bin: Burp Intruder-style payload fuzzer
 │   ├── mg-replay/         # bin: Burp Repeater-style finding verification
 │   ├── mg-report/         # lib+bin: bounty report generation + CVSS scoring
+│   ├── mg-recopilot/      # lib+bin: decompiled-pseudocode RE copilot
+│   ├── mg-aifuzz/         # lib+bin: adversarial prompt-injection fuzzer
+│   ├── mg-exploitgen/     # lib+bin: CVE-driven exploit-project scaffolding
 │   └── mg-harness/        # lib+bin: scoped AI/TUI endpoint dispatcher
 └── docs/                  # Design notes (currently sparse)
 ```
@@ -69,9 +72,23 @@ engagements/<name>/
 │   ├── index.json
 │   ├── endpoints.json
 │   └── secrets.json
-└── findings/
-    ├── <id>-<slug>.md
-    └── <id>-<slug>-replay-<date>.json
+├── findings/
+│   ├── <id>-<slug>.md
+│   └── <id>-<slug>-replay-<date>.json
+├── re/<binary>/
+│   ├── manifest.json        # optional: arch, mitigations, notes
+│   ├── raw/<func>.c         # operator-supplied decompiled pseudocode
+│   ├── <func>.md            # mg-recopilot Markdown analysis
+│   └── <func>.json          # mg-recopilot structured analysis
+├── aifuzz/
+│   ├── CONSENT              # marker file; required before mg-aifuzz run
+│   ├── sentinels.txt        # optional: known system-prompt sentinels
+│   └── <run-id>.jsonl       # one row per prompt-injection attempt
+└── exploits/<cve>/
+    ├── Cargo.toml           # generated crate skeleton
+    ├── runbook.md           # operator runbook with authorized-testing banner
+    ├── src/                 # scanner, validator, payload, cleanup stages
+    └── tests/smoke.rs       # scaffold compile-only test
 ```
 
 ## Code conventions (Rust)

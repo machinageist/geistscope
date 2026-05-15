@@ -169,6 +169,10 @@ impl Engagement {
     pub fn findings_dir(&self) -> PathBuf {
         self.root.join("findings")
     }
+    // Return path to the reverse-engineering directory
+    pub fn re_dir(&self) -> PathBuf {
+        self.root.join("re")
+    }
 }
 
 // Return the safe on-disk path for an engagement name under a parent directory

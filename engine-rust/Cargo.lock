@@ -1554,6 +1554,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "mg-aifuzz"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "payload-engine",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "session",
+ "thiserror",
+ "time",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "mg-crawl"
 version = "0.1.0"
 dependencies = [
@@ -1571,6 +1590,20 @@ dependencies = [
  "time",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "mg-exploitgen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "llm-client",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1600,8 +1633,12 @@ dependencies = [
  "anyhow",
  "clap",
  "engagement",
+ "mg-aifuzz",
+ "mg-exploitgen",
  "mg-recon",
+ "mg-recopilot",
  "mg-report",
+ "payload-engine",
  "serde",
  "serde_json",
  "session",
@@ -1647,6 +1684,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-recopilot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "llm-client",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mg-replay"
 version = "0.1.0"
 dependencies = [
@@ -1673,6 +1724,7 @@ dependencies = [
  "llm-client",
  "serde",
  "thiserror",
+ "time",
  "tokio",
 ]
 
