@@ -74,6 +74,12 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-tui`         | Ratatui dashboard: engagements, hosts, findings, fuzz, logs, harness, browser |
 | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls |
 
+## Core Libraries
+
+| Library | What it does |
+|---------|--------------|
+| `session` | Engagement auth/session config and header resolution without plaintext token storage |
+
 ## Governing docs
 
 | File | Purpose |

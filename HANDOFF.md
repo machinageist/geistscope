@@ -34,6 +34,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 | Binary / Crate | Status |
 |---|---|
 | `engagement` lib | Complete — workspace, scope, audit, findings |
+| `session` lib | Started — env-backed token header resolution and session.json helpers; form/OAuth/tool integration pending |
 | `http-client` lib | Complete — reqwest wrapper, UA rotation, rate limiting |
 | `llm-client` lib | Complete — Anthropic + Ollama |
 | `subdomain-enum` | Complete |
@@ -55,6 +56,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 - 2026-05-15: Added initial `mg-harness` crate and CLI with JSON invocation/results, endpoint registry, version/risk checks, confirmation gate for `recon.run`, `engagement.open`, `scope.check`, and scoped `finding.create`. Exposed `mg-recon` as a library so harness calls recon directly instead of shelling out. Added reusable `Finding::next_id`. Updated docs and wiki for the AI harness direction.
 - 2026-05-15: Completed the first `mg-tui` Harness tab slice. The TUI now has a Harness tab that reads `audit.log`, shows current/last harness endpoint activity, queue depth placeholder, endpoint registry status, and a harness-only audit tail. This completes the checklist item for a visible Harness tab while the long-running daemon queue is still pending.
 - 2026-05-15: Added read-only `mg-harness` endpoints for `engagement.status` and `finding.read`. `engagement.status` summarizes key output files and counts; `finding.read` resolves a safe finding ID prefix, bounds model-visible markdown to 256 KiB, and returns evidence references.
+- 2026-05-15: Started §3 session management with a new `session` library crate. The first slice writes and loads `session.json` env-var references, rejects plaintext cookie saves, resolves token auth headers from environment variables, scope-checks session test URLs, and adds `engagements/*/session.json` to `.gitignore`. Form login, OAuth refresh, encryption-at-rest for future stored cookies/tokens, CLI commands, and tool integration remain pending.
 
 ---
 

@@ -19,6 +19,7 @@ existing Rust engine.
 geistscope/
 ├── engine-rust/           # All tooling — see engine-rust/README.md
 │   ├── engagement/        # lib: workspace layout, scope, audit, findings
+│   ├── session/           # lib: session.json config + auth header resolution
 │   ├── http-client/       # lib: shared reqwest wrapper
 │   ├── llm-client/        # lib: Anthropic + Ollama
 │   ├── fingerprint/       # lib+bin: tech stack detection

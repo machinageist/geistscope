@@ -38,7 +38,8 @@ Features:
 - Request and response viewer with search, headers, body, cookies, and diff.
 - HAR/Burp/Caido import into a request corpus.
 - "Send to replay", "Send to fuzz", "Create finding", and "Ask AI" actions.
-- Auth profiles for controlled test accounts and roles.
+- Auth profiles for controlled test accounts and roles. Started with the
+  `session` crate for env-backed token headers.
 - Cookie/token redaction and storage outside model-visible context.
 - Keyboard-first workflow with stable panes and no layout jumps.
 

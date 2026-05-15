@@ -10,6 +10,7 @@ tool endpoints.
 | Crate            | Type     | Binary           | Purpose                                                              |
 | ---------------- | -------- | ---------------- | -------------------------------------------------------------------- |
 | `engagement`     | lib+bin  | `mg-engagement`  | Bug bounty engagement workspace: scope, audit, findings              |
+| `session`        | lib      | —                | Engagement session config and auth header resolution                 |
 | `http-client`    | lib      | —                | Shared reqwest wrapper: UA rotation, rate limit, jittered retry      |
 | `llm-client`     | lib      | —                | Unified Ollama (local) + Anthropic LLM interface                     |
 | `fingerprint`    | lib+bin  | `mg-fingerprint` | HTTP response → tech stack detection                                 |
@@ -33,6 +34,7 @@ http-client ◄─── fingerprint ◄─── mg-recon ◄─── ai-prior
             ◄─── mg-crawl (reqwest direct)
 
 engagement ◄─── subdomain-enum
+           ◄─── session
            ◄─── mg-scan
            ◄─── fingerprint
            ◄─── mg-recon

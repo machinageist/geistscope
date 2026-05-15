@@ -15,5 +15,6 @@ members = [
     "mg-replay",
     "mg-tui",
     "mg-harness",
+    "session",
 ]
 resolver = "2"
