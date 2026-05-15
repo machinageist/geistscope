@@ -104,6 +104,17 @@ an engagement has a configured session profile.
 | `docs/FEATURE_ROADMAP.md` | Prioritized TUI browser, harness, recon, OOB, reporting roadmap |
 | `docs/RESEARCH_SOURCES.md` | Web and local sources used to shape the methodology |
 
+## Integration Smoke Test
+
+The Docker-backed smoke target lives in `tests/target/`. It exercises crawl,
+active probe, and report generation against known local bugs:
+
+```bash
+docker compose -f tests/target/docker-compose.yml up -d --wait
+bash tests/integration/pipeline-smoke.sh
+docker compose -f tests/target/docker-compose.yml down -v
+```
+
 ## Requirements
 
 - Rust 1.82+ (edition 2024, let-chain syntax)

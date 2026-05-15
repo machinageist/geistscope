@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build workspace
+        working-directory: engine-rust
+        run: cargo build --workspace
+      - name: Unit tests
+        working-directory: engine-rust
+        run: cargo test --workspace
+      - name: Clippy
+        working-directory: engine-rust
+        run: cargo clippy --workspace -- -D warnings
+      - name: Start vulnerable target
+        run: docker compose -f tests/target/docker-compose.yml up -d --wait
+      - name: Integration smoke test
+        run: bash tests/integration/pipeline-smoke.sh
+      - name: Stop vulnerable target
+        if: always()
+        run: docker compose -f tests/target/docker-compose.yml down -v

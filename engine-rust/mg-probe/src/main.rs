@@ -149,8 +149,8 @@ async fn main() -> Result<()> {
     for host_rec in &http_hosts {
         let host = &host_rec.hostname;
 
-        // always try HTTPS first; check_* functions handle connection errors gracefully
-        let base_url = format!("https://{host}");
+        // choose scheme/port from recon so nonstandard HTTP services work
+        let base_url = base_url_for_host(host_rec);
 
         eprintln!("  checking {base_url}");
 
@@ -227,4 +227,53 @@ async fn main() -> Result<()> {
 
     eprintln!("  written: {}", report_path.display());
     Ok(())
+}
+
+// Choose a base URL from recon ports, preferring HTTPS when available
+fn base_url_for_host(host: &HostRecord) -> String {
+    if host.open_ports.contains(&443) {
+        return format!("https://{}", host.hostname);
+    }
+    if host.open_ports.contains(&80) {
+        return format!("http://{}", host.hostname);
+    }
+    if let Some(port) = host
+        .open_ports
+        .iter()
+        .copied()
+        .find(|port| *port == 8443 || *port == 9443)
+    {
+        return format!("https://{}:{port}", host.hostname);
+    }
+    if let Some(port) = host.open_ports.first() {
+        return format!("http://{}:{port}", host.hostname);
+    }
+    format!("https://{}", host.hostname)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_url_uses_nonstandard_http_port() {
+        let host = HostRecord {
+            hostname: "localhost".into(),
+            http_accessible: true,
+            fingerprint: None,
+            open_ports: vec![18080],
+        };
+        assert_eq!(base_url_for_host(&host), "http://localhost:18080");
+    }
+
+    #[test]
+    fn base_url_prefers_https_default_port() {
+        let host = HostRecord {
+            hostname: "example.com".into(),
+            http_accessible: true,
+            fingerprint: None,
+            open_ports: vec![80, 443],
+        };
+        assert_eq!(base_url_for_host(&host), "https://example.com");
+    }
 }

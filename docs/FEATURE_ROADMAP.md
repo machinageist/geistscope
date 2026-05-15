@@ -164,6 +164,12 @@ Current-feature improvements:
 - Build on `mg-engagement` findings rather than introducing a separate format.
 - Add replay status and OOB evidence references to report frontmatter.
 
+## Test Harness Status
+
+The repository now includes a Docker Compose vulnerable target and
+`tests/integration/pipeline-smoke.sh`. GitHub Actions runs workspace build,
+tests, clippy, and the Docker smoke test.
+
 ## P3: Red-Team Extensions
 
 Features:
