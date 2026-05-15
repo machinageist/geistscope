@@ -68,6 +68,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 - 2026-05-15: Implemented the §9 `mg-report` crate and harness endpoint. `mg-report generate` reads one finding, wraps evidence as untrusted model data, drafts a HackerOne-style report, computes CVSS 3.1 locally from a vector, supports deterministic `--offline` generation, and writes `<finding>-report.md`. `mg-harness report.generate` now exposes the same flow with bounded JSON output.
 - 2026-05-15: Implemented the §7 `mg-crawl` JS analyzer slice. Added `js_analyzer.rs`, enriched `endpoints.json` rows with method/source/body/params/GraphQL flags, writes `internal-refs.json`, `vulnerable-libraries.json`, and `graphql-candidates.json`, and performs a bounded in-scope GraphQL introspection POST when JS signals GraphQL. Cross-host absolute URLs are kept out of active endpoint rows and retained only as reference evidence.
 - 2026-05-15: Added the §10 integration harness and CI wiring. `tests/target/docker-compose.yml` starts a local Python vulnerable target with reflected input, SQL-error, open-redirect, GraphQL, internal-ref, and vulnerable-library signals. `tests/integration/pipeline-smoke.sh` initializes an engagement, writes a localhost summary, runs `mg-crawl`, `mg-probe --active`, and `mg-report --offline`, then asserts the expected artifacts and known bug signals. `.github/workflows/ci.yml` runs workspace build, tests, clippy, and the Docker smoke test. `mg-probe` now selects nonstandard HTTP ports from recon summaries so the local target is probeable.
+- 2026-05-15: Updated the standalone `~/mg-server/content/pages/geistscope-tool-suite.md` wiki page and README with the new `mg-report`, `mg-harness`, chain analysis, JS analyzer, and integration-smoke-test workflow. The wiki remains a page under `content/pages`, not a blog post, and the existing header nav link points to `/wiki/geistscope-tool-suite`.
 
 ---
 
@@ -818,4 +819,4 @@ New binaries must be added to the install loop in `README.md` and the wiki.
 - [ ] `RateGovernor` in `engagement` lib, wired into all network tools
 - [x] `mg-tui` Harness tab showing audit log tail and active endpoint
 - [x] All new crates in workspace `Cargo.toml`
-- [ ] `README.md` and wiki updated with new binaries and workflow
+- [x] `README.md` and wiki updated with new binaries and workflow
