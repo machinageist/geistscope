@@ -11,6 +11,7 @@ tool endpoints.
 | ---------------- | -------- | ---------------- | -------------------------------------------------------------------- |
 | `engagement`     | lib+bin  | `mg-engagement`  | Bug bounty engagement workspace: scope, audit, findings              |
 | `session`        | lib      | —                | Engagement session config and auth header resolution for tools       |
+| `payload-engine` | lib      | —                | Stack-aware payload selection for fuzzing and harness planning       |
 | `http-client`    | lib      | —                | Shared reqwest wrapper: UA rotation, rate limit, jittered retry      |
 | `llm-client`     | lib      | —                | Unified Ollama (local) + Anthropic LLM interface                     |
 | `fingerprint`    | lib+bin  | `mg-fingerprint` | HTTP response → tech stack detection                                 |

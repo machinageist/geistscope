@@ -90,6 +90,7 @@ an engagement has a configured session profile.
 | Library | What it does |
 |---------|--------------|
 | `session` | Engagement auth/session config and header resolution for tools without plaintext token storage |
+| `payload-engine` | Stack-aware payload selection for fuzzing and harness planning |
 
 ## Governing docs
 

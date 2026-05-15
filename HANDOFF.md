@@ -63,6 +63,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 - 2026-05-15: Implemented the §3 credential CLI and harness session endpoints. `mg-engagement credentials-set` writes token/form env-var references to `session.json`, `credentials-test` sends a scoped token-auth test request, `mg-harness session.set` stores profiles only after confirmation, and `session.get_headers` resolves auth headers while returning only redacted metadata. Form login execution, OAuth refresh, encrypted cookie/token material, and crawl/fuzz/probe header injection remain pending.
 - 2026-05-15: Wired env-backed session headers into the network tools. `http-client` now accepts default headers, `mg-crawl` loads session headers before crawling, and `mg-probe`/`mg-fuzz` apply the same headers through their reqwest clients while logging only header counts. `mg-fuzz` still lets explicit template headers override the client defaults. Transparent 401 re-auth and non-token form/OAuth refresh remain pending.
 - 2026-05-15: Started §4 active vulnerability checks in `mg-probe`. Added `--active`, a no-redirect active client, crawler endpoint loading, harmless reflected-marker checks, single-quote SQL error checks, and no-follow open redirect checks with request caps and per-request rate sleeps. IDOR/two-session checks, subdomain takeover, OOB SSRF, and extended debug-path active classification remain pending.
+- 2026-05-15: Implemented the §5 `payload-engine` crate and wired `mg-fuzz --context-aware` into it. The new library exposes payload context/types, stack-aware payload selection for SQLi/XSS/SSTI/SSRF/traversal/IDOR/open redirect/command injection, and engagement summary inference from recon fingerprints. `mg-fuzz` now replaces built-in payload set names with context-aware variants when `--context-aware` is set or `recon/summary.json` exists; file and numeric payload specs still use the legacy loader.
 
 ---
 
@@ -799,8 +800,8 @@ New binaries must be added to the install loop in `README.md` and the wiki.
 - [x] `mg-crawl` using session headers transparently
 - [x] `mg-fuzz` injecting session headers automatically
 - [ ] `mg-probe --active` with all check modules in §4
-- [ ] `payload-engine` crate with stack-aware payload selection
-- [ ] `mg-fuzz --context-aware` using payload-engine
+- [x] `payload-engine` crate with stack-aware payload selection
+- [x] `mg-fuzz --context-aware` using payload-engine
 - [ ] `mg-oob serve / get-url / poll` binary with HTTP + DNS listeners
 - [ ] Harness `oob.*` endpoints wired to `mg-oob`
 - [ ] `mg-crawl` JS analyzer with GraphQL introspection, library CVE list, internal-ref extraction
@@ -812,5 +813,5 @@ New binaries must be added to the install loop in `README.md` and the wiki.
 - [ ] GitHub Actions CI running clippy, unit tests, integration tests
 - [ ] `RateGovernor` in `engagement` lib, wired into all network tools
 - [x] `mg-tui` Harness tab showing audit log tail and active endpoint
-- [ ] All new crates in workspace `Cargo.toml`
+- [x] All new crates in workspace `Cargo.toml`
 - [ ] `README.md` and wiki updated with new binaries and workflow

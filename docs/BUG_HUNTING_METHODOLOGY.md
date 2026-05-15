@@ -109,7 +109,7 @@ GeistScope should support these bug classes as first-class workflows:
 | API testing | Crawl endpoints, GraphQL skill | OpenAPI import, REST parameter map, GraphQL operation explorer |
 | SSRF/OOB/blind bugs | SSRF payloads | Interactsh-compatible callback allocation and polling |
 | XSS/client-side | XSS payloads, crawl HTML | DOM sink/source extraction, CSP-aware PoC helper |
-| SQLi/SSTI/command injection | Payload sets | Safer baseline probes, DB/template fingerprint hints |
+| SQLi/SSTI/command injection | Payload sets plus `payload-engine` stack-aware variants | Safer baseline probes, richer DB/template fingerprint hints |
 | Race/business logic | Race skill | Parallel replay, single-packet-style timing harness where legal |
 | File upload/traversal | Payload sets, skill | Multipart template editor, path traversal corpus |
 | Subdomain takeover | Planned | CNAME/service fingerprint, claimability evidence checklist |

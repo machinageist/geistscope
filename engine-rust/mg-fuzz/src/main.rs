@@ -28,6 +28,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use engagement::Engagement;
+use payload_engine::{PayloadContext, PayloadSet};
 
 use crate::diff::ResponseRecord;
 use crate::report::{FuzzReport, FuzzResult};
@@ -97,6 +98,10 @@ struct Args {
     /// Only print interesting responses during the run (status change, body delta > 50B, timing)
     #[arg(long)]
     interesting_only: bool,
+
+    /// Enable stack-aware payload expansion for built-in payload sets
+    #[arg(long)]
+    context_aware: bool,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -123,12 +128,17 @@ async fn main() -> Result<()> {
         anyhow::bail!("template has no §markers§ — nothing to fuzz");
     }
 
-    // load all payload lists
+    // load all payload lists, using recon context when available
+    let payload_context = payload_engine::get_payload_context_from_engagement(&eng);
+    let context_aware = args.context_aware || eng.recon_dir().join("summary.json").exists();
     let payload_lists: Vec<Vec<String>> = args
         .payload_specs
         .iter()
-        .map(|spec| payload::load(spec).with_context(|| format!("load payload '{spec}'")))
+        .map(|spec| load_payload_spec(spec, context_aware, &payload_context))
         .collect::<Result<_>>()?;
+    if context_aware {
+        eprintln!("  context-aware payloads: {:?}", payload_context);
+    }
 
     // generate the attack request sequence based on mode
     let attack_reqs = match args.mode {
@@ -251,6 +261,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+// Load a payload spec, replacing built-ins with stack-aware variants when enabled
+fn load_payload_spec(spec: &str, context_aware: bool, ctx: &PayloadContext) -> Result<Vec<String>> {
+    if context_aware && let Some(set) = PayloadSet::from_name(spec) {
+        return Ok(payload_engine::get_payloads(set, ctx));
+    }
+    payload::load(spec).with_context(|| format!("load payload '{spec}'"))
+}
+
 // ── HTTP dispatch ─────────────────────────────────────────────────────────────
 
 // Send an InjectedRequest to the target and return a ResponseRecord
@@ -329,4 +347,33 @@ async fn read_limited_text(mut resp: reqwest::Response, limit: usize) -> Result<
         }
     }
     Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use payload_engine::{DbEngine, ParameterType, ValueHint};
+
+    #[test]
+    fn context_aware_payload_spec_uses_payload_engine() {
+        let ctx = PayloadContext {
+            backend_db: Some(DbEngine::Mysql),
+            parameter_type: ParameterType::Query,
+            value_hint: ValueHint::FreeText,
+            ..PayloadContext::default()
+        };
+
+        let payloads = load_payload_spec("sqli", true, &ctx).unwrap();
+
+        assert!(payloads.iter().any(|payload| payload.contains("LOAD_FILE")));
+    }
+
+    #[test]
+    fn non_context_payload_spec_uses_legacy_loader() {
+        let ctx = PayloadContext::default();
+
+        let payloads = load_payload_spec("numbers:1-3", true, &ctx).unwrap();
+
+        assert_eq!(payloads, vec!["1", "2", "3"]);
+    }
 }

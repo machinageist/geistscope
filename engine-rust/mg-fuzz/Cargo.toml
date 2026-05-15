@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 engagement = { path = "../engagement" }
 session = { path = "../session" }
+payload-engine = { path = "../payload-engine" }
 clap = { version = "4.5", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

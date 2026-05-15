@@ -121,6 +121,8 @@ Current-feature improvements:
 Features:
 
 - Parameter miner from traffic, crawl, JS, forms, OpenAPI, and GraphQL.
+- Stack-aware payload selection. Implemented with `payload-engine` and
+  `mg-fuzz --context-aware`.
 - ProjectDiscovery-style fuzz preconditions so templates only run where they
   make sense.
 - Shared cross-tool rate-limit coordinator.

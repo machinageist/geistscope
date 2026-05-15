@@ -16,5 +16,6 @@ members = [
     "mg-tui",
     "mg-harness",
     "session",
+    "payload-engine",
 ]
 resolver = "2"
