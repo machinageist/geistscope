@@ -66,7 +66,7 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-scan`        | Async TCP port scanner                              |
 | `mg-fingerprint` | HTTP tech stack detection                           |
 | `mg-recon`       | Orchestrates the full 4-stage recon pipeline        |
-| `ai-prioritize`  | LLM-ranked attack surface from recon data           |
+| `ai-prioritize`  | LLM-ranked attack surface and exploit-chain analysis |
 | `mg-crawl`       | BFS web crawler with JS secret/endpoint extraction  |
 | `mg-probe`       | Passive posture checker with optional low-volume active endpoint probes |
 | `mg-fuzz`        | Burp Intruder-style HTTP fuzzer                     |

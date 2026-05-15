@@ -80,6 +80,11 @@ but the harness should move from one-shot ranking to an explainable queue:
 Do not optimize for "most tests run." Optimize for high-signal manual paths that
 produce valid, non-duplicate findings.
 
+`ai-prioritize` also writes `recon/chain-analysis.md` and
+`recon/chain-analysis.json` for exploit-chain reasoning. The harness exposes
+those artifacts through `chain.read` so follow-up tests can combine evidence
+rather than treat every issue in isolation.
+
 ## 4. Browser-Driven Testing Loops
 
 The TUI should support these natural loops:

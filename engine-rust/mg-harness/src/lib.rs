@@ -192,6 +192,7 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "recon.run" => handle_recon_run(cfg, &invocation).await,
         "session.set" => handle_session_set(cfg, &invocation).await,
         "session.get_headers" => handle_session_get_headers(cfg, &invocation).await,
+        "chain.read" => handle_chain_read(cfg, &invocation).await,
         "finding.read" => handle_finding_read(cfg, &invocation).await,
         "finding.create" => handle_finding_create(cfg, &invocation).await,
         _ => Ok(result_blocked(
@@ -306,6 +307,12 @@ pub fn registry() -> Vec<EndpointSpec> {
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Read one finding markdown file by finding ID.",
+        },
+        EndpointSpec {
+            name: "chain.read",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Read bounded exploit chain analysis artifacts.",
         },
         EndpointSpec {
             name: "finding.replay",
@@ -805,6 +812,67 @@ async fn handle_session_get_headers(
             "configured": true,
             "headers": redacted_headers,
             "header_count": header_count,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle chain.read
+async fn handle_chain_read(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let json_path = eng.recon_dir().join("chain-analysis.json");
+    let md_path = eng.recon_dir().join("chain-analysis.md");
+    if !json_path.exists() && !md_path.exists() {
+        return Ok(result_blocked(
+            invocation.endpoint.clone(),
+            RiskClass::ReadOnly,
+            "chain.missing",
+            "chain-analysis artifacts are not present",
+        ));
+    }
+
+    let json_raw = fs::read_to_string(&json_path).unwrap_or_default();
+    let md_raw = fs::read_to_string(&md_path).unwrap_or_default();
+    let (json_text, json_truncated) = truncate_model_visible(&json_raw);
+    let (markdown, md_truncated) = truncate_model_visible(&md_raw);
+    let mut redactions = BTreeMap::new();
+    if json_truncated {
+        redactions.insert(
+            "chain_json_truncated_bytes".into(),
+            json_raw.len().saturating_sub(json_text.len()),
+        );
+    }
+    if md_truncated {
+        redactions.insert(
+            "chain_markdown_truncated_bytes".into(),
+            md_raw.len().saturating_sub(markdown.len()),
+        );
+    }
+
+    let _ = eng.audit("mg-harness", &eng.meta.target, Some("endpoint=chain.read"));
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some("chain analysis loaded".into()),
+        output_files: vec![display_path(&json_path), display_path(&md_path)],
+        evidence_refs: vec![format!(
+            "evidence://{}/recon/chain-analysis",
+            invocation.engagement
+        )],
+        redactions,
+        data: Some(json!({
+            "json_path": display_path(&json_path),
+            "markdown_path": display_path(&md_path),
+            "chain_json": json_text,
+            "markdown": markdown,
+            "json_truncated": json_truncated,
+            "markdown_truncated": md_truncated,
         })),
         reason: None,
         policy: None,
@@ -1368,6 +1436,30 @@ mod tests {
         assert_eq!(data["configured"], true);
         assert_eq!(data["headers"]["authorization"], "<redacted>");
         assert_eq!(data["header_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn chain_read_loads_analysis_artifacts() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        fs::write(
+            eng.recon_dir().join("chain-analysis.json"),
+            "{\"analysis_markdown\":\"## Chains\\nNone\"}",
+        )
+        .unwrap();
+        fs::write(eng.recon_dir().join("chain-analysis.md"), "## Chains\nNone").unwrap();
+
+        let result = dispatch(&cfg, invocation("chain.read")).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        assert!(
+            data["chain_json"]
+                .as_str()
+                .unwrap()
+                .contains("analysis_markdown")
+        );
+        assert!(data["markdown"].as_str().unwrap().contains("## Chains"));
     }
 
     #[test]

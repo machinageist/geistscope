@@ -111,6 +111,7 @@ Errors should be explicit:
 | `oob.poll` | `passive_remote` | planned Interactsh client | Fetch callback evidence |
 | `finding.create` | `read_only` | `mg-engagement` | Create finding markdown |
 | `finding.read` | `read_only` | `mg-engagement` | Read bounded finding markdown by ID |
+| `chain.read` | `read_only` | `ai-prioritize` output | Read bounded exploit-chain analysis artifacts |
 | `finding.replay` | `low_active` | `mg-replay` | Retest finding evidence |
 | `report.draft` | `read_only` | planned | Generate bounty/client report draft |
 | `skill.match` | `read_only` | `ai-prioritize` skill loader | Match evidence to bug-class skills |

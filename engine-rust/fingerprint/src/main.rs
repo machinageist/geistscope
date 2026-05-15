@@ -25,6 +25,7 @@ async fn main() -> Result<()> {
         max_retries: 1,
         rotate_ua: true,
         max_redirects: 5,
+        ..Default::default()
     })
     .context("build HTTP client")?;
 

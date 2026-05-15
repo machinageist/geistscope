@@ -63,7 +63,8 @@ Goal: route AI assistance through scoped endpoints instead of free-form shell.
 Status: started. `mg-harness` now provides a JSON invocation CLI and library
 dispatcher with endpoint registry, version/risk checks, confirmation gating,
 scope checks, and implemented `engagement.open`, `engagement.status`,
-`scope.check`, `recon.run`, `finding.create`, and `finding.read`.
+`scope.check`, `recon.run`, `session.set`, `session.get_headers`,
+`finding.create`, `finding.read`, and `chain.read`.
 
 Features:
 
@@ -79,6 +80,8 @@ Current-feature improvements:
 
 - Reuse `llm-client` but separate model messages from tool execution.
 - Move `ai-prioritize` skill loading into a reusable library API.
+- Use `chain-analysis.md/json` from `ai-prioritize` to drive chained follow-up
+  tests. Started.
 - Add prompt-injection regression fixtures from crawled HTML and JS comments.
 
 ## P1: Recon And Surface Quality

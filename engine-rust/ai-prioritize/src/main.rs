@@ -99,6 +99,16 @@ struct PrioritiesFile {
     priorities: Vec<parse::Priority>,
 }
 
+// Chain-analysis JSON output
+#[derive(Serialize)]
+struct ChainAnalysisFile {
+    engagement: String,
+    generated_at: String,
+    recon_at: String,
+    source_files: Vec<String>,
+    analysis_markdown: String,
+}
+
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -121,11 +131,16 @@ async fn main() -> Result<()> {
 
     let priorities_path = eng.recon_dir().join("priorities.md");
     let priorities_json_path = eng.recon_dir().join("priorities.json");
+    let chain_md_path = eng.recon_dir().join("chain-analysis.md");
+    let chain_json_path = eng.recon_dir().join("chain-analysis.json");
 
-    // check freshness before paying for a model call
-    if !args.force && is_fresh(&priorities_path, &summary_path, args.stale_hours) {
+    // check freshness before paying for model calls
+    let priorities_fresh = is_fresh(&priorities_path, &summary_path, args.stale_hours);
+    let chain_fresh = is_fresh(&chain_md_path, &summary_path, args.stale_hours)
+        && is_fresh(&chain_json_path, &summary_path, args.stale_hours);
+    if !args.force && priorities_fresh && chain_fresh {
         eprintln!(
-            "priorities are up to date (use --force to regenerate, --stale-hours to tune threshold)"
+            "priorities and chain analysis are up to date (use --force to regenerate, --stale-hours to tune threshold)"
         );
         return Ok(());
     }
@@ -161,6 +176,7 @@ async fn main() -> Result<()> {
 
     // parse structured priorities from the LLM markdown
     let parsed = parse::parse_llm_output(&llm_response, Path::new(&skills_dir));
+    let priority_markdown = parsed.raw_markdown.clone();
     eprintln!("  parsed {} priority entries", parsed.priorities.len());
 
     // timestamps for the run record
@@ -188,14 +204,28 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&pf).context("serialize priorities")?;
     std::fs::write(&priorities_json_path, json).context("write priorities.json")?;
 
+    eprintln!("  calling LLM for chain analysis...");
+    let chain_markdown =
+        run_chain_analysis(&client, &summary_raw, &priority_markdown, &eng).await?;
+    write_chain_analysis(
+        &chain_md_path,
+        &chain_json_path,
+        &summary.engagement,
+        &run_ts,
+        &summary.generated_at,
+        chain_markdown,
+    )?;
+
     let _ = eng.audit(
         "ai-prioritize",
         &summary.target,
-        Some(&format!("run={run_ts}")),
+        Some(&format!("run={run_ts} chain_analysis=true")),
     );
 
     eprintln!("  written: {}", priorities_path.display());
     eprintln!("  written: {}", priorities_json_path.display());
+    eprintln!("  written: {}", chain_md_path.display());
+    eprintln!("  written: {}", chain_json_path.display());
     Ok(())
 }
 
@@ -294,6 +324,85 @@ fn append_to_priorities_md(
     Ok(())
 }
 
+// Run the chain-analysis LLM pass with bounded local evidence
+async fn run_chain_analysis(
+    client: &LlmClient,
+    summary_raw: &str,
+    priorities_markdown: &str,
+    eng: &engagement::Engagement,
+) -> Result<String> {
+    let probe_path = eng.recon_dir().join("probe-report.json");
+    let probe_report = read_bounded_optional(&probe_path, 128 * 1024)?;
+    let summary_bounded = bounded_text(summary_raw, 256 * 1024);
+    let priorities_bounded = bounded_text(priorities_markdown, 96 * 1024);
+    let system = prompt::chain_system_prompt();
+    let user = prompt::chain_user_prompt(
+        &summary_bounded,
+        &priorities_bounded,
+        probe_report.as_deref(),
+    );
+    client
+        .complete(system, &user)
+        .await
+        .context("chain-analysis LLM call failed")
+}
+
+// Write chain analysis markdown and JSON files
+fn write_chain_analysis(
+    md_path: &Path,
+    json_path: &Path,
+    engagement: &str,
+    run_ts: &str,
+    recon_ts: &str,
+    analysis_markdown: String,
+) -> Result<()> {
+    let md = format!(
+        "# GeistScope Chain Analysis — {engagement}\n\n\
+         <!-- run: {run_ts} recon: {recon_ts} -->\n\n\
+         {analysis_markdown}\n"
+    );
+    std::fs::write(md_path, md).context("write chain-analysis.md")?;
+    let file = ChainAnalysisFile {
+        engagement: engagement.to_string(),
+        generated_at: run_ts.to_string(),
+        recon_at: recon_ts.to_string(),
+        source_files: vec![
+            "recon/summary.json".into(),
+            "recon/priorities.md".into(),
+            "recon/probe-report.json".into(),
+        ],
+        analysis_markdown,
+    };
+    let json = serde_json::to_string_pretty(&file).context("serialize chain-analysis.json")?;
+    std::fs::write(json_path, json).context("write chain-analysis.json")?;
+    Ok(())
+}
+
+// Truncate UTF-8 text to a byte cap and preserve boundary validity
+fn bounded_text(raw: &str, max_bytes: usize) -> String {
+    if raw.len() <= max_bytes {
+        return raw.to_string();
+    }
+    let mut end = max_bytes;
+    while !raw.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n\n<!-- truncated: {} bytes hidden -->",
+        &raw[..end],
+        raw.len().saturating_sub(end)
+    )
+}
+
+// Read an optional local evidence file with a model-visible byte cap
+fn read_bounded_optional(path: &Path, max_bytes: usize) -> Result<Option<String>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    Ok(Some(bounded_text(&raw, max_bytes)))
+}
+
 // Build the LLM client; prefer Anthropic, fall back to Ollama
 fn build_client(args: &Args) -> Result<LlmClient> {
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
@@ -323,4 +432,60 @@ fn expand_tilde(path: &str) -> String {
         return format!("{home}/{rest}");
     }
     path.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn tmp_dir() -> std::path::PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "ai-prioritize-chain-test-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn bounded_optional_file_truncates_at_char_boundary() {
+        let dir = tmp_dir();
+        let path = dir.join("probe-report.json");
+        std::fs::write(&path, format!("{}é", "a".repeat(8))).unwrap();
+
+        let value = read_bounded_optional(&path, 9).unwrap().unwrap();
+
+        assert!(value.contains("truncated"));
+        assert!(value.is_char_boundary(value.len()));
+    }
+
+    #[test]
+    fn chain_analysis_writer_outputs_markdown_and_json() {
+        let dir = tmp_dir();
+        let md = dir.join("chain-analysis.md");
+        let json = dir.join("chain-analysis.json");
+
+        write_chain_analysis(
+            &md,
+            &json,
+            "acme",
+            "2026-05-15T00:00:00Z",
+            "2026-05-14T00:00:00Z",
+            "## Chains\n\nNone yet.".into(),
+        )
+        .unwrap();
+
+        assert!(
+            std::fs::read_to_string(&md)
+                .unwrap()
+                .contains("GeistScope Chain Analysis")
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+        assert_eq!(parsed["engagement"], "acme");
+    }
 }

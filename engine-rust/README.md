@@ -19,7 +19,7 @@ tool endpoints.
 | `subdomain-enum` | lib+bin  | `subdomain-enum` | Passive (CT logs) + active (DNS brute force) subdomain enum          |
 | `mg-scan`        | lib+bin  | `mg-scan`        | Async TCP port scanner with banner grab + stealth controls           |
 | `mg-recon`       | bin      | `mg-recon`       | Full recon pipeline: subdomain enum → fingerprint → port scan → summary |
-| `ai-prioritize`  | bin      | `ai-prioritize`  | Rank attack surface with LLM (Anthropic primary, Ollama fallback)    |
+| `ai-prioritize`  | bin      | `ai-prioritize`  | Rank attack surface and write exploit-chain analysis with LLM        |
 | `mg-crawl`       | bin      | `mg-crawl`       | BFS crawler: HTML pages + JS secret/endpoint extraction              |
 | `mg-probe`       | bin      | `mg-probe`       | Passive posture plus optional `--active` marker/SQL/open-redirect probes |
 | `mg-fuzz`        | bin      | `mg-fuzz`        | Burp Intruder-style payload fuzzer: sniper / battering-ram / pitchfork / cluster-bomb |

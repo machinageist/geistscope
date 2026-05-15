@@ -28,7 +28,7 @@ geistscope/
 │   ├── subdomain-enum/    # lib+bin: passive + active subdomain enum
 │   ├── mg-scan/           # lib+bin: async TCP port scanner
 │   ├── mg-recon/          # bin: 4-stage recon orchestrator
-│   ├── ai-prioritize/     # bin: LLM-ranked attack surface
+│   ├── ai-prioritize/     # bin: LLM-ranked attack surface + chain analysis
 │   ├── mg-crawl/          # bin: BFS crawler + JS secret extraction
 │   ├── mg-probe/          # bin: passive posture + optional active endpoint checks
 │   ├── mg-fuzz/           # bin: Burp Intruder-style payload fuzzer
