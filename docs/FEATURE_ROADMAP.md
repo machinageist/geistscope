@@ -28,6 +28,9 @@ Exit criteria:
 
 Goal: make `mg-tui` the daily driver for a solo researcher.
 
+Status: started. `mg-tui` now includes a Harness tab that displays endpoint
+registry status plus harness activity parsed from `audit.log`.
+
 Features:
 
 - Engagement picker with current status, scope, and active risk mode.
@@ -44,6 +47,7 @@ Current-feature improvements:
 - Expand `views/browser.rs` from page inspection into request-corpus navigation.
 - Add traffic search and saved filters.
 - Add quick links from findings to replay/fuzz output files.
+- Expand the Harness tab once `mg-harness` has a daemon queue and live job state.
 
 ## P1: AI Harness Core
 

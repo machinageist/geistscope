@@ -7,7 +7,7 @@
  *******************************************************************/
 
 use crate::html_render::{FieldType, RenderedPage};
-use crate::loader::{EngagementData, EngagementEntry, load_engagement_data, list_engagements};
+use crate::loader::{EngagementData, EngagementEntry, list_engagements, load_engagement_data};
 use ratatui::text::Line;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ pub enum Tab {
     Findings,
     Fuzz,
     Logs,
+    Harness,
     Browser,
 }
 
@@ -30,6 +31,7 @@ impl Tab {
         Tab::Findings,
         Tab::Fuzz,
         Tab::Logs,
+        Tab::Harness,
         Tab::Browser,
     ];
 
@@ -40,6 +42,7 @@ impl Tab {
             Tab::Findings => "Findings",
             Tab::Fuzz => "Fuzz",
             Tab::Logs => "Logs",
+            Tab::Harness => "Harness",
             Tab::Browser => "Browser",
         }
     }
@@ -82,7 +85,11 @@ impl BrowserState {
 
     // URL of currently selected link (1-indexed display, 0-indexed internal)
     pub fn selected_link_url(&self) -> Option<&str> {
-        self.page.as_ref()?.links.get(self.selected_link).map(String::as_str)
+        self.page
+            .as_ref()?
+            .links
+            .get(self.selected_link)
+            .map(String::as_str)
     }
 
     // Advance to next link
@@ -97,7 +104,11 @@ impl BrowserState {
     pub fn prev_link(&mut self) {
         let count = self.link_count();
         if count > 0 {
-            self.selected_link = if self.selected_link == 0 { count - 1 } else { self.selected_link - 1 };
+            self.selected_link = if self.selected_link == 0 {
+                count - 1
+            } else {
+                self.selected_link - 1
+            };
         }
     }
 
@@ -120,7 +131,8 @@ impl BrowserState {
     // Collect non-hidden field indices from the current page in document order
     fn visible_field_indices(&self) -> Vec<usize> {
         self.page.as_ref().map_or(Vec::new(), |p| {
-            p.form_elements.iter()
+            p.form_elements
+                .iter()
                 .filter(|f| !matches!(f.field_type, FieldType::Hidden))
                 .map(|f| f.index)
                 .collect()
@@ -130,7 +142,9 @@ impl BrowserState {
     // Move focus to the next visible form field (wraps)
     pub fn focus_next_field(&mut self) {
         let indices = self.visible_field_indices();
-        if indices.is_empty() { return; }
+        if indices.is_empty() {
+            return;
+        }
         let next = match self.focused_field {
             None => indices[0],
             Some(cur) => {
@@ -144,12 +158,18 @@ impl BrowserState {
     // Move focus to the previous visible form field (wraps)
     pub fn focus_prev_field(&mut self) {
         let indices = self.visible_field_indices();
-        if indices.is_empty() { return; }
+        if indices.is_empty() {
+            return;
+        }
         let prev = match self.focused_field {
             None => *indices.last().unwrap(),
             Some(cur) => {
                 let pos = indices.iter().position(|&i| i == cur).unwrap_or(0);
-                if pos == 0 { *indices.last().unwrap() } else { indices[pos - 1] }
+                if pos == 0 {
+                    *indices.last().unwrap()
+                } else {
+                    indices[pos - 1]
+                }
             }
         };
         self.focused_field = Some(prev);
@@ -179,6 +199,7 @@ pub struct App {
     pub finding_cursor: usize,
     pub fuzz_cursor: usize,
     pub log_offset: usize,
+    pub harness_offset: usize,
     pub findings_filter: String,
     pub engagements_dir: PathBuf,
     pub should_quit: bool,
@@ -199,6 +220,7 @@ impl App {
             finding_cursor: 0,
             fuzz_cursor: 0,
             log_offset: 0,
+            harness_offset: 0,
             findings_filter: String::new(),
             engagements_dir,
             should_quit: false,
@@ -224,6 +246,7 @@ impl App {
             self.finding_cursor = 0;
             self.fuzz_cursor = 0;
             self.log_offset = 0;
+            self.harness_offset = 0;
         }
     }
 
@@ -253,6 +276,11 @@ impl App {
             Tab::Logs => {
                 if self.log_offset > 0 {
                     self.log_offset -= 1;
+                }
+            }
+            Tab::Harness => {
+                if self.harness_offset > 0 {
+                    self.harness_offset -= 1;
                 }
             }
             Tab::Browser => {
@@ -292,6 +320,11 @@ impl App {
                     self.log_offset += 1;
                 }
             }
+            Tab::Harness => {
+                if self.harness_offset + 1 < self.data.harness.events.len() {
+                    self.harness_offset += 1;
+                }
+            }
             Tab::Browser => {
                 let max = self.browser.page.as_ref().map_or(0, |p| p.lines.len());
                 if self.browser.scroll + 1 < max {
@@ -321,7 +354,11 @@ impl App {
 
     // Navigate to previous tab
     pub fn prev_tab(&mut self) {
-        let i = if self.tab.index() == 0 { Tab::ALL.len() - 1 } else { self.tab.index() - 1 };
+        let i = if self.tab.index() == 0 {
+            Tab::ALL.len() - 1
+        } else {
+            self.tab.index() - 1
+        };
         self.tab = Tab::from_index(i);
     }
 }

@@ -7,7 +7,7 @@
  *******************************************************************/
 
 use crate::app::{App, Tab};
-use crate::views::{browser, engagements, findings, fuzz, hosts, logs};
+use crate::views::{browser, engagements, findings, fuzz, harness, hosts, logs};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -35,6 +35,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Tab::Findings => findings::render(f, app, chunks[1]),
         Tab::Fuzz => fuzz::render(f, app, chunks[1]),
         Tab::Logs => logs::render(f, app, chunks[1]),
+        Tab::Harness => harness::render(f, app, chunks[1]),
         Tab::Browser => browser::render(f, app, chunks[1]),
     }
 
@@ -51,7 +52,12 @@ fn render_tab_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let tabs = Tabs::new(titles)
         .select(app.tab.index())
         .block(Block::default().borders(Borders::ALL).title(" GeistScope "))
-        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .divider("|");
 
     f.render_widget(tabs, area);
@@ -65,7 +71,10 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .unwrap_or("(none selected)");
 
     let text = Line::from(vec![
-        Span::styled(" Engagement: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " Engagement: ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
         Span::styled(engagement_label, Style::default().fg(Color::Cyan)),
         Span::raw("   "),
         Span::styled("q", Style::default().fg(Color::Yellow)),
@@ -82,7 +91,6 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Span::raw(" refresh "),
     ]);
 
-    let p = ratatui::widgets::Paragraph::new(text)
-        .style(Style::default().bg(Color::DarkGray));
+    let p = ratatui::widgets::Paragraph::new(text).style(Style::default().bg(Color::DarkGray));
     f.render_widget(p, area);
 }

@@ -51,6 +51,26 @@ pub struct FuzzEntry {
     pub interesting: bool,
 }
 
+// Parsed harness event from audit.log
+#[derive(Clone, Debug, Default)]
+pub struct HarnessEvent {
+    pub timestamp: String,
+    pub endpoint: String,
+    pub risk: String,
+    pub status: String,
+    pub target: String,
+    pub raw: String,
+}
+
+// Harness state derived from audit.log
+#[derive(Clone, Debug, Default)]
+pub struct HarnessData {
+    pub current_endpoint: String,
+    pub last_result: String,
+    pub queue_depth: usize,
+    pub events: Vec<HarnessEvent>,
+}
+
 // Snapshot of all loaded data for one engagement
 #[derive(Clone, Debug, Default)]
 pub struct EngagementData {
@@ -58,6 +78,7 @@ pub struct EngagementData {
     pub findings: Vec<FindingEntry>,
     pub fuzz_results: Vec<FuzzEntry>,
     pub log_lines: Vec<String>,
+    pub harness: HarnessData,
 }
 
 // Serde helpers for summary.json
@@ -123,7 +144,13 @@ fn parse_engagement_entry(dir: &Path) -> Result<EngagementEntry> {
     let platform = v["platform"].as_str().unwrap_or("").to_string();
     let recon_done = dir.join("recon").join("summary.json").exists();
     let findings_count = count_findings(&dir.join("findings"));
-    Ok(EngagementEntry { name, target, platform, findings_count, recon_done })
+    Ok(EngagementEntry {
+        name,
+        target,
+        platform,
+        findings_count,
+        recon_done,
+    })
 }
 
 // Count .md files in the findings directory
@@ -140,11 +167,14 @@ fn count_findings(findings_dir: &Path) -> usize {
 // Load all data for a named engagement
 pub fn load_engagement_data(engagements_dir: &Path, name: &str) -> EngagementData {
     let dir = engagements_dir.join(name);
+    let log_lines = load_log(&dir);
+    let harness = load_harness(&log_lines);
     EngagementData {
         hosts: load_hosts(&dir),
         findings: load_findings(&dir),
         fuzz_results: load_fuzz(&dir),
-        log_lines: load_log(&dir),
+        log_lines,
+        harness,
     }
 }
 
@@ -228,7 +258,12 @@ fn parse_finding_frontmatter(path: &Path) -> Option<FindingEntry> {
             host = v.trim().to_string();
         }
     }
-    Some(FindingEntry { id, title, severity, host })
+    Some(FindingEntry {
+        id,
+        title,
+        severity,
+        host,
+    })
 }
 
 // Sort severity: critical < high < medium < low < info
@@ -274,7 +309,10 @@ fn load_fuzz(dir: &Path) -> Vec<FuzzEntry> {
             None => continue,
         };
         for r in results {
-            let diff = r.diff.unwrap_or(FuzzDiff { len_delta: None, interesting: None });
+            let diff = r.diff.unwrap_or(FuzzDiff {
+                len_delta: None,
+                interesting: None,
+            });
             if diff.interesting.unwrap_or(false) {
                 out.push(FuzzEntry {
                     label: r.label.unwrap_or_default(),
@@ -296,5 +334,93 @@ fn load_log(dir: &Path) -> Vec<String> {
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    raw.lines().rev().take(200).map(str::to_string).collect::<Vec<_>>().into_iter().rev().collect()
+    raw.lines()
+        .rev()
+        .take(200)
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+// Parse harness events from audit log lines
+fn load_harness(log_lines: &[String]) -> HarnessData {
+    let events: Vec<HarnessEvent> = log_lines
+        .iter()
+        .filter_map(|line| parse_harness_event(line))
+        .collect();
+    let current_endpoint = events
+        .last()
+        .map(|event| event.endpoint.clone())
+        .unwrap_or_else(|| "none".into());
+    let last_result = events
+        .last()
+        .map(|event| {
+            if event.status.is_empty() {
+                "recorded".into()
+            } else {
+                event.status.clone()
+            }
+        })
+        .unwrap_or_else(|| "no harness events".into());
+    HarnessData {
+        current_endpoint,
+        last_result,
+        queue_depth: 0,
+        events,
+    }
+}
+
+// Parse one audit.log line into a harness event when possible
+fn parse_harness_event(line: &str) -> Option<HarnessEvent> {
+    if !line.contains("mg-harness") && !line.contains("tool=") {
+        return None;
+    }
+
+    let mut parts = line.split_whitespace();
+    let timestamp = parts.next().unwrap_or_default().to_string();
+    let mut tool = parts.next().unwrap_or_default().to_string();
+    let mut target = parts.next().unwrap_or_default().to_string();
+    let mut endpoint = String::new();
+    let mut risk = String::new();
+    let mut status = String::new();
+
+    // Parse key=value tokens from both current audit format and planned format
+    for token in line.split_whitespace() {
+        if let Some(value) = token.strip_prefix("tool=") {
+            tool = value.to_string();
+            endpoint = value.to_string();
+        } else if let Some(value) = token.strip_prefix("endpoint=") {
+            endpoint = value.to_string();
+        } else if let Some(value) = token.strip_prefix("risk=") {
+            risk = value.to_string();
+        } else if let Some(value) = token.strip_prefix("status=") {
+            status = value.to_string();
+        } else if let Some(value) = token.strip_prefix("in_scope=") {
+            status = format!("in_scope={value}");
+        } else if let Some(value) = token.strip_prefix("targets=") {
+            target = value.trim_matches('"').to_string();
+        } else if let Some(value) = token.strip_prefix("engagement=")
+            && target.is_empty()
+        {
+            target = value.to_string();
+        }
+    }
+
+    if endpoint.is_empty() && tool == "mg-harness" {
+        endpoint = "unknown".into();
+    }
+    if endpoint.is_empty() {
+        return None;
+    }
+
+    Some(HarnessEvent {
+        timestamp,
+        endpoint,
+        risk,
+        status,
+        target,
+        raw: line.to_string(),
+    })
 }

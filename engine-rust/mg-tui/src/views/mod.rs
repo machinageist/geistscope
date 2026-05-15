@@ -10,5 +10,6 @@ pub mod browser;
 pub mod engagements;
 pub mod findings;
 pub mod fuzz;
+pub mod harness;
 pub mod hosts;
 pub mod logs;

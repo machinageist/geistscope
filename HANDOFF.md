@@ -53,6 +53,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 ## Progress Log
 
 - 2026-05-15: Added initial `mg-harness` crate and CLI with JSON invocation/results, endpoint registry, version/risk checks, confirmation gate for `recon.run`, `engagement.open`, `scope.check`, and scoped `finding.create`. Exposed `mg-recon` as a library so harness calls recon directly instead of shelling out. Added reusable `Finding::next_id`. Updated docs and wiki for the AI harness direction.
+- 2026-05-15: Completed the first `mg-tui` Harness tab slice. The TUI now has a Harness tab that reads `audit.log`, shows current/last harness endpoint activity, queue depth placeholder, endpoint registry status, and a harness-only audit tail. This completes the checklist item for a visible Harness tab while the long-running daemon queue is still pending.
 
 ---
 
@@ -801,6 +802,6 @@ New binaries must be added to the install loop in `README.md` and the wiki.
 - [ ] Integration test suite asserting full pipeline finds known bugs
 - [ ] GitHub Actions CI running clippy, unit tests, integration tests
 - [ ] `RateGovernor` in `engagement` lib, wired into all network tools
-- [ ] `mg-tui` Harness tab showing audit log tail and active endpoint
+- [x] `mg-tui` Harness tab showing audit log tail and active endpoint
 - [ ] All new crates in workspace `Cargo.toml`
 - [ ] `README.md` and wiki updated with new binaries and workflow

@@ -22,7 +22,7 @@ tool endpoints.
 | `mg-probe`       | bin      | `mg-probe`       | Passive security posture: headers, CORS, cookies, debug path exposure |
 | `mg-fuzz`        | bin      | `mg-fuzz`        | Burp Intruder-style payload fuzzer: sniper / battering-ram / pitchfork / cluster-bomb |
 | `mg-replay`      | bin      | `mg-replay`      | Replay curl evidence from findings; verdict: still_vulnerable / appears_fixed |
-| `mg-tui`         | bin      | `mg-tui`         | Ratatui terminal dashboard: engagements, hosts, findings, fuzz results, logs  |
+| `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard: engagements, hosts, findings, fuzz, logs, harness, browser |
 | `mg-harness`     | lib+bin  | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls                     |
 
 ## Dependency graph
