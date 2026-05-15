@@ -262,6 +262,14 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
             app.select_engagement();
         }
 
+        KeyCode::Enter if app.tab == Tab::Hosts => {
+            if let Some(url) = app.data.hosts.get(app.host_cursor).map(host_browser_url) {
+                app.tab = Tab::Browser;
+                app.browser.begin_navigate(&url);
+                navigate(app, url, tx);
+            }
+        }
+
         KeyCode::Enter if app.tab == Tab::Browser => {
             if let Some(url) = app.browser.selected_link_url().map(str::to_string) {
                 let resolved = resolve_url(&url, &app.browser.url);
@@ -299,6 +307,16 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
 
         _ => {}
     }
+}
+
+// Build the initial browser URL for a discovered host
+fn host_browser_url(host: &loader::HostRecord) -> String {
+    let scheme = if host.open_ports.contains(&80) && !host.open_ports.contains(&443) {
+        "http"
+    } else {
+        "https"
+    };
+    format!("{scheme}://{}", host.hostname)
 }
 
 // Handle browser search input
@@ -683,4 +701,32 @@ fn resolve_url(href: &str, base: &str) -> String {
         return resolved.to_string();
     }
     href.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loader::HostRecord;
+
+    #[test]
+    fn host_browser_url_prefers_https_when_available() {
+        let host = HostRecord {
+            hostname: "api.example.com".into(),
+            open_ports: vec![80, 443],
+            ..HostRecord::default()
+        };
+
+        assert_eq!(host_browser_url(&host), "https://api.example.com");
+    }
+
+    #[test]
+    fn host_browser_url_uses_http_for_port_80_only() {
+        let host = HostRecord {
+            hostname: "www.example.com".into(),
+            open_ports: vec![80],
+            ..HostRecord::default()
+        };
+
+        assert_eq!(host_browser_url(&host), "http://www.example.com");
+    }
 }

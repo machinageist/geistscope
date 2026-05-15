@@ -43,7 +43,7 @@ fn render_host_list(f: &mut Frame, app: &App, area: Rect) {
     state.select(Some(app.host_cursor));
 
     let list = List::new(items)
-        .block(Block::default().title(" Hosts ").borders(Borders::ALL))
+        .block(Block::default().title(" Hosts  Enter browse ").borders(Borders::ALL))
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
         .highlight_symbol("▶ ");
 

@@ -32,12 +32,12 @@ Status: started. `mg-tui` now includes a Harness tab that displays endpoint
 registry status plus harness activity parsed from `audit.log`. The Browser tab
 now has a request/response inspector with method, final URL, status, MIME type,
 page inventory, redacted cookie/header display, in-page search, and selected
-engagement session headers.
+engagement session headers. Hosts can now pivot directly into the Browser tab.
 
 Features:
 
 - Engagement picker with current status, scope, and active risk mode.
-- Host/path/parameter browser.
+- Host/path/parameter browser. Started with host-to-browser pivoting.
 - Request and response viewer with search, headers, body, cookies, and diff.
   Started with page search plus redacted response headers and cookies.
 - HAR/Burp/Caido import into a request corpus.
