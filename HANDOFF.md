@@ -46,7 +46,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 | `mg-fuzz` | Complete — needs stack-aware payload selection (see §5) |
 | `mg-replay` | Complete |
 | `ai-prioritize` | Complete |
-| `mg-tui` | Complete — extend for harness status view (see §2) |
+| `mg-tui` | Started for product UI — dashboard, harness status, browser rendering, response inspector, redacted cookies/headers, and page search exist |
 | `mg-harness` | Started — endpoint registry, engagement open/status basics, scope check, confirmed recon run, and scoped finding creation exist; continue §2 |
 
 ---
@@ -57,6 +57,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 - 2026-05-15: Completed the first `mg-tui` Harness tab slice. The TUI now has a Harness tab that reads `audit.log`, shows current/last harness endpoint activity, queue depth placeholder, endpoint registry status, and a harness-only audit tail. This completes the checklist item for a visible Harness tab while the long-running daemon queue is still pending.
 - 2026-05-15: Added read-only `mg-harness` endpoints for `engagement.status` and `finding.read`. `engagement.status` summarizes key output files and counts; `finding.read` resolves a safe finding ID prefix, bounds model-visible markdown to 256 KiB, and returns evidence references.
 - 2026-05-15: Started §3 session management with a new `session` library crate. The first slice writes and loads `session.json` env-var references, rejects plaintext cookie saves, resolves token auth headers from environment variables, scope-checks session test URLs, and adds `engagements/*/session.json` to `.gitignore`. Form login, OAuth refresh, encryption-at-rest for future stored cookies/tokens, CLI commands, and tool integration remain pending.
+- 2026-05-15: Expanded the `mg-tui` browser slice from rendered page viewing toward the roadmap request/response inspector. The Browser tab now shows a side inspector with request method, final URL, response status, MIME type, page inventory, response headers, redacted `Set-Cookie` inventory, and in-page search (`/`, `n`, `N`) with match highlighting. This is a partial completion of the P1 browser-core request/response viewer item; request corpus import, diffing, replay/fuzz actions, and finding creation remain pending.
 
 ---
 

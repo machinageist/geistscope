@@ -29,13 +29,16 @@ Exit criteria:
 Goal: make `mg-tui` the daily driver for a solo researcher.
 
 Status: started. `mg-tui` now includes a Harness tab that displays endpoint
-registry status plus harness activity parsed from `audit.log`.
+registry status plus harness activity parsed from `audit.log`. The Browser tab
+now has a request/response inspector with method, final URL, status, MIME type,
+page inventory, redacted cookie/header display, and in-page search.
 
 Features:
 
 - Engagement picker with current status, scope, and active risk mode.
 - Host/path/parameter browser.
 - Request and response viewer with search, headers, body, cookies, and diff.
+  Started with page search plus redacted response headers and cookies.
 - HAR/Burp/Caido import into a request corpus.
 - "Send to replay", "Send to fuzz", "Create finding", and "Ask AI" actions.
 - Auth profiles for controlled test accounts and roles. Started with the
@@ -46,6 +49,7 @@ Features:
 Current-feature improvements:
 
 - Expand `views/browser.rs` from page inspection into request-corpus navigation.
+- Add request body capture and response diffing to the Browser inspector.
 - Add traffic search and saved filters.
 - Add quick links from findings to replay/fuzz output files.
 - Expand the Harness tab once `mg-harness` has a daemon queue and live job state.

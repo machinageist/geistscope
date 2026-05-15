@@ -10,7 +10,9 @@
  *******************************************************************/
 
 use crate::app::App;
-use crate::html_render::{FieldType, FormElement, parse_field_marker, parse_img_marker};
+use crate::html_render::{
+    FieldType, FormElement, RenderedPage, parse_field_marker, parse_img_marker,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -33,7 +35,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 
     render_url_bar(f, app, chunks[0]);
     render_status_line(f, app, chunks[1]);
-    render_page(f, app, chunks[2]);
+    render_body(f, app, chunks[2]);
     render_link_bar(f, app, chunks[3]);
 }
 
@@ -43,7 +45,12 @@ fn render_url_bar(f: &mut Frame, app: &App, area: Rect) {
     let display = if b.url_editing { &b.url_buf } else { &b.url };
     let cursor = if b.url_editing { "\u{2502}" } else { "" };
     let label = if b.url_editing {
-        Span::styled(" URL \u{25B8} ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(
+            " URL \u{25B8} ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::styled(" URL   ", Style::default().fg(Color::DarkGray))
     };
@@ -55,9 +62,18 @@ fn render_url_bar(f: &mut Frame, app: &App, area: Rect) {
     let p = Paragraph::new(Line::from(vec![
         label,
         Span::styled(display.clone(), Style::default().fg(Color::White)),
-        Span::styled(cursor, Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+        Span::styled(
+            cursor,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::SLOW_BLINK),
+        ),
     ]))
-    .block(Block::default().borders(Borders::ALL).border_style(border_style));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_style),
+    );
     f.render_widget(p, area);
 }
 
@@ -65,7 +81,10 @@ fn render_url_bar(f: &mut Frame, app: &App, area: Rect) {
 fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
     let b = &app.browser;
     let spans = if b.loading {
-        vec![Span::styled(" \u{27F3} Loading\u{2026}", Style::default().fg(Color::Yellow))]
+        vec![Span::styled(
+            " \u{27F3} Loading\u{2026}",
+            Style::default().fg(Color::Yellow),
+        )]
     } else if let Some(err) = &b.error {
         vec![
             Span::styled(" \u{2717} ", Style::default().fg(Color::Red)),
@@ -79,12 +98,28 @@ fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
             _ => Color::Red,
         };
         let title = b.page.as_ref().and_then(|p| {
-            if p.title.is_empty() { None } else { Some(p.title.clone()) }
+            if p.title.is_empty() {
+                None
+            } else {
+                Some(p.title.clone())
+            }
         });
         let img_count = b.page.as_ref().map_or(0, |p| p.images.len());
         let cached = b.image_cache.len();
         let mut s = vec![
-            Span::styled(format!(" {} ", b.status), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(" {} ", b.request_method),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("\u{00B7} ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!(" {} ", b.status),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("\u{00B7} ", Style::default().fg(Color::DarkGray)),
             Span::styled(b.content_type.clone(), Style::default().fg(Color::Gray)),
         ];
@@ -95,8 +130,16 @@ fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
             ));
         }
         if let Some(t) = title {
-            s.push(Span::styled("  \u{00B7}  ", Style::default().fg(Color::DarkGray)));
-            s.push(Span::styled(t, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)));
+            s.push(Span::styled(
+                "  \u{00B7}  ",
+                Style::default().fg(Color::DarkGray),
+            ));
+            s.push(Span::styled(
+                t,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ));
         }
         s
     } else {
@@ -108,12 +151,30 @@ fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+// Render page content with optional request/response inspector
+fn render_body(f: &mut Frame, app: &App, area: Rect) {
+    if app.browser.show_inspector && area.width >= 96 {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(64), Constraint::Percentage(36)])
+            .split(area);
+        render_page(f, app, chunks[0]);
+        render_inspector(f, app, chunks[1]);
+    } else {
+        render_page(f, app, area);
+    }
+}
+
 // Render page content line-by-line, substituting image placeholders from cache
 fn render_page(f: &mut Frame, app: &App, area: Rect) {
     let b = &app.browser;
     let page = match &b.page {
         None => {
-            let msg = if b.loading { "Fetching\u{2026}" } else { "No page loaded.  Press  u  to enter a URL." };
+            let msg = if b.loading {
+                "Fetching\u{2026}"
+            } else {
+                "No page loaded.  Press  u  to enter a URL."
+            };
             f.render_widget(
                 Paragraph::new(msg).style(Style::default().fg(Color::DarkGray)),
                 area,
@@ -131,6 +192,7 @@ fn render_page(f: &mut Frame, app: &App, area: Rect) {
             break;
         }
         let row_rect = Rect::new(area.x, area.y + screen_row, area.width, 1);
+        let source_row = b.scroll + screen_row as usize;
 
         if let Some((img_idx, img_row)) = parse_img_marker(line) {
             // Substitute cached halfblock line if available
@@ -156,7 +218,9 @@ fn render_page(f: &mut Frame, app: &App, area: Rect) {
         } else if let Some(field_idx) = parse_field_marker(line) {
             // Render interactive form field at this line
             if let Some(field) = page.form_elements.iter().find(|f| f.index == field_idx) {
-                let value = b.field_values.get(&field_idx)
+                let value = b
+                    .field_values
+                    .get(&field_idx)
                     .map(String::as_str)
                     .unwrap_or(&field.value);
                 let is_focused = b.focused_field == Some(field_idx);
@@ -164,28 +228,189 @@ fn render_page(f: &mut Frame, app: &App, area: Rect) {
                 f.render_widget(Paragraph::new(rendered), row_rect);
             }
         } else {
+            let current_match = b.current_find_line() == Some(source_row);
+            let contains_match = !b.find_query.is_empty()
+                && line_text(line)
+                    .to_lowercase()
+                    .contains(&b.find_query.to_lowercase());
             f.render_widget(
-                Paragraph::new(highlight_selected_link(line.clone(), selected_n)),
+                Paragraph::new(highlight_find_line(
+                    highlight_selected_link(line.clone(), selected_n),
+                    contains_match,
+                    current_match,
+                )),
                 row_rect,
             );
         }
     }
 }
 
+// Render request/response metadata beside the page
+fn render_inspector(f: &mut Frame, app: &App, area: Rect) {
+    let b = &app.browser;
+    let page = b.page.as_ref();
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "Request ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(b.request_method.clone(), Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(truncate_for_width(
+            &b.url,
+            area.width.saturating_sub(2) as usize,
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "Response ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(b.status.to_string(), status_style(b.status)),
+            Span::raw(" "),
+            Span::styled(
+                truncate_for_width(&b.content_type, 28),
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "Page ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(page_counts(page, b.visible_field_count())),
+        ]),
+    ];
+
+    if !b.find_query.is_empty() {
+        let current = if b.find_matches.is_empty() {
+            0
+        } else {
+            b.find_cursor + 1
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Find ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{current}/{} ", b.find_matches.len()),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::raw(truncate_for_width(
+                &b.find_query,
+                area.width.saturating_sub(12) as usize,
+            )),
+        ]));
+    }
+
+    if !b.response_cookies.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "Cookies",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for cookie in b.response_cookies.iter().take(5) {
+            lines.push(Line::from(vec![
+                Span::styled("  set-cookie: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(truncate_for_width(
+                    cookie,
+                    area.width.saturating_sub(16) as usize,
+                )),
+            ]));
+        }
+        if b.response_cookies.len() > 5 {
+            lines.push(Line::from(Span::styled(
+                format!("  +{} more cookies", b.response_cookies.len() - 5),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Headers",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )));
+    for (name, value) in b
+        .response_headers
+        .iter()
+        .take(header_rows(area, lines.len()))
+    {
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {name}: "), Style::default().fg(Color::DarkGray)),
+            Span::raw(truncate_for_width(
+                value,
+                area.width.saturating_sub(name.len() as u16 + 6) as usize,
+            )),
+        ]));
+    }
+
+    let paragraph = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Inspector ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
+    f.render_widget(paragraph, area);
+}
+
+// Format page inventory counts for the inspector
+fn page_counts(page: Option<&RenderedPage>, visible_fields: usize) -> String {
+    match page {
+        Some(page) => format!(
+            "{} lines  {} links  {} forms  {} fields  {} images",
+            page.lines.len(),
+            page.links.len(),
+            page.forms.len(),
+            visible_fields,
+            page.images.len()
+        ),
+        None => "no page".to_string(),
+    }
+}
+
 // Render one interactive form field line based on its type and focus state
-fn render_field_line(field: &FormElement, value: &str, is_focused: bool, width: u16) -> Line<'static> {
+fn render_field_line(
+    field: &FormElement,
+    value: &str,
+    is_focused: bool,
+    width: u16,
+) -> Line<'static> {
     let w = width.saturating_sub(4) as usize;
     match &field.field_type {
         FieldType::Hidden => Line::default(),
 
         FieldType::Submit | FieldType::Button => {
-            let label = if !field.placeholder.is_empty() { field.placeholder.as_str() }
-                else if !field.value.is_empty() { field.value.as_str() }
-                else { "Submit" };
-            let style = if is_focused {
-                Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+            let label = if !field.placeholder.is_empty() {
+                field.placeholder.as_str()
+            } else if !field.value.is_empty() {
+                field.value.as_str()
             } else {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                "Submit"
+            };
+            let style = if is_focused {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             };
             Line::from(Span::styled(format!("  [ {label} ]"), style))
         }
@@ -194,7 +419,9 @@ fn render_field_line(field: &FormElement, value: &str, is_focused: bool, width: 
             let on = value == "1" || value == "true" || (value.is_empty() && *checked);
             let box_str = if on { "[x]" } else { "[ ]" };
             let style = if is_focused {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -208,7 +435,9 @@ fn render_field_line(field: &FormElement, value: &str, is_focused: bool, width: 
             let on = value == "1" || value == "true" || (value.is_empty() && *checked);
             let box_str = if on { "(\u{2022})" } else { "( )" };
             let style = if is_focused {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -219,7 +448,8 @@ fn render_field_line(field: &FormElement, value: &str, is_focused: bool, width: 
         }
 
         FieldType::Select(options) => {
-            let label = options.iter()
+            let label = options
+                .iter()
                 .find(|(v, _)| v == value)
                 .map(|(_, l)| l.as_str())
                 .or_else(|| options.first().map(|(_, l)| l.as_str()))
@@ -233,15 +463,19 @@ fn render_field_line(field: &FormElement, value: &str, is_focused: bool, width: 
         }
 
         FieldType::File => {
-            let display = if value.is_empty() { "(no file chosen)".to_string() } else { value.to_string() };
+            let display = if value.is_empty() {
+                "(no file chosen)".to_string()
+            } else {
+                value.to_string()
+            };
             let style = if is_focused {
                 Style::default().fg(Color::Black).bg(Color::White)
             } else {
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::UNDERLINED)
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::UNDERLINED)
             };
-            Line::from(vec![
-                Span::styled(format!("  \u{1F4C4} {display}"), style),
-            ])
+            Line::from(vec![Span::styled(format!("  \u{1F4C4} {display}"), style)])
         }
 
         FieldType::Password => {
@@ -270,13 +504,23 @@ fn render_field_line(field: &FormElement, value: &str, is_focused: bool, width: 
 fn render_text_input_line(display: &str, is_focused: bool) -> Line<'static> {
     if is_focused {
         Line::from(vec![
-            Span::styled(display.to_string(), Style::default().fg(Color::Black).bg(Color::White)),
-            Span::styled("\u{2502}", Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+            Span::styled(
+                display.to_string(),
+                Style::default().fg(Color::Black).bg(Color::White),
+            ),
+            Span::styled(
+                "\u{2502}",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ),
         ])
     } else {
         Line::from(Span::styled(
             display.to_string(),
-            Style::default().fg(Color::White).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::UNDERLINED),
         ))
     }
 }
@@ -289,7 +533,12 @@ fn highlight_selected_link(line: Line<'static>, n: usize) -> Line<'static> {
             .into_iter()
             .map(|s| {
                 if s.content.as_ref() == marker.as_str() {
-                    Span::styled(s.content, Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+                    Span::styled(
+                        s.content,
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else {
                     s
                 }
@@ -298,10 +547,93 @@ fn highlight_selected_link(line: Line<'static>, n: usize) -> Line<'static> {
     )
 }
 
+// Apply line-level search highlighting
+fn highlight_find_line(
+    line: Line<'static>,
+    contains_match: bool,
+    current_match: bool,
+) -> Line<'static> {
+    if !contains_match {
+        return line;
+    }
+    let style = if current_match {
+        Style::default().fg(Color::Black).bg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Yellow)
+    };
+    Line::from(
+        line.spans
+            .into_iter()
+            .map(|span| Span::styled(span.content, span.style.patch(style)))
+            .collect::<Vec<_>>(),
+    )
+}
+
+// Extract text from a rendered line
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+// Return status color for HTTP status codes
+fn status_style(status: u16) -> Style {
+    match status {
+        200..=299 => Style::default().fg(Color::Green),
+        300..=399 => Style::default().fg(Color::Yellow),
+        400..=499 => Style::default().fg(Color::LightRed),
+        _ => Style::default().fg(Color::Red),
+    }
+}
+
+// Bound strings to the pane width without changing layout
+fn truncate_for_width(s: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let char_count = s.chars().count();
+    if char_count <= width {
+        return s.to_string();
+    }
+    if width <= 1 {
+        return "\u{2026}".to_string();
+    }
+    let take = width.saturating_sub(1);
+    format!("{}\u{2026}", s.chars().take(take).collect::<String>())
+}
+
+// Compute remaining header rows in the inspector pane
+fn header_rows(area: Rect, current_lines: usize) -> usize {
+    let available = area.height.saturating_sub(2) as usize;
+    available.saturating_sub(current_lines).max(1)
+}
+
 // Render link navigator + key hints
 fn render_link_bar(f: &mut Frame, app: &App, area: Rect) {
     let b = &app.browser;
-    let spans = if b.focused_field.is_some() {
+    let spans = if b.find_editing {
+        vec![
+            Span::styled(
+                "  Find: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(b.find_buf.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                "\u{2502}",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ),
+            Span::styled(
+                "  Enter apply  Esc cancel",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]
+    } else if b.focused_field.is_some() {
         vec![Span::styled(
             "  Tab next field  Shift-Tab prev  Enter submit  Esc unfocus  type to edit",
             Style::default().fg(Color::Yellow),
@@ -311,20 +643,21 @@ fn render_link_bar(f: &mut Frame, app: &App, area: Rect) {
         vec![
             Span::styled(
                 format!(" [{}/{}] ", b.selected_link + 1, b.link_count()),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(url.to_string(), Style::default().fg(Color::White)),
             Span::styled(
-                "   [ prev  ] next  Enter follow  Tab field  b back  u URL  R reload",
+                "   [ prev  ] next  Enter follow  / find  n next  i inspector  Tab field",
                 Style::default().fg(Color::DarkGray),
             ),
         ]
     } else {
         vec![Span::styled(
-            "  u URL  b back  \u{2191}\u{2193} scroll  Tab field  R reload  mouse wheel to scroll",
+            "  u URL  / find  n/N matches  i inspector  b back  R reload  \u{2191}\u{2193} scroll",
             Style::default().fg(Color::DarkGray),
         )]
     };
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
-

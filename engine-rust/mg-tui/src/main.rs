@@ -16,22 +16,21 @@ mod loader;
 mod ui;
 mod views;
 
-use app::{App, Tab};
 use anyhow::Result;
+use app::{App, Tab};
 use browser_fetch::{AppMsg, FetchResult, fetch_page, fetch_post};
-use html_render::{FieldType, parse_field_marker};
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
-        MouseButton, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
+        MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use html_render::{FieldType, parse_field_marker};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
-    env,
-    io,
+    env, io,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     time::{Duration, Instant},
@@ -58,11 +57,7 @@ fn engagements_dir() -> PathBuf {
 }
 
 // Setup terminal (raw mode + alternate screen + mouse), run loop, restore on exit
-fn run(
-    app: &mut App,
-    tx: Sender<AppMsg>,
-    rx: Receiver<AppMsg>,
-) -> Result<()> {
+fn run(app: &mut App, tx: Sender<AppMsg>, rx: Receiver<AppMsg>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -72,7 +67,11 @@ fn run(
     let result = event_loop(&mut terminal, app, tx, rx);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -99,7 +98,7 @@ fn event_loop(
         // Drain all pending background messages (page + image fetches)
         while let Ok(msg) = rx.try_recv() {
             match msg {
-                AppMsg::Page(Ok(r)) => apply_page(app, r, &tx),
+                AppMsg::Page(Ok(r)) => apply_page(app, *r, &tx),
                 AppMsg::Page(Err(e)) => {
                     app.browser.loading = false;
                     app.browser.error = Some(e);
@@ -111,7 +110,8 @@ fn event_loop(
         }
 
         if event::poll(POLL_TIMEOUT)?
-            && let event = event::read()? {
+            && let event = event::read()?
+        {
             match event {
                 Event::Key(key) => handle_key(app, key.code, key.modifiers, &tx),
                 Event::Mouse(me) => handle_mouse(app, me.kind, me.column, me.row, terminal, &tx),
@@ -139,14 +139,18 @@ fn apply_page(app: &mut App, r: FetchResult, tx: &Sender<AppMsg>) {
 
     app.browser.url = r.url;
     app.browser.url_buf = app.browser.url.clone();
+    app.browser.request_method = r.request_method;
     app.browser.status = r.status;
     app.browser.content_type = r.content_type;
+    app.browser.response_headers = r.response_headers;
+    app.browser.response_cookies = r.response_cookies;
     app.browser.image_cache.clear();
     app.browser.page = Some(r.page);
     app.browser.loading = false;
     app.browser.error = None;
     app.browser.scroll = 0;
     app.browser.selected_link = 0;
+    app.browser.recompute_find_matches();
 
     // Spawn one background thread per image slot
     for (index, raw_src) in image_srcs {
@@ -164,12 +168,20 @@ fn apply_page(app: &mut App, r: FetchResult, tx: &Sender<AppMsg>) {
 fn navigate(url: String, tx: &Sender<AppMsg>) {
     let tx = tx.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(AppMsg::Page(fetch_page(&url).map_err(|e| e.to_string())));
+        let _ = tx.send(AppMsg::Page(
+            fetch_page(&url).map(Box::new).map_err(|e| e.to_string()),
+        ));
     });
 }
 
 // Dispatch keyboard events
 fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender<AppMsg>) {
+    // Browser search input intercepts text until Enter or Esc
+    if app.tab == Tab::Browser && app.browser.find_editing {
+        handle_find_key(app, code);
+        return;
+    }
+
     // URL bar editing intercepts most keys
     if app.tab == Tab::Browser && app.browser.url_editing {
         handle_url_bar_key(app, code, tx);
@@ -196,10 +208,14 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
         KeyCode::Down | KeyCode::Char('j') => app.cursor_down(),
 
         KeyCode::PageUp if app.tab == Tab::Browser => {
-            for _ in 0..20 { app.cursor_up(); }
+            for _ in 0..20 {
+                app.cursor_up();
+            }
         }
         KeyCode::PageDown if app.tab == Tab::Browser => {
-            for _ in 0..20 { app.cursor_down(); }
+            for _ in 0..20 {
+                app.cursor_down();
+            }
         }
 
         KeyCode::Enter if app.tab == Tab::Engagements => {
@@ -231,12 +247,29 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
                 navigate(url, tx);
             }
         }
+        KeyCode::Char('/') if app.tab == Tab::Browser => app.browser.begin_find(),
+        KeyCode::Char('n') if app.tab == Tab::Browser => app.browser.next_find_match(),
+        KeyCode::Char('N') if app.tab == Tab::Browser => app.browser.prev_find_match(),
+        KeyCode::Char('i') if app.tab == Tab::Browser => app.browser.toggle_inspector(),
         KeyCode::Char(']') if app.tab == Tab::Browser => app.browser.next_link(),
         KeyCode::Char('[') if app.tab == Tab::Browser => app.browser.prev_link(),
 
         KeyCode::Char('r') => app.refresh(),
         KeyCode::Char('f') => cycle_findings_filter(app),
 
+        _ => {}
+    }
+}
+
+// Handle browser search input
+fn handle_find_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Enter => app.browser.apply_find(),
+        KeyCode::Esc => app.browser.cancel_find(),
+        KeyCode::Backspace => {
+            app.browser.find_buf.pop();
+        }
+        KeyCode::Char(c) => app.browser.find_buf.push(c),
         _ => {}
     }
 }
@@ -258,7 +291,10 @@ fn handle_field_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &
 
         KeyCode::Enter => {
             // Find the form this field belongs to; submit or advance
-            let form_idx = app.browser.page.as_ref()
+            let form_idx = app
+                .browser
+                .page
+                .as_ref()
                 .and_then(|p| p.form_elements.iter().find(|f| f.index == idx))
                 .and_then(|f| f.form_index);
             if let Some(fi) = form_idx {
@@ -272,7 +308,10 @@ fn handle_field_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &
             if let Some(v) = app.browser.field_values.get_mut(&idx) {
                 v.pop();
             } else {
-                let def = app.browser.page.as_ref()
+                let def = app
+                    .browser
+                    .page
+                    .as_ref()
                     .and_then(|p| p.form_elements.iter().find(|f| f.index == idx))
                     .map(|f| f.value.clone())
                     .unwrap_or_default();
@@ -284,17 +323,28 @@ fn handle_field_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &
 
         KeyCode::Char(' ') => {
             // Space toggles checkbox/radio; submits submit buttons; otherwise appends
-            let field_type = app.browser.page.as_ref()
+            let field_type = app
+                .browser
+                .page
+                .as_ref()
                 .and_then(|p| p.form_elements.iter().find(|f| f.index == idx))
                 .map(|f| f.field_type.clone());
             match field_type {
                 Some(FieldType::Checkbox { .. }) => {
-                    let cur = app.browser.field_values.get(&idx).map(String::as_str).unwrap_or("0");
+                    let cur = app
+                        .browser
+                        .field_values
+                        .get(&idx)
+                        .map(String::as_str)
+                        .unwrap_or("0");
                     let toggled = if cur == "1" { "0" } else { "1" };
                     app.browser.field_values.insert(idx, toggled.to_string());
                 }
                 Some(FieldType::Submit) | Some(FieldType::Button) => {
-                    let form_idx = app.browser.page.as_ref()
+                    let form_idx = app
+                        .browser
+                        .page
+                        .as_ref()
                         .and_then(|p| p.form_elements.iter().find(|f| f.index == idx))
                         .and_then(|f| f.form_index);
                     if let Some(fi) = form_idx {
@@ -303,7 +353,9 @@ fn handle_field_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &
                 }
                 _ => {
                     let entry = app.browser.field_values.entry(idx).or_insert_with(|| {
-                        app.browser.page.as_ref()
+                        app.browser
+                            .page
+                            .as_ref()
                             .and_then(|p| p.form_elements.iter().find(|f| f.index == idx))
                             .map(|f| f.value.clone())
                             .unwrap_or_default()
@@ -315,7 +367,9 @@ fn handle_field_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &
 
         KeyCode::Char(c) => {
             let entry = app.browser.field_values.entry(idx).or_insert_with(|| {
-                app.browser.page.as_ref()
+                app.browser
+                    .page
+                    .as_ref()
                     .and_then(|p| p.form_elements.iter().find(|f| f.index == idx))
                     .map(|f| f.value.clone())
                     .unwrap_or_default()
@@ -345,11 +399,21 @@ fn submit_form(app: &mut App, form_idx: usize, tx: &Sender<AppMsg>) {
     let method = form.method.clone();
 
     // Build params from non-hidden, named fields belonging to this form
-    let params: Vec<(String, String)> = page.form_elements.iter()
+    let params: Vec<(String, String)> = page
+        .form_elements
+        .iter()
         .filter(|f| f.form_index == Some(form_idx) && !f.name.is_empty())
-        .filter(|f| !matches!(f.field_type, FieldType::Hidden | FieldType::Submit | FieldType::Button | FieldType::File))
+        .filter(|f| {
+            !matches!(
+                f.field_type,
+                FieldType::Hidden | FieldType::Submit | FieldType::Button | FieldType::File
+            )
+        })
         .map(|f| {
-            let val = app.browser.field_values.get(&f.index)
+            let val = app
+                .browser
+                .field_values
+                .get(&f.index)
                 .cloned()
                 .unwrap_or_else(|| f.value.clone());
             (f.name.clone(), val)
@@ -361,7 +425,11 @@ fn submit_form(app: &mut App, form_idx: usize, tx: &Sender<AppMsg>) {
         app.browser.begin_navigate(&url);
         let tx2 = tx.clone();
         std::thread::spawn(move || {
-            let _ = tx2.send(AppMsg::Page(fetch_post(&url, &params).map_err(|e| e.to_string())));
+            let _ = tx2.send(AppMsg::Page(
+                fetch_post(&url, &params)
+                    .map(Box::new)
+                    .map_err(|e| e.to_string()),
+            ));
         });
     } else {
         let url = build_get_url(&action, &params);
@@ -372,12 +440,19 @@ fn submit_form(app: &mut App, form_idx: usize, tx: &Sender<AppMsg>) {
 
 // Build a GET URL by appending form params as a query string
 fn build_get_url(action: &str, params: &[(String, String)]) -> String {
-    if params.is_empty() { return action.to_string(); }
-    let qs: String = params.iter()
+    if params.is_empty() {
+        return action.to_string();
+    }
+    let qs: String = params
+        .iter()
         .map(|(k, v)| format!("{}={}", url_encode(k), url_encode(v)))
         .collect::<Vec<_>>()
         .join("&");
-    if action.contains('?') { format!("{action}&{qs}") } else { format!("{action}?{qs}") }
+    if action.contains('?') {
+        format!("{action}&{qs}")
+    } else {
+        format!("{action}?{qs}")
+    }
 }
 
 // Percent-encode a value for a URL query string (RFC 3986 unreserved chars pass through)
@@ -410,7 +485,9 @@ fn handle_url_bar_key(app: &mut App, code: KeyCode, tx: &Sender<AppMsg>) {
             app.browser.url_editing = false;
             app.browser.url_buf = app.browser.url.clone();
         }
-        KeyCode::Backspace => { app.browser.url_buf.pop(); }
+        KeyCode::Backspace => {
+            app.browser.url_buf.pop();
+        }
         KeyCode::Char(c) => app.browser.url_buf.push(c),
         _ => {}
     }
@@ -430,10 +507,14 @@ fn handle_mouse(
     match kind {
         // Wheel scrolling works in any tab
         MouseEventKind::ScrollDown => {
-            for _ in 0..MOUSE_SCROLL_STEP { app.cursor_down(); }
+            for _ in 0..MOUSE_SCROLL_STEP {
+                app.cursor_down();
+            }
         }
         MouseEventKind::ScrollUp => {
-            for _ in 0..MOUSE_SCROLL_STEP { app.cursor_up(); }
+            for _ in 0..MOUSE_SCROLL_STEP {
+                app.cursor_up();
+            }
         }
 
         MouseEventKind::Down(MouseButton::Left) => {
@@ -549,7 +630,8 @@ fn resolve_url(href: &str, base: &str) -> String {
         return href.to_string();
     }
     if let Ok(base_url) = url::Url::parse(base)
-        && let Ok(resolved) = base_url.join(href) {
+        && let Ok(resolved) = base_url.join(href)
+    {
         return resolved.to_string();
     }
     href.to_string()

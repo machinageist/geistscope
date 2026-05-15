@@ -71,7 +71,7 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-probe`       | Passive security posture checker                    |
 | `mg-fuzz`        | Burp Intruder-style HTTP fuzzer                     |
 | `mg-replay`      | Burp Repeater-style finding verification            |
-| `mg-tui`         | Ratatui dashboard: engagements, hosts, findings, fuzz, logs, harness, browser |
+| `mg-tui`         | Ratatui dashboard and browser: engagements, hosts, findings, fuzz, logs, harness status, page rendering, inspector, and search |
 | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls |
 
 ## Core Libraries

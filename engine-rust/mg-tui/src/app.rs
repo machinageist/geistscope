@@ -62,8 +62,11 @@ pub struct BrowserState {
     pub url: String,
     pub url_buf: String,
     pub url_editing: bool,
+    pub request_method: String,
     pub status: u16,
     pub content_type: String,
+    pub response_headers: Vec<(String, String)>,
+    pub response_cookies: Vec<String>,
     pub page: Option<RenderedPage>,
     pub error: Option<String>,
     pub loading: bool,
@@ -75,12 +78,23 @@ pub struct BrowserState {
     // form interaction: which field is focused, and live values keyed by element index
     pub focused_field: Option<usize>,
     pub field_values: HashMap<usize, String>,
+    pub show_inspector: bool,
+    pub find_editing: bool,
+    pub find_buf: String,
+    pub find_query: String,
+    pub find_matches: Vec<usize>,
+    pub find_cursor: usize,
 }
 
 impl BrowserState {
     // Total link count in current page
     pub fn link_count(&self) -> usize {
         self.page.as_ref().map_or(0, |p| p.links.len())
+    }
+
+    // Total visible form control count in current page
+    pub fn visible_field_count(&self) -> usize {
+        self.visible_field_indices().len()
     }
 
     // URL of currently selected link (1-indexed display, 0-indexed internal)
@@ -120,12 +134,15 @@ impl BrowserState {
         self.url = new_url.to_string();
         self.url_buf = new_url.to_string();
         self.url_editing = false;
+        self.find_editing = false;
         self.loading = true;
         self.error = None;
         self.scroll = 0;
         self.selected_link = 0;
         self.focused_field = None;
         self.field_values.clear();
+        self.find_matches.clear();
+        self.find_cursor = 0;
     }
 
     // Collect non-hidden field indices from the current page in document order
@@ -186,6 +203,107 @@ impl BrowserState {
         self.error = None;
         Some(prev)
     }
+
+    // Toggle the browser inspector pane
+    pub fn toggle_inspector(&mut self) {
+        self.show_inspector = !self.show_inspector;
+    }
+
+    // Start editing the page search query
+    pub fn begin_find(&mut self) {
+        self.find_editing = true;
+        self.find_buf = self.find_query.clone();
+    }
+
+    // Apply the current search buffer and jump to the first match
+    pub fn apply_find(&mut self) {
+        self.find_query = self.find_buf.trim().to_string();
+        self.find_editing = false;
+        self.recompute_find_matches();
+        self.find_cursor = 0;
+        self.scroll_to_find_match();
+    }
+
+    // Cancel search editing without changing the active query
+    pub fn cancel_find(&mut self) {
+        self.find_editing = false;
+        self.find_buf = self.find_query.clone();
+    }
+
+    // Rebuild search matches for current page and query
+    pub fn recompute_find_matches(&mut self) {
+        self.find_matches.clear();
+        if self.find_query.is_empty() {
+            self.find_cursor = 0;
+            return;
+        }
+
+        let needle = self.find_query.to_lowercase();
+        if let Some(page) = &self.page {
+            self.find_matches = page
+                .lines
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, line)| {
+                    let text = line_text(line).to_lowercase();
+                    text.contains(&needle).then_some(idx)
+                })
+                .collect();
+        }
+
+        if self.find_cursor >= self.find_matches.len() {
+            self.find_cursor = 0;
+        }
+    }
+
+    // Jump to the next search match
+    pub fn next_find_match(&mut self) {
+        if self.find_matches.is_empty() {
+            self.recompute_find_matches();
+        }
+        if self.find_matches.is_empty() {
+            return;
+        }
+        self.find_cursor = (self.find_cursor + 1) % self.find_matches.len();
+        self.scroll_to_find_match();
+    }
+
+    // Jump to the previous search match
+    pub fn prev_find_match(&mut self) {
+        if self.find_matches.is_empty() {
+            self.recompute_find_matches();
+        }
+        if self.find_matches.is_empty() {
+            return;
+        }
+        self.find_cursor = if self.find_cursor == 0 {
+            self.find_matches.len() - 1
+        } else {
+            self.find_cursor - 1
+        };
+        self.scroll_to_find_match();
+    }
+
+    // Return the current match source line, if any
+    pub fn current_find_line(&self) -> Option<usize> {
+        self.find_matches.get(self.find_cursor).copied()
+    }
+
+    // Scroll the page so the current match is visible near the top
+    fn scroll_to_find_match(&mut self) {
+        if let Some(line) = self.current_find_line() {
+            self.scroll = line.saturating_sub(2);
+        }
+    }
+}
+
+// Extract plain text from a rendered line
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 // Top-level application state
@@ -224,7 +342,11 @@ impl App {
             findings_filter: String::new(),
             engagements_dir,
             should_quit: false,
-            browser: BrowserState::default(),
+            browser: BrowserState {
+                request_method: "GET".to_string(),
+                show_inspector: true,
+                ..BrowserState::default()
+            },
         }
     }
 
@@ -360,5 +482,58 @@ impl App {
             self.tab.index() - 1
         };
         self.tab = Tab::from_index(i);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::html_render::RenderedPage;
+
+    fn page_with_lines(lines: &[&str]) -> RenderedPage {
+        RenderedPage {
+            title: String::new(),
+            lines: lines
+                .iter()
+                .map(|line| Line::raw((*line).to_string()))
+                .collect(),
+            links: vec![],
+            images: vec![],
+            forms: vec![],
+            form_elements: vec![],
+        }
+    }
+
+    #[test]
+    fn browser_find_tracks_matching_lines() {
+        let mut browser = BrowserState {
+            page: Some(page_with_lines(&["alpha", "beta target", "target gamma"])),
+            find_query: "target".into(),
+            ..BrowserState::default()
+        };
+
+        browser.recompute_find_matches();
+
+        assert_eq!(browser.find_matches, vec![1, 2]);
+        assert_eq!(browser.current_find_line(), Some(1));
+    }
+
+    #[test]
+    fn browser_find_wraps_through_matches() {
+        let mut browser = BrowserState {
+            page: Some(page_with_lines(&["target one", "middle", "target two"])),
+            find_query: "target".into(),
+            ..BrowserState::default()
+        };
+        browser.recompute_find_matches();
+
+        browser.next_find_match();
+        assert_eq!(browser.current_find_line(), Some(2));
+
+        browser.next_find_match();
+        assert_eq!(browser.current_find_line(), Some(0));
+
+        browser.prev_find_match();
+        assert_eq!(browser.current_find_line(), Some(2));
     }
 }
