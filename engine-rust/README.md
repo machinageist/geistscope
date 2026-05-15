@@ -1,8 +1,9 @@
 # GeistScope engine — Rust workspace
 
-Recon and offensive-security tooling for bug bounty hunting.
-Tools are designed to be used standalone, chained through the engagement workspace,
-and consumed by Claude as a collaborative AI operator.
+Recon, web testing, replay, fuzzing, and TUI tooling for authorized bug bounty,
+pentest, and red-team work. Tools are designed to be used standalone, chained
+through the engagement workspace, and consumed by an AI harness through scoped
+tool endpoints.
 
 ## Crates
 
@@ -22,6 +23,7 @@ and consumed by Claude as a collaborative AI operator.
 | `mg-fuzz`        | bin      | `mg-fuzz`        | Burp Intruder-style payload fuzzer: sniper / battering-ram / pitchfork / cluster-bomb |
 | `mg-replay`      | bin      | `mg-replay`      | Replay curl evidence from findings; verdict: still_vulnerable / appears_fixed |
 | `mg-tui`         | bin      | `mg-tui`         | Ratatui terminal dashboard: engagements, hosts, findings, fuzz results, logs  |
+| `mg-harness`     | lib+bin  | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls                     |
 
 ## Dependency graph
 
@@ -41,7 +43,27 @@ engagement ◄─── subdomain-enum
            ◄─── mg-replay
 
 llm-client ◄─── ai-prioritize
+
+mg-recon ◄─── mg-harness
+engagement ◄─── mg-harness
 ```
+
+Planned harness layer:
+
+```text
+mg-harness -> engagement/http-client/llm-client/current tool libraries
+mg-tui     -> mg-harness endpoints for replay, fuzz, OOB, reporting, ranking
+```
+
+See `../docs/AI_TOOL_ENDPOINTS.md` before implementing this layer.
+
+Implemented harness endpoints:
+
+- `endpoint.registry`
+- `engagement.open`
+- `scope.check`
+- `recon.run` (requires `confirmed: true`)
+- `finding.create`
 
 ## Engagement directory layout
 
@@ -121,10 +143,24 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 
 # Install all binaries system-wide
-for crate in engagement subdomain-enum mg-scan fingerprint mg-recon ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay; do
+for crate in engagement subdomain-enum mg-scan fingerprint mg-recon ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-tui mg-harness; do
     cargo install --path $crate
 done
 ```
+
+## AI harness direction
+
+Future AI-facing code should not add arbitrary command execution. Add typed
+endpoint wrappers around existing libraries and CLIs:
+
+- Validate model-provided JSON before dispatch.
+- Check engagement scope before active network traffic.
+- Redact tokens, cookies, and sensitive response bodies before model ingestion.
+- Write audit events for recommendations, dispatches, blocks, and results.
+- Keep high-active actions behind explicit user confirmation.
+
+Provider-specific clients belong behind `llm-client` or a harness adapter; tool
+policy belongs in the harness.
 
 ## Code conventions
 

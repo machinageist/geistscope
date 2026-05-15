@@ -4,10 +4,14 @@ This file orients Claude Code sessions for the GeistScope project.
 
 ## What this project is
 
-GeistScope is a personal bug bounty toolchain designed so that Claude can act as
-an AI co-operator during live engagements. Tools write to a shared filesystem
-layout (the "engagement directory") and Claude reads the same files, making the
-collaboration file-native with no custom IPC.
+GeistScope is a professional bug bounty and red-team workstation designed so an
+AI operator can assist during authorized engagements without receiving raw shell
+access or unbounded authority. The current implementation is a Rust CLI/TUI
+suite that writes to a shared filesystem layout (the "engagement directory").
+
+The product direction is a TUI-based bug-hunting browser backed by a local AI
+harness. That harness should expose scoped, audited tool endpoints around the
+existing Rust engine.
 
 ## Repository layout
 
@@ -26,8 +30,19 @@ geistscope/
 │   ├── mg-crawl/          # bin: BFS crawler + JS secret extraction
 │   ├── mg-probe/          # bin: passive security posture checker
 │   ├── mg-fuzz/           # bin: Burp Intruder-style payload fuzzer
-│   └── mg-replay/         # bin: Burp Repeater-style finding verification
+│   ├── mg-replay/         # bin: Burp Repeater-style finding verification
+│   └── mg-harness/        # lib+bin: scoped AI/TUI endpoint dispatcher
 └── docs/                  # Design notes (currently sparse)
+```
+
+Important docs:
+
+```
+docs/PRODUCT_DOCTRINE.md       # product definition + coding doctrine
+docs/BUG_HUNTING_METHODOLOGY.md # authorized testing methodology
+docs/AI_TOOL_ENDPOINTS.md      # model-callable tool endpoint contract
+docs/FEATURE_ROADMAP.md        # prioritized implementation roadmap
+docs/RESEARCH_SOURCES.md       # web/local sources used for the doctrine
 ```
 
 ## Engagement directory layout (runtime)
@@ -76,19 +91,33 @@ Every crate must pass `cargo clippy -- -D warnings` before commit.
 
 ## Active development focus
 
-**`mg-tui` is complete** — Ratatui terminal dashboard installed at `~/.cargo/bin/mg-tui`.
-Tabs: Engagements · Hosts · Findings · Fuzz · Logs. Keys: Tab/BackTab navigate tabs, ↑↓ move cursor, Enter selects engagement, f cycles severity filter, r refreshes.
+**`mg-tui` is the foundation for the product UI.** It currently reads engagement
+files and renders engagements, hosts, findings, fuzz results, logs, and browser
+inspection. The next UI step is not a marketing GUI; it is a TUI bug-hunting
+browser with traffic navigation, replay/fuzz actions, scope visibility, and
+AI-assisted next-test suggestions.
 
-**Next:** GUI layer (egui or Tauri/React) — see ULTRAPLAN.md "GUI (planned post-TUI)".
-Also candidates: OOB interactsh integration, subdomain takeover checks, GraphQL fuzzing.
+**Next engine layer:** `mg-harness`, a local endpoint dispatcher that lets the
+AI call scoped tools through typed schemas. The first slice exists with
+`endpoint.registry`, `engagement.open`, `scope.check`, confirmed `recon.run`,
+and scoped `finding.create`.
+See `docs/AI_TOOL_ENDPOINTS.md`.
+
+High-priority candidates: Interactsh/OOB integration, request corpus import,
+subdomain takeover checks, GraphQL/OpenAPI testing, two-account access-control
+diffing, shared rate limits, and evidence/report generation.
 
 ## Key reference files
 
 | File | Purpose |
 |---|---|
+| `docs/PRODUCT_DOCTRINE.md` | Governs product direction, coding decisions, and AI-harness safety |
+| `docs/AI_TOOL_ENDPOINTS.md` | Endpoint schema, risk classes, scope/audit/redaction policy |
+| `docs/BUG_HUNTING_METHODOLOGY.md` | Field workflow for bug bounty, pentest, and red-team use |
+| `docs/FEATURE_ROADMAP.md` | Current and suggested feature roadmap |
 | `engine-rust/README.md` | Crate table, workflow examples, fuzz template format |
 | `engine-rust/ULTRAPLAN.md` | Milestone status, architecture decisions, deferred items |
-| `~/.claude/bug-hunting-skills/` | 18 skill files used by ai-prioritize |
+| `~/.claude/bug-hunting-skills/` | Skill files used by ai-prioritize |
 
 ## Workflow
 

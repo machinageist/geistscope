@@ -1590,6 +1590,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "mg-recon",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "mg-probe"
 version = "0.1.0"
 dependencies = [

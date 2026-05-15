@@ -22,27 +22,6 @@ fn parse_severity(s: &str) -> Result<Severity> {
     }
 }
 
-// Generate a finding ID like "2026-05-02-001" by counting existing files for today
-fn next_finding_id(findings_dir: &Path) -> Result<String> {
-    let today = OffsetDateTime::now_utc()
-        .date()
-        .format(&time::format_description::parse("[year]-[month]-[day]").unwrap())?;
-    let mut max_seq = 0u32;
-    if findings_dir.exists() {
-        for entry in std::fs::read_dir(findings_dir)? {
-            let name = entry?.file_name().to_string_lossy().to_string();
-            // Match prefix like "2026-05-02-NNN-"
-            if let Some(rest) = name.strip_prefix(&format!("{today}-"))
-                && let Some(seq_part) = rest.split('-').next()
-                && let Ok(n) = seq_part.parse::<u32>()
-            {
-                max_seq = max_seq.max(n);
-            }
-        }
-    }
-    Ok(format!("{today}-{:03}", max_seq + 1))
-}
-
 fn cmd_init(
     root: &Path,
     name: String,
@@ -184,7 +163,7 @@ fn cmd_finding(
     }
 
     let sev = parse_severity(severity)?;
-    let id = next_finding_id(&e.findings_dir())?;
+    let id = Finding::next_id(&e.findings_dir())?;
     let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
     let f = Finding {
         id,

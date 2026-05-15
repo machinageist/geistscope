@@ -1,13 +1,15 @@
 # GeistScope
 
-Automated bug bounty toolchain designed for human + AI collaboration.
-Tools write to a shared file layout; an AI operator reads the same files — no custom IPC.
+Professional bug bounty and red-team tooling for human + AI collaboration.
+The current system is a Rust CLI/TUI suite that writes to a shared engagement
+workspace. The product direction is a TUI-based bug-hunting browser with a
+scoped AI harness and dedicated tool endpoints at its core.
 
 ## Architecture
 
-```
-engine-rust/          Rust workspace — 11 binaries, 4 libraries
-docs/                 Design notes
+```text
+engine-rust/          Rust workspace: CLIs, libraries, TUI
+docs/                 Product doctrine, methodology, AI endpoint contract, roadmap
 CLAUDE.md             AI session orientation (read this first)
 ```
 
@@ -29,7 +31,11 @@ mg-recon              ← subdomain enum + fingerprint + port scan → summary.j
       │
       └── mg-replay       ← Finding verification (Burp Repeater equivalent)
       │
-      └── mg-tui          ← Terminal dashboard (Ratatui)
+      └── mg-tui          ← Terminal dashboard / TUI browser foundation
+
+Planned:
+
+mg-harness            ← Scoped AI tool endpoint dispatcher
 ```
 
 ## Quick start
@@ -39,7 +45,7 @@ mg-recon              ← subdomain enum + fingerprint + port scan → summary.j
 cd engine-rust
 cargo build --workspace
 for crate in engagement subdomain-enum mg-scan fingerprint mg-recon \
-             ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-tui; do
+             ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-tui mg-harness; do
     cargo install --path $crate
 done
 
@@ -66,6 +72,17 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-fuzz`        | Burp Intruder-style HTTP fuzzer                     |
 | `mg-replay`      | Burp Repeater-style finding verification            |
 | `mg-tui`         | Ratatui terminal dashboard: engagements/hosts/findings/fuzz/logs |
+| `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls |
+
+## Governing docs
+
+| File | Purpose |
+|------|---------|
+| `docs/PRODUCT_DOCTRINE.md` | Product definition, coding doctrine, AI-harness safety rules |
+| `docs/BUG_HUNTING_METHODOLOGY.md` | Authorized testing workflow and bug-class coverage model |
+| `docs/AI_TOOL_ENDPOINTS.md` | Provider-neutral endpoint contract for model-callable tools |
+| `docs/FEATURE_ROADMAP.md` | Prioritized TUI browser, harness, recon, OOB, reporting roadmap |
+| `docs/RESEARCH_SOURCES.md` | Web and local sources used to shape the methodology |
 
 ## Requirements
 

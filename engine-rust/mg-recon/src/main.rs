@@ -6,10 +6,10 @@
  * Notes:           Calls lib functions in-process (no subprocess); each stage checks
  *                  for an existing output file and skips unless --force is passed
  *******************************************************************/
-mod orchestrator;
 
 use anyhow::Result;
 use clap::Parser;
+use mg_recon::orchestrator;
 
 #[derive(Parser, Debug)]
 #[command(

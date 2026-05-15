@@ -10,6 +10,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
+use time::macros::format_description;
 
 use crate::EngagementError;
 
@@ -73,6 +75,27 @@ pub struct Finding {
 }
 
 impl Finding {
+    // Generate a finding ID like "2026-05-15-001" by counting today's files
+    pub fn next_id(findings_dir: &Path) -> Result<String, EngagementError> {
+        let today = OffsetDateTime::now_utc()
+            .date()
+            .format(format_description!("[year]-[month]-[day]"))?;
+        let mut max_seq = 0u32;
+        if findings_dir.exists() {
+            for entry in std::fs::read_dir(findings_dir)? {
+                let name = entry?.file_name().to_string_lossy().to_string();
+                // Match prefix like "2026-05-15-NNN-"
+                if let Some(rest) = name.strip_prefix(&format!("{today}-"))
+                    && let Some(seq_part) = rest.split('-').next()
+                    && let Ok(n) = seq_part.parse::<u32>()
+                {
+                    max_seq = max_seq.max(n);
+                }
+            }
+        }
+        Ok(format!("{today}-{:03}", max_seq + 1))
+    }
+
     // Render to a markdown file with YAML-ish frontmatter
     pub fn to_markdown(&self) -> String {
         let id = frontmatter_value(&self.id);
@@ -220,5 +243,21 @@ mod tests {
     fn filename_component_removes_path_separators() {
         assert_eq!(filename_safe_component("../2026/001"), "2026-001");
         assert_eq!(filename_safe_component("\n"), "finding");
+    }
+
+    #[test]
+    fn next_id_counts_existing_findings_for_today() {
+        let dir = std::env::temp_dir().join(format!("finding-next-id-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let today = OffsetDateTime::now_utc()
+            .date()
+            .format(format_description!("[year]-[month]-[day]"))
+            .unwrap();
+        fs::write(dir.join(format!("{today}-001-first.md")), "").unwrap();
+        fs::write(dir.join(format!("{today}-003-third.md")), "").unwrap();
+        let id = Finding::next_id(&dir).unwrap();
+        assert_eq!(id, format!("{today}-004"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

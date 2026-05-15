@@ -14,5 +14,6 @@ members = [
     "mg-fuzz",
     "mg-replay",
     "mg-tui",
+    "mg-harness",
 ]
 resolver = "2"
