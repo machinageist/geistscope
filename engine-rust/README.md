@@ -20,7 +20,7 @@ tool endpoints.
 | `mg-recon`       | bin      | `mg-recon`       | Full recon pipeline: subdomain enum → fingerprint → port scan → summary |
 | `ai-prioritize`  | bin      | `ai-prioritize`  | Rank attack surface with LLM (Anthropic primary, Ollama fallback)    |
 | `mg-crawl`       | bin      | `mg-crawl`       | BFS crawler: HTML pages + JS secret/endpoint extraction              |
-| `mg-probe`       | bin      | `mg-probe`       | Passive security posture: headers, CORS, cookies, debug path exposure |
+| `mg-probe`       | bin      | `mg-probe`       | Passive posture plus optional `--active` marker/SQL/open-redirect probes |
 | `mg-fuzz`        | bin      | `mg-fuzz`        | Burp Intruder-style payload fuzzer: sniper / battering-ram / pitchfork / cluster-bomb |
 | `mg-replay`      | bin      | `mg-replay`      | Replay curl evidence from findings; verdict: still_vulnerable / appears_fixed |
 | `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with host pivoting, harness status, inspector, search, and session headers |

@@ -51,6 +51,10 @@ struct Args {
     #[arg(long)]
     passive_only: bool,
 
+    /// Enable low-volume active endpoint probes from crawl endpoints.json
+    #[arg(long)]
+    active: bool,
+
     /// Re-run even if probe-report.json is fresh (always overwrites)
     #[arg(long)]
     force: bool,
@@ -114,6 +118,13 @@ async fn main() -> Result<()> {
         .default_headers(default_headers)
         .build()
         .context("build HTTP client")?;
+    let active_client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(args.timeout_ms))
+        .user_agent("mg-probe/0.1 (active endpoint checker)")
+        .default_headers(session::get_auth_headers(&eng).await?)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("build active HTTP client")?;
 
     // load and parse the recon summary
     let raw = std::fs::read_to_string(&summary_path).context("read summary.json")?;
@@ -176,6 +187,17 @@ async fn main() -> Result<()> {
                 let mut html_issues = checks::check_html_files(&crawl_host_dir, host, &index);
                 all_issues.append(&mut html_issues);
             }
+            if args.active {
+                let mut active_issues = checks::check_active_endpoint_params(
+                    &active_client,
+                    &base_url,
+                    host,
+                    &crawl_host_dir,
+                    rate,
+                )
+                .await;
+                all_issues.append(&mut active_issues);
+            }
         }
     }
 
@@ -195,9 +217,10 @@ async fn main() -> Result<()> {
         "mg-probe",
         &eng.meta.target,
         Some(&format!(
-            "hosts={} issues={} auth_headers={}",
+            "hosts={} issues={} active={} auth_headers={}",
             http_hosts.len(),
             all_issues.len(),
+            args.active,
             auth_header_count
         )),
     );

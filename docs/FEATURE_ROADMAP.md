@@ -97,7 +97,9 @@ Features:
 Current-feature improvements:
 
 - Keep `mg-crawl` robots and rate-limit behavior, but add better parser coverage.
-- Keep `mg-probe` semi-active checks bounded and scope-aware.
+- Keep `mg-probe` semi-active checks bounded and scope-aware. Started with
+  `--active` reflected-marker, single-quote SQL error, and no-follow open
+  redirect probes from crawler endpoints.
 
 ## P1: OOB And Blind Testing
 

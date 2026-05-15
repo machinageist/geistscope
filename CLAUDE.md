@@ -29,7 +29,7 @@ geistscope/
 │   ├── mg-recon/          # bin: 4-stage recon orchestrator
 │   ├── ai-prioritize/     # bin: LLM-ranked attack surface
 │   ├── mg-crawl/          # bin: BFS crawler + JS secret extraction
-│   ├── mg-probe/          # bin: passive security posture checker
+│   ├── mg-probe/          # bin: passive posture + optional active endpoint checks
 │   ├── mg-fuzz/           # bin: Burp Intruder-style payload fuzzer
 │   ├── mg-replay/         # bin: Burp Repeater-style finding verification
 │   └── mg-harness/        # lib+bin: scoped AI/TUI endpoint dispatcher

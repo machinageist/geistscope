@@ -12,9 +12,12 @@
  *******************************************************************/
 
 use std::collections::HashSet;
+use std::path::Path;
+use std::time::Duration;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use engagement::Severity;
 
@@ -27,6 +30,13 @@ pub struct ProbeIssue {
     pub title: String,
     pub detail: String,
     pub evidence: String,
+}
+
+// Endpoint row loaded from mg-crawl endpoints.json
+#[derive(Debug, Clone, Deserialize)]
+struct CrawlEndpoint {
+    path: String,
+    source_url: String,
 }
 
 impl ProbeIssue {
@@ -341,6 +351,38 @@ const DEBUG_PATHS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+const MAX_ACTIVE_ENDPOINTS: usize = 80;
+const MAX_ACTIVE_REQUESTS: usize = 240;
+const XSS_MARKER: &str = "geist-xss-probe";
+const SQLI_MARKER: &str = "'";
+const OPEN_REDIRECT_TARGET: &str = "https://example.com/geistscope-open-redirect";
+const REDIRECT_PARAMS: &[&str] = &[
+    "url",
+    "uri",
+    "next",
+    "redirect",
+    "redirect_url",
+    "redirect_uri",
+    "return",
+    "return_to",
+    "continue",
+    "target",
+    "dest",
+    "destination",
+];
+const DB_ERROR_PATTERNS: &[&str] = &[
+    "SQLSTATE[",
+    "You have an error in your SQL syntax",
+    "Warning: mysql_",
+    "pg_query():",
+    "PostgreSQL query failed",
+    "unterminated quoted string",
+    "Microsoft OLE DB Provider for SQL Server",
+    "SQLite/JDBCDriver",
+    "sqlite3.OperationalError",
+    "ORA-",
+];
+
 // Probe each known debug/exposure path; record any that return 200 or 403
 pub async fn check_exposed_paths(client: &Client, base_url: &str, host: &str) -> Vec<ProbeIssue> {
     let base = base_url.trim_end_matches('/');
@@ -366,6 +408,235 @@ pub async fn check_exposed_paths(client: &Client, base_url: &str, host: &str) ->
     }
 
     issues
+}
+
+// Run low-volume active probes against crawled endpoint query parameters
+pub async fn check_active_endpoint_params(
+    client: &Client,
+    base_url: &str,
+    host: &str,
+    crawl_host_dir: &Path,
+    rate: Duration,
+) -> Vec<ProbeIssue> {
+    let endpoints = load_crawl_endpoints(crawl_host_dir);
+    let mut issues = Vec::new();
+    let mut requests = 0usize;
+    let base = match Url::parse(base_url) {
+        Ok(base) => base,
+        Err(_) => return issues,
+    };
+
+    for endpoint in endpoints.iter().take(MAX_ACTIVE_ENDPOINTS) {
+        let Some(url) = endpoint_url(&base, &endpoint.path) else {
+            continue;
+        };
+        let params = query_param_names(&url);
+        for param in params {
+            if requests >= MAX_ACTIVE_REQUESTS {
+                return issues;
+            }
+
+            if let Some(issue) =
+                probe_reflected_marker(client, host, &url, &param, &endpoint.source_url).await
+            {
+                issues.push(issue);
+            }
+            requests += 1;
+            tokio::time::sleep(rate).await;
+
+            if requests >= MAX_ACTIVE_REQUESTS {
+                return issues;
+            }
+            if let Some(issue) =
+                probe_sql_error(client, host, &url, &param, &endpoint.source_url).await
+            {
+                issues.push(issue);
+            }
+            requests += 1;
+            tokio::time::sleep(rate).await;
+        }
+
+        for param in redirect_params_for(&url) {
+            if requests >= MAX_ACTIVE_REQUESTS {
+                return issues;
+            }
+            if let Some(issue) =
+                probe_open_redirect(client, &base, host, &url, param, &endpoint.source_url).await
+            {
+                issues.push(issue);
+            }
+            requests += 1;
+            tokio::time::sleep(rate).await;
+        }
+    }
+
+    issues
+}
+
+// Load crawler endpoint rows from endpoints.json
+fn load_crawl_endpoints(crawl_host_dir: &Path) -> Vec<CrawlEndpoint> {
+    let path = crawl_host_dir.join("endpoints.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+// Resolve one crawler endpoint path against a base URL
+fn endpoint_url(base: &Url, path: &str) -> Option<Url> {
+    if let Ok(url) = Url::parse(path) {
+        return Some(url);
+    }
+    base.join(path).ok()
+}
+
+// Return unique query parameter names
+fn query_param_names(url: &Url) -> Vec<String> {
+    let mut seen = HashSet::new();
+    url.query_pairs()
+        .filter_map(|(key, _)| {
+            let key = key.to_string();
+            seen.insert(key.clone()).then_some(key)
+        })
+        .collect()
+}
+
+// Return redirect parameter candidates for a URL
+fn redirect_params_for(url: &Url) -> Vec<&'static str> {
+    let existing = query_param_names(url);
+    let existing_redirects: Vec<&'static str> = REDIRECT_PARAMS
+        .iter()
+        .copied()
+        .filter(|param| existing.iter().any(|key| key.eq_ignore_ascii_case(param)))
+        .collect();
+    if !existing_redirects.is_empty() {
+        return existing_redirects;
+    }
+
+    let path = url.path().to_lowercase();
+    if path.contains("redirect")
+        || path.contains("login")
+        || path.contains("oauth")
+        || path.contains("callback")
+    {
+        return vec!["next", "redirect_uri", "return_to"];
+    }
+    Vec::new()
+}
+
+// Return a mutated copy of a URL with one query value replaced
+fn mutated_param_url(url: &Url, param: &str, value: &str) -> Url {
+    let mut mutated = url.clone();
+    let mut pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(key, val)| {
+            if key == param {
+                (key.to_string(), value.to_string())
+            } else {
+                (key.to_string(), val.to_string())
+            }
+        })
+        .collect();
+    if !pairs.iter().any(|(key, _)| key == param) {
+        pairs.push((param.to_string(), value.to_string()));
+    }
+    mutated.query_pairs_mut().clear().extend_pairs(pairs);
+    mutated
+}
+
+// Probe one parameter with a harmless marker and report reflection
+async fn probe_reflected_marker(
+    client: &Client,
+    host: &str,
+    url: &Url,
+    param: &str,
+    source_url: &str,
+) -> Option<ProbeIssue> {
+    let mutated = mutated_param_url(url, param, XSS_MARKER);
+    let body = fetch_body(client, mutated.as_str()).await?;
+    if !body.contains(XSS_MARKER) {
+        return None;
+    }
+    Some(ProbeIssue {
+        check: "active-reflection".into(),
+        host: host.into(),
+        severity: "medium".into(),
+        title: format!("Reflected input marker in parameter '{param}'"),
+        detail: "A harmless marker was reflected in the response. This is not an execution proof, but it is a candidate reflected XSS or HTML injection sink.".into(),
+        evidence: format!("GET {mutated}\nsource: {source_url}\nmarker: {XSS_MARKER}"),
+    })
+}
+
+// Probe one parameter with a single quote and report database errors
+async fn probe_sql_error(
+    client: &Client,
+    host: &str,
+    url: &Url,
+    param: &str,
+    source_url: &str,
+) -> Option<ProbeIssue> {
+    let mutated = mutated_param_url(url, param, SQLI_MARKER);
+    let body = fetch_body(client, mutated.as_str()).await?;
+    let pattern = db_error_match(&body)?;
+    Some(ProbeIssue {
+        check: "active-sqli-error".into(),
+        host: host.into(),
+        severity: "high".into(),
+        title: format!("Database error after single-quote probe in '{param}'"),
+        detail: "A single-quote probe caused a database error string in the response. No UNION, stacked-query, or destructive payloads were sent.".into(),
+        evidence: format!("GET {mutated}\nsource: {source_url}\nmatched: {pattern}"),
+    })
+}
+
+// Probe one redirect parameter without following the redirect
+async fn probe_open_redirect(
+    client: &Client,
+    base: &Url,
+    host: &str,
+    url: &Url,
+    param: &str,
+    source_url: &str,
+) -> Option<ProbeIssue> {
+    let mutated = mutated_param_url(url, param, OPEN_REDIRECT_TARGET);
+    let resp = client.get(mutated.as_str()).send().await.ok()?;
+    if !resp.status().is_redirection() {
+        return None;
+    }
+    let location = resp.headers().get("location")?.to_str().ok()?;
+    let destination = url.join(location).ok()?;
+    if !is_off_origin(base, &destination) {
+        return None;
+    }
+    Some(ProbeIssue {
+        check: "active-open-redirect".into(),
+        host: host.into(),
+        severity: "medium".into(),
+        title: format!("Open redirect candidate in parameter '{param}'"),
+        detail: "A redirect parameter accepted an off-origin URL. The active client did not follow the redirect.".into(),
+        evidence: format!(
+            "GET {mutated}\nsource: {source_url}\nLocation: {location}"
+        ),
+    })
+}
+
+// Fetch response body text for active probes
+async fn fetch_body(client: &Client, url: &str) -> Option<String> {
+    let resp = client.get(url).send().await.ok()?;
+    resp.text().await.ok()
+}
+
+// Return matched database error marker
+fn db_error_match(body: &str) -> Option<&'static str> {
+    let lower = body.to_lowercase();
+    DB_ERROR_PATTERNS
+        .iter()
+        .copied()
+        .find(|pattern| lower.contains(&pattern.to_lowercase()))
+}
+
+// Return true when a redirect destination leaves the original origin
+fn is_off_origin(base: &Url, destination: &Url) -> bool {
+    matches!(destination.scheme(), "http" | "https") && destination.host_str() != base.host_str()
 }
 
 // ── HTML content analysis ────────────────────────────────────────────────────
@@ -510,5 +781,42 @@ mod tests {
         let redacted = redact_set_cookie("session=secret-value; Path=/; HttpOnly");
         assert_eq!(redacted, "session=<redacted>; Path=/; HttpOnly");
         assert!(!redacted.contains("secret-value"));
+    }
+
+    #[test]
+    fn active_mutation_replaces_existing_query_param() {
+        let url = Url::parse("https://example.com/search?q=test&page=1").unwrap();
+        let mutated = mutated_param_url(&url, "q", "probe");
+        assert_eq!(
+            mutated.as_str(),
+            "https://example.com/search?q=probe&page=1"
+        );
+    }
+
+    #[test]
+    fn active_mutation_adds_missing_query_param() {
+        let url = Url::parse("https://example.com/login").unwrap();
+        let mutated = mutated_param_url(&url, "next", OPEN_REDIRECT_TARGET);
+        assert_eq!(
+            mutated.as_str(),
+            "https://example.com/login?next=https%3A%2F%2Fexample.com%2Fgeistscope-open-redirect"
+        );
+    }
+
+    #[test]
+    fn db_error_patterns_match_case_insensitively() {
+        assert_eq!(
+            db_error_match("fatal: unterminated quoted string at or near"),
+            Some("unterminated quoted string")
+        );
+    }
+
+    #[test]
+    fn off_origin_detects_external_redirects() {
+        let base = Url::parse("https://example.com").unwrap();
+        let same = Url::parse("https://example.com/path").unwrap();
+        let external = Url::parse("https://attacker.test/path").unwrap();
+        assert!(!is_off_origin(&base, &same));
+        assert!(is_off_origin(&base, &external));
     }
 }

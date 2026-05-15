@@ -43,6 +43,8 @@ Current coverage:
 - `mg-crawl` maps same-origin pages, JavaScript, forms, endpoints, and redacted
   secret candidates.
 - `mg-probe` checks headers, CORS, cookies, debug paths, and stack traces.
+  With `--active`, it also runs bounded harmless marker reflection, single-quote
+  SQL error, and no-follow open redirect checks against crawler endpoints.
 
 TUI browser target behavior:
 

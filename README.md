@@ -68,7 +68,7 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-recon`       | Orchestrates the full 4-stage recon pipeline        |
 | `ai-prioritize`  | LLM-ranked attack surface from recon data           |
 | `mg-crawl`       | BFS web crawler with JS secret/endpoint extraction  |
-| `mg-probe`       | Passive security posture checker                    |
+| `mg-probe`       | Passive posture checker with optional low-volume active endpoint probes |
 | `mg-fuzz`        | Burp Intruder-style HTTP fuzzer                     |
 | `mg-replay`      | Burp Repeater-style finding verification            |
 | `mg-tui`         | Ratatui dashboard/browser: engagements, hosts, findings, fuzz, logs, harness status, host pivoting, page rendering, inspector, search, and session headers |
