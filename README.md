@@ -74,6 +74,14 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-tui`         | Ratatui dashboard/browser: engagements, hosts, findings, fuzz, logs, harness status, host pivoting, page rendering, inspector, search, and session headers |
 | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls |
 
+Credential profiles are stored as environment-variable references, not raw
+secrets:
+
+```bash
+mg-engagement credentials-set acme-bounty --token-env MG_TOKEN
+mg-engagement credentials-test acme-bounty --url https://api.example.com/me
+```
+
 ## Core Libraries
 
 | Library | What it does |

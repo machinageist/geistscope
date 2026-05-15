@@ -43,7 +43,8 @@ Features:
 - HAR/Burp/Caido import into a request corpus.
 - "Send to replay", "Send to fuzz", "Create finding", and "Ask AI" actions.
 - Auth profiles for controlled test accounts and roles. Started with the
-  `session` crate for env-backed token headers and TUI browser use.
+  `session` crate, `mg-engagement` credential commands, harness `session.*`
+  endpoints, and TUI browser use.
 - Cookie/token redaction and storage outside model-visible context.
 - Keyboard-first workflow with stable panes and no layout jumps.
 

@@ -26,6 +26,10 @@ tool endpoints.
 | `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with host pivoting, harness status, inspector, search, and session headers |
 | `mg-harness`     | lib+bin  | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls                     |
 
+`mg-engagement credentials-set` writes `session.json` using env-var references
+only. `mg-harness session.get_headers` resolves headers for tools but returns
+redacted metadata to model-visible callers.
+
 ## Dependency graph
 
 ```

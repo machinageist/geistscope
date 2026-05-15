@@ -115,6 +115,8 @@ pub enum HarnessError {
     TimeFormat(#[from] time::error::Format),
     #[error("recon: {0}")]
     Recon(#[from] anyhow::Error),
+    #[error("session: {0}")]
+    Session(#[from] session::SessionError),
 }
 
 impl HarnessConfig {
@@ -188,6 +190,8 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "engagement.status" => handle_engagement_status(cfg, &invocation).await,
         "scope.check" => handle_scope_check(cfg, &invocation).await,
         "recon.run" => handle_recon_run(cfg, &invocation).await,
+        "session.set" => handle_session_set(cfg, &invocation).await,
+        "session.get_headers" => handle_session_get_headers(cfg, &invocation).await,
         "finding.read" => handle_finding_read(cfg, &invocation).await,
         "finding.create" => handle_finding_create(cfg, &invocation).await,
         _ => Ok(result_blocked(
@@ -236,6 +240,18 @@ pub fn registry() -> Vec<EndpointSpec> {
             risk: RiskClass::HighActive,
             implemented: true,
             description: "Run the scoped mg-recon pipeline after explicit confirmation.",
+        },
+        EndpointSpec {
+            name: "session.set",
+            risk: RiskClass::StateChange,
+            implemented: true,
+            description: "Store a redaction-safe session profile using environment-variable references.",
+        },
+        EndpointSpec {
+            name: "session.get_headers",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Resolve session auth headers and return only redacted header metadata.",
         },
         EndpointSpec {
             name: "crawl.run",
@@ -436,7 +452,10 @@ async fn handle_engagement_status(
         endpoint: invocation.endpoint.clone(),
         status: EndpointStatus::Ok,
         risk: RiskClass::ReadOnly,
-        summary: Some(format!("engagement {} status loaded", invocation.engagement)),
+        summary: Some(format!(
+            "engagement {} status loaded",
+            invocation.engagement
+        )),
         output_files: vec![display_path(&summary_path), display_path(&priorities_path)],
         evidence_refs: Vec::new(),
         redactions: BTreeMap::new(),
@@ -523,7 +542,10 @@ async fn handle_finding_read(
     let (markdown, truncated) = truncate_model_visible(&raw);
     let mut redactions = BTreeMap::new();
     if truncated {
-        redactions.insert("truncated_bytes".into(), raw.len().saturating_sub(markdown.len()));
+        redactions.insert(
+            "truncated_bytes".into(),
+            raw.len().saturating_sub(markdown.len()),
+        );
     }
 
     let _ = eng.audit(
@@ -649,6 +671,146 @@ async fn handle_recon_run(
     })
 }
 
+// Handle session.set
+async fn handle_session_set(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    reject_plaintext_secret_args(&invocation.args)?;
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let token_env = optional_string_opt(&invocation.args, "token_env")?;
+    let password_env = optional_string_opt(&invocation.args, "password_env")?;
+    let login_url = optional_string_opt(&invocation.args, "login_url")?;
+    let username = optional_string_opt(&invocation.args, "username")?;
+    let token_header = optional_string(&invocation.args, "token_header", "Authorization")?;
+    let token_prefix = optional_string(&invocation.args, "token_prefix", "Bearer")?;
+    let login_method = optional_string(
+        &invocation.args,
+        "login_method",
+        if token_env.is_some() { "token" } else { "form" },
+    )?;
+    validate_login_method(&login_method)?;
+
+    if token_env.is_none() && password_env.is_none() {
+        return Err(HarnessError::InvalidArgs(
+            "session.set requires token_env or password_env".into(),
+        ));
+    }
+    if password_env.is_some() && login_url.is_none() {
+        return Err(HarnessError::InvalidArgs(
+            "password_env requires login_url".into(),
+        ));
+    }
+
+    let config = session::SessionConfig {
+        username,
+        password_env,
+        login_url,
+        login_method: login_method.clone(),
+        token_header,
+        token_prefix,
+        token_env,
+        session_cookie: None,
+        token_refresh_url: optional_string_opt(&invocation.args, "token_refresh_url")?,
+        valid_until: None,
+    };
+    let path = session::save_session_config(&eng, &config)?;
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!("endpoint=session.set method={login_method}")),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::StateChange,
+        summary: Some(format!(
+            "stored {login_method} session profile for {}",
+            invocation.engagement
+        )),
+        output_files: vec![display_path(&path)],
+        evidence_refs: Vec::new(),
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "path": display_path(&path),
+            "login_method": login_method,
+            "has_token_env": config.token_env.is_some(),
+            "has_password_env": config.password_env.is_some(),
+            "has_login_url": config.login_url.is_some(),
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle session.get_headers
+async fn handle_session_get_headers(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    match session::load_session_config(&eng) {
+        Ok(_) => {}
+        Err(session::SessionError::NotConfigured) => {
+            return Ok(EndpointResult {
+                endpoint: invocation.endpoint.clone(),
+                status: EndpointStatus::Ok,
+                risk: RiskClass::ReadOnly,
+                summary: Some("no session profile configured".into()),
+                output_files: Vec::new(),
+                evidence_refs: Vec::new(),
+                redactions: BTreeMap::new(),
+                data: Some(json!({
+                    "configured": false,
+                    "headers": {},
+                    "header_count": 0,
+                })),
+                reason: None,
+                policy: None,
+            });
+        }
+        Err(err) => return Err(err.into()),
+    }
+
+    let headers = session::get_auth_headers_sync(&eng)?;
+    let redacted_headers: BTreeMap<String, String> = headers
+        .iter()
+        .map(|(name, _)| (name.as_str().to_string(), "<redacted>".to_string()))
+        .collect();
+    let header_count = redacted_headers.len();
+    let mut redactions = BTreeMap::new();
+    redactions.insert("headers".into(), header_count);
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!(
+            "endpoint=session.get_headers header_count={}",
+            header_count
+        )),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!(
+            "resolved {} redacted auth header(s)",
+            redacted_headers.len()
+        )),
+        output_files: Vec::new(),
+        evidence_refs: Vec::new(),
+        redactions,
+        data: Some(json!({
+            "configured": true,
+            "headers": redacted_headers,
+            "header_count": header_count,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
 // Load engagement by name
 fn load_engagement(cfg: &HarnessConfig, name: &str) -> Result<Engagement, HarnessError> {
     Ok(Engagement::load_named(&cfg.engagements_dir, name)?)
@@ -682,6 +844,39 @@ fn optional_string(args: &Value, key: &str, default: &str) -> Result<String, Har
             .ok_or_else(|| HarnessError::InvalidArgs(format!("arg `{key}` must be a string"))),
         None => Ok(default.to_string()),
     }
+}
+
+// Extract an optional string argument as Option
+fn optional_string_opt(args: &Value, key: &str) -> Result<Option<String>, HarnessError> {
+    match args.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_string()))
+            .ok_or_else(|| HarnessError::InvalidArgs(format!("arg `{key}` must be a string"))),
+    }
+}
+
+// Validate supported session login methods
+fn validate_login_method(method: &str) -> Result<(), HarnessError> {
+    match method {
+        "token" | "form" | "oauth_client_credentials" => Ok(()),
+        other => Err(HarnessError::InvalidArgs(format!(
+            "unsupported login method `{other}`"
+        ))),
+    }
+}
+
+// Reject direct plaintext secret fields in model-visible invocations
+fn reject_plaintext_secret_args(args: &Value) -> Result<(), HarnessError> {
+    for key in ["password", "token", "api_key", "session_cookie"] {
+        if args.get(key).is_some() {
+            return Err(HarnessError::InvalidArgs(format!(
+                "arg `{key}` is not allowed; use an environment-variable reference"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // Extract an optional bool argument
@@ -1074,14 +1269,22 @@ mod tests {
             "target": "https://api.example.com/v1/users/2"
         });
         let create_result = dispatch(&cfg, create).await;
-        let finding_id = create_result.data.unwrap()["id"].as_str().unwrap().to_string();
+        let finding_id = create_result.data.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         let mut read = invocation("finding.read");
         read.args = json!({ "finding_id": finding_id });
         let read_result = dispatch(&cfg, read).await;
         assert_eq!(read_result.status, EndpointStatus::Ok);
         let data = read_result.data.unwrap();
-        assert!(data["markdown"].as_str().unwrap().contains("Readable finding"));
+        assert!(
+            data["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("Readable finding")
+        );
         assert_eq!(data["truncated"], false);
     }
 
@@ -1106,6 +1309,65 @@ mod tests {
         let result = dispatch(&cfg, inv).await;
         assert_eq!(result.status, EndpointStatus::Blocked);
         assert_eq!(result.policy.as_deref(), Some("scope.default_deny"));
+    }
+
+    #[tokio::test]
+    async fn session_set_writes_env_reference_profile() {
+        let cfg = test_config();
+        let mut inv = invocation("session.set");
+        inv.confirmed = true;
+        inv.args = json!({
+            "token_env": "MG_HARNESS_TOKEN",
+            "token_header": "Authorization",
+            "token_prefix": "Bearer"
+        });
+
+        let result = dispatch(&cfg, inv).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let path = result.output_files.first().unwrap();
+        let raw = fs::read_to_string(path).unwrap();
+        assert!(raw.contains("\"token_env\": \"MG_HARNESS_TOKEN\""));
+        assert!(!raw.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn session_set_rejects_plaintext_secret_args() {
+        let cfg = test_config();
+        let mut inv = invocation("session.set");
+        inv.confirmed = true;
+        inv.args = json!({
+            "token": "secret",
+            "token_env": "MG_HARNESS_TOKEN"
+        });
+
+        let result = dispatch(&cfg, inv).await;
+
+        assert_eq!(result.status, EndpointStatus::Error);
+        assert!(result.reason.unwrap().contains("not allowed"));
+    }
+
+    #[tokio::test]
+    async fn session_get_headers_redacts_values() {
+        let cfg = test_config();
+        let env_name = format!("MG_HARNESS_TOKEN_{}", std::process::id());
+        // Set a uniquely named process env var for this header-resolution test.
+        unsafe {
+            std::env::set_var(&env_name, "secret-token-value");
+        }
+        let mut set = invocation("session.set");
+        set.confirmed = true;
+        set.args = json!({ "token_env": env_name });
+        let set_result = dispatch(&cfg, set).await;
+        assert_eq!(set_result.status, EndpointStatus::Ok);
+
+        let result = dispatch(&cfg, invocation("session.get_headers")).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        assert_eq!(data["configured"], true);
+        assert_eq!(data["headers"]["authorization"], "<redacted>");
+        assert_eq!(data["header_count"], 1);
     }
 
     #[test]

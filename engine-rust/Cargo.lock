@@ -655,6 +655,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",
@@ -1599,6 +1600,7 @@ dependencies = [
  "mg-recon",
  "serde",
  "serde_json",
+ "session",
  "thiserror",
  "time",
  "tokio",

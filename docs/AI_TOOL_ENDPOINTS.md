@@ -98,6 +98,8 @@ Errors should be explicit:
 | `scope.check` | `read_only` | `engagement` crate | Decide if target/action is allowed |
 | `audit.append` | `read_only` | `engagement` crate | Persist tool/AI activity |
 | `recon.run` | `high_active` | `mg-recon` | Run subdomain, fingerprint, scan summary |
+| `session.set` | `state_change` | `session` crate | Store env-var credential references after confirmation |
+| `session.get_headers` | `read_only` | `session` crate | Resolve auth headers and return redacted header metadata |
 | `crawl.run` | `low_active` | `mg-crawl` | Crawl scoped URLs |
 | `probe.run` | `low_active` | `mg-probe` | Passive/semi-active posture checks |
 | `traffic.import` | `read_only` | planned | Import HAR/Burp/Caido/proxy logs |
@@ -167,7 +169,8 @@ local model, apply the same schema validation in the harness before dispatch.
 2. Add a local `mg-harness` crate that dispatches current CLI/library functions.
    In progress: `endpoint.registry`, `engagement.open`, `scope.check`, and
    confirmed `recon.run`, scoped `finding.create`, `engagement.status`, and
-   bounded `finding.read` are implemented.
+   bounded `finding.read` are implemented. Session profile write/read endpoints
+   are also implemented with redacted output.
 3. Add `--json`/machine-output parity where current binaries lack it.
 4. Build TUI actions on top of the same dispatcher.
 5. Add a model-provider adapter that can produce endpoint requests only.

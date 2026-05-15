@@ -68,6 +68,38 @@ pub enum Command {
         #[arg(long, default_value = "medium")]
         severity: String,
     },
+    /// Store an auth/session profile for an engagement
+    CredentialsSet {
+        name: String,
+        /// Username for form login flows
+        #[arg(long)]
+        username: Option<String>,
+        /// Environment variable containing the password
+        #[arg(long)]
+        password_env: Option<String>,
+        /// Login endpoint for form login flows
+        #[arg(long)]
+        login_url: Option<String>,
+        /// Environment variable containing a static token
+        #[arg(long)]
+        token_env: Option<String>,
+        /// HTTP header for static tokens
+        #[arg(long, default_value = "Authorization")]
+        token_header: String,
+        /// Token prefix such as Bearer; use an empty string for raw tokens
+        #[arg(long, default_value = "Bearer")]
+        token_prefix: String,
+        /// Login method: token|form|oauth_client_credentials
+        #[arg(long)]
+        login_method: Option<String>,
+    },
+    /// Test the configured auth/session profile against an in-scope URL
+    CredentialsTest {
+        name: String,
+        /// In-scope URL to request with configured auth headers
+        #[arg(long)]
+        url: String,
+    },
 }
 
 pub fn get_args() -> Args {

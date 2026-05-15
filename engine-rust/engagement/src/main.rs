@@ -7,9 +7,45 @@ mod cli;
 
 use anyhow::{Context, Result, anyhow};
 use engagement::{Engagement, EngagementMeta, Finding, Severity, Status};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SessionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    password_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    login_url: Option<String>,
+    #[serde(default)]
+    login_method: String,
+    #[serde(default)]
+    token_header: String,
+    #[serde(default)]
+    token_prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_cookie: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token_refresh_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    valid_until: Option<String>,
+}
+
+struct CredentialsSetInput {
+    username: Option<String>,
+    password_env: Option<String>,
+    login_url: Option<String>,
+    token_env: Option<String>,
+    token_header: String,
+    token_prefix: String,
+    login_method: Option<String>,
+}
 
 fn parse_severity(s: &str) -> Result<Severity> {
     match s.to_lowercase().as_str() {
@@ -20,6 +56,127 @@ fn parse_severity(s: &str) -> Result<Severity> {
         "critical" => Ok(Severity::Critical),
         other => Err(anyhow!("unknown severity: {other}")),
     }
+}
+
+fn cmd_credentials_set(root: &Path, name: &str, input: CredentialsSetInput) -> Result<()> {
+    let e = Engagement::load_named(root, name)?;
+    if input.token_env.is_none() && input.password_env.is_none() {
+        return Err(anyhow!(
+            "provide --token-env for token auth or --password-env with --login-url for form auth"
+        ));
+    }
+    if input.password_env.is_some() && input.login_url.is_none() {
+        return Err(anyhow!("--password-env requires --login-url"));
+    }
+
+    let method = input.login_method.unwrap_or_else(|| {
+        if input.token_env.is_some() {
+            "token".into()
+        } else {
+            "form".into()
+        }
+    });
+    validate_login_method(&method)?;
+
+    let config = SessionConfig {
+        username: input.username,
+        password_env: input.password_env,
+        login_url: input.login_url,
+        login_method: method.clone(),
+        token_header: input.token_header,
+        token_prefix: input.token_prefix,
+        token_env: input.token_env,
+        session_cookie: None,
+        token_refresh_url: None,
+        valid_until: None,
+    };
+    let path = e.root.join("session.json");
+    let json = serde_json::to_string_pretty(&config)?;
+    std::fs::write(&path, json)?;
+    let _ = e.audit(
+        "mg-engagement",
+        &e.meta.target,
+        Some(&format!("credentials-set method={method}")),
+    );
+    println!(
+        "stored {method} credential profile for {name} at {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn cmd_credentials_test(root: &Path, name: &str, test_url: &str) -> Result<()> {
+    let e = Engagement::load_named(root, name)?;
+    ensure_url_in_scope(&e, test_url)?;
+    let config = load_session_config(&e)?;
+    let headers = build_auth_headers(&config)?;
+    let client = reqwest::blocking::Client::builder()
+        .default_headers(headers)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()?;
+    let response = client.get(test_url).send()?;
+    let status = response.status();
+    let _ = e.audit(
+        "mg-engagement",
+        test_url,
+        Some(&format!("credentials-test status={}", status.as_u16())),
+    );
+    if status.as_u16() < 400 {
+        println!("session ok: {} {}", status.as_u16(), test_url);
+        Ok(())
+    } else {
+        println!("session failed: {} {}", status.as_u16(), test_url);
+        std::process::exit(2);
+    }
+}
+
+fn validate_login_method(method: &str) -> Result<()> {
+    match method {
+        "token" | "form" | "oauth_client_credentials" => Ok(()),
+        other => Err(anyhow!("unsupported login method: {other}")),
+    }
+}
+
+fn load_session_config(engagement: &Engagement) -> Result<SessionConfig> {
+    let path = engagement.root.join("session.json");
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("read session config {}", path.display()))?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+fn build_auth_headers(config: &SessionConfig) -> Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    if let Some(token_env) = &config.token_env {
+        let token = std::env::var(token_env)
+            .with_context(|| format!("environment variable {token_env} is not set"))?;
+        let header_name = HeaderName::from_bytes(config.token_header.as_bytes())?;
+        let header_value = if config.token_prefix.is_empty() {
+            token
+        } else {
+            format!("{} {}", config.token_prefix, token)
+        };
+        headers.insert(header_name, HeaderValue::from_str(&header_value)?);
+    } else {
+        return Err(anyhow!(
+            "credentials-test currently supports token profiles; form/OAuth refresh is pending"
+        ));
+    }
+    Ok(headers)
+}
+
+fn ensure_url_in_scope(engagement: &Engagement, raw_url: &str) -> Result<()> {
+    let url = reqwest::Url::parse(raw_url).with_context(|| format!("invalid URL {raw_url}"))?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("URL does not contain a host: {raw_url}"))?;
+    let scope = engagement.scope()?;
+    if !scope.is_in_scope(host) {
+        return Err(anyhow!(
+            "target {host} is OUT OF SCOPE for engagement {}; refusing credential test",
+            engagement.meta.name
+        ));
+    }
+    Ok(())
 }
 
 fn cmd_init(
@@ -211,5 +368,107 @@ fn main() -> Result<()> {
             target,
             severity,
         } => cmd_finding(root, &name, title, target, &severity),
+        cli::Command::CredentialsSet {
+            name,
+            username,
+            password_env,
+            login_url,
+            token_env,
+            token_header,
+            token_prefix,
+            login_method,
+        } => cmd_credentials_set(
+            root,
+            &name,
+            CredentialsSetInput {
+                username,
+                password_env,
+                login_url,
+                token_env,
+                token_header,
+                token_prefix,
+                login_method,
+            },
+        ),
+        cli::Command::CredentialsTest { name, url } => cmd_credentials_test(root, &name, &url),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engagement::{Engagement, EngagementMeta};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn tmp_parent() -> std::path::PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "mg-engagement-session-test-{}-{n}",
+            std::process::id(),
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn test_engagement(parent: &Path) -> Engagement {
+        let meta = EngagementMeta {
+            name: "acme".into(),
+            target: "example.com".into(),
+            created_at: String::new(),
+            platform: None,
+            url: None,
+            tags: Vec::new(),
+        };
+        Engagement::init(parent, meta).unwrap()
+    }
+
+    #[test]
+    fn credentials_set_writes_env_reference_only() {
+        let root = tmp_parent();
+        let engagement = test_engagement(&root);
+
+        cmd_credentials_set(
+            &root,
+            "acme",
+            CredentialsSetInput {
+                username: None,
+                password_env: None,
+                login_url: None,
+                token_env: Some("MG_TOKEN".into()),
+                token_header: "Authorization".into(),
+                token_prefix: "Bearer".into(),
+                login_method: None,
+            },
+        )
+        .unwrap();
+
+        let raw = std::fs::read_to_string(engagement.root.join("session.json")).unwrap();
+        assert!(raw.contains("\"token_env\": \"MG_TOKEN\""));
+        assert!(!raw.contains("secret"));
+    }
+
+    #[test]
+    fn credentials_set_requires_usable_profile() {
+        let root = tmp_parent();
+        test_engagement(&root);
+
+        let err = cmd_credentials_set(
+            &root,
+            "acme",
+            CredentialsSetInput {
+                username: None,
+                password_env: None,
+                login_url: None,
+                token_env: None,
+                token_header: "Authorization".into(),
+                token_prefix: "Bearer".into(),
+                login_method: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("provide --token-env"));
     }
 }
