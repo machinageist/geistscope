@@ -61,6 +61,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 - 2026-05-15: Wired the `mg-tui` Browser tab into the new `session` library for selected engagements. Browser GET and form POST requests now apply env-backed auth headers from `session.json` when present, show only a redacted auth status in the inspector, and stop navigation with a visible error if a configured session cannot resolve its environment variables. This starts the tool-integration side of §3 for the TUI browser; `mg-crawl`, `mg-fuzz`, form login, OAuth refresh, and CLI credential commands remain pending.
 - 2026-05-15: Added the first dashboard-to-browser pivot. Pressing Enter on a selected Hosts row now opens that host in the Browser tab, preferring HTTPS when 443 is present and falling back to HTTP for port-80-only hosts. This starts the P1 natural workflow of pivoting from host inventory into traffic/browser inspection; request corpus navigation, replay/fuzz pivots, and finding pivots remain pending.
 - 2026-05-15: Implemented the §3 credential CLI and harness session endpoints. `mg-engagement credentials-set` writes token/form env-var references to `session.json`, `credentials-test` sends a scoped token-auth test request, `mg-harness session.set` stores profiles only after confirmation, and `session.get_headers` resolves auth headers while returning only redacted metadata. Form login execution, OAuth refresh, encrypted cookie/token material, and crawl/fuzz/probe header injection remain pending.
+- 2026-05-15: Wired env-backed session headers into the network tools. `http-client` now accepts default headers, `mg-crawl` loads session headers before crawling, and `mg-probe`/`mg-fuzz` apply the same headers through their reqwest clients while logging only header counts. `mg-fuzz` still lets explicit template headers override the client defaults. Transparent 401 re-auth and non-token form/OAuth refresh remain pending.
 
 ---
 
@@ -794,8 +795,8 @@ New binaries must be added to the install loop in `README.md` and the wiki.
 - [ ] `mg-harness` serving all endpoints in §2 with scope enforcement and audit logging
 - [ ] `session` lib with form, token, and OAuth credential flows
 - [x] `mg-engagement credentials-set / credentials-test` subcommands
-- [ ] `mg-crawl` using session headers transparently
-- [ ] `mg-fuzz` injecting session headers automatically
+- [x] `mg-crawl` using session headers transparently
+- [x] `mg-fuzz` injecting session headers automatically
 - [ ] `mg-probe --active` with all check modules in §4
 - [ ] `payload-engine` crate with stack-aware payload selection
 - [ ] `mg-fuzz --context-aware` using payload-engine

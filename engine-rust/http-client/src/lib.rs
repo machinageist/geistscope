@@ -9,6 +9,7 @@
  *******************************************************************/
 
 use reqwest::Response;
+use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -39,6 +40,7 @@ pub struct ClientConfig {
     pub rotate_ua: bool,
     /// Max redirects to follow; 0 = don't follow
     pub max_redirects: usize,
+    pub default_headers: HeaderMap,
 }
 
 impl Default for ClientConfig {
@@ -49,6 +51,7 @@ impl Default for ClientConfig {
             max_retries: 3,
             rotate_ua: true,
             max_redirects: 10,
+            default_headers: HeaderMap::new(),
         }
     }
 }
@@ -66,6 +69,7 @@ impl Client {
         let inner = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.timeout_ms))
             .redirect(reqwest::redirect::Policy::limited(config.max_redirects))
+            .default_headers(config.default_headers.clone())
             .build()?;
         Ok(Self {
             inner,
@@ -87,7 +91,9 @@ impl Client {
 
     // Sleep until the rate-limit interval has elapsed since the last request
     async fn throttle(&self) {
-        let Some(min_ms) = self.config.rate_limit_ms else { return };
+        let Some(min_ms) = self.config.rate_limit_ms else {
+            return;
+        };
         let min = Duration::from_millis(min_ms);
         let mut last = self.last_req.lock().await;
         let elapsed = last.elapsed();
@@ -102,7 +108,13 @@ impl Client {
         self.throttle().await;
         let mut attempt = 0u32;
         loop {
-            match self.inner.get(url).header("User-Agent", self.next_ua()).send().await {
+            match self
+                .inner
+                .get(url)
+                .header("User-Agent", self.next_ua())
+                .send()
+                .await
+            {
                 Ok(r) => return Ok(r),
                 Err(_) if attempt < self.config.max_retries => {
                     attempt += 1;
@@ -143,7 +155,11 @@ mod tests {
     use super::*;
 
     fn test_client(rotate: bool) -> Client {
-        Client::new(ClientConfig { rotate_ua: rotate, ..Default::default() }).unwrap()
+        Client::new(ClientConfig {
+            rotate_ua: rotate,
+            ..Default::default()
+        })
+        .unwrap()
     }
 
     #[test]

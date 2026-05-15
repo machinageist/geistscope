@@ -154,14 +154,20 @@ async fn main() -> Result<()> {
     let scheme = if args.no_tls { "http" } else { "https" };
     let port = args.port.map(|p| format!(":{p}")).unwrap_or_default();
     let base_url = format!("{scheme}://{host}{port}");
+    let default_headers = session::get_auth_headers(&eng)
+        .await
+        .context("load session auth headers")?;
+    let auth_header_count = default_headers.len();
 
     // build reqwest client
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(args.timeout_ms))
         .user_agent("mg-fuzz/0.1 (security research)")
         .danger_accept_invalid_certs(args.insecure)
+        .default_headers(default_headers)
         .build()
         .context("build HTTP client")?;
+    eprintln!("  auth headers applied: {auth_header_count}");
 
     let rate = Duration::from_millis(args.rate_ms);
     let ts = OffsetDateTime::now_utc()
@@ -237,8 +243,8 @@ async fn main() -> Result<()> {
         "mg-fuzz",
         &host,
         Some(&format!(
-            "requests={} interesting={}",
-            fuzz_report.total_requests, interesting_count
+            "requests={} interesting={} auth_headers={}",
+            fuzz_report.total_requests, interesting_count, auth_header_count
         )),
     );
 

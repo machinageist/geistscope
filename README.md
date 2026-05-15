@@ -82,6 +82,9 @@ mg-engagement credentials-set acme-bounty --token-env MG_TOKEN
 mg-engagement credentials-test acme-bounty --url https://api.example.com/me
 ```
 
+`mg-crawl`, `mg-probe`, `mg-fuzz`, and the TUI browser apply those headers when
+an engagement has a configured session profile.
+
 ## Core Libraries
 
 | Library | What it does |

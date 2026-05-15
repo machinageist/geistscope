@@ -88,19 +88,25 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+    let default_headers = session::get_auth_headers(&eng)
+        .await
+        .context("load session auth headers")?;
+    let auth_header_count = default_headers.len();
     let client = Client::new(ClientConfig {
         timeout_ms: args.timeout_ms,
         rate_limit_ms: rate_ms,
+        default_headers,
         ..Default::default()
     })
     .context("build HTTP client")?;
 
     eprintln!(
-        "mg-crawl: {} start URL(s), depth={}, rate={}ms, ignore-robots={}",
+        "mg-crawl: {} start URL(s), depth={}, rate={}ms, ignore-robots={}, auth_headers={}",
         args.urls.len(),
         args.depth,
         args.rate_ms,
-        args.ignore_robots
+        args.ignore_robots,
+        auth_header_count
     );
 
     let cfg = crawl::CrawlConfig {
@@ -119,7 +125,12 @@ async fn main() -> Result<()> {
     let _ = eng.audit(
         "mg-crawl",
         &target_summary,
-        Some(&format!("depth={} urls={}", args.depth, args.urls.len())),
+        Some(&format!(
+            "depth={} urls={} auth_headers={}",
+            args.depth,
+            args.urls.len(),
+            auth_header_count
+        )),
     );
 
     Ok(())

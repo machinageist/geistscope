@@ -102,11 +102,16 @@ async fn main() -> Result<()> {
 
     // build scope checker for filtering which hosts to probe
     let scope = eng.scope().context("load scope")?;
+    let default_headers = session::get_auth_headers(&eng)
+        .await
+        .context("load session auth headers")?;
+    let auth_header_count = default_headers.len();
 
     // build reqwest client with configured timeout and rate limiting
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(args.timeout_ms))
         .user_agent("mg-probe/0.1 (security posture scanner)")
+        .default_headers(default_headers)
         .build()
         .context("build HTTP client")?;
 
@@ -120,7 +125,11 @@ async fn main() -> Result<()> {
         .filter(|h| h.http_accessible && scope.is_in_scope(&h.hostname))
         .collect();
 
-    eprintln!("mg-probe: {} HTTP-accessible hosts", http_hosts.len());
+    eprintln!(
+        "mg-probe: {} HTTP-accessible hosts, auth_headers={}",
+        http_hosts.len(),
+        auth_header_count
+    );
 
     let mut all_issues = Vec::new();
     let rate = Duration::from_millis(args.rate_ms);
@@ -186,9 +195,10 @@ async fn main() -> Result<()> {
         "mg-probe",
         &eng.meta.target,
         Some(&format!(
-            "hosts={} issues={}",
+            "hosts={} issues={} auth_headers={}",
             http_hosts.len(),
-            all_issues.len()
+            all_issues.len(),
+            auth_header_count
         )),
     );
 

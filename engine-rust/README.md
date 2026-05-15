@@ -28,7 +28,8 @@ tool endpoints.
 
 `mg-engagement credentials-set` writes `session.json` using env-var references
 only. `mg-harness session.get_headers` resolves headers for tools but returns
-redacted metadata to model-visible callers.
+redacted metadata to model-visible callers. `mg-crawl`, `mg-probe`, `mg-fuzz`,
+and `mg-tui` apply configured session headers through their HTTP clients.
 
 ## Dependency graph
 

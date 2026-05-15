@@ -98,10 +98,11 @@ activity, and browser inspection with page search plus redacted response
 headers/cookies. When an engagement is selected, browser requests can apply the
 env-backed auth headers configured in `session.json` without rendering secret
 values. `mg-engagement credentials-set/test` and harness `session.*` endpoints
-manage those profiles without exposing secret values. Host rows can pivot
-directly into the Browser tab. The next UI step is not a marketing GUI; it is a
-TUI bug-hunting browser with traffic navigation, replay/fuzz actions, scope
-visibility, and AI-assisted next-test suggestions.
+manage those profiles without exposing secret values. `mg-crawl`, `mg-probe`,
+`mg-fuzz`, and the TUI browser now apply configured session headers. Host rows
+can pivot directly into the Browser tab. The next UI step is not a marketing
+GUI; it is a TUI bug-hunting browser with traffic navigation, replay/fuzz
+actions, scope visibility, and AI-assisted next-test suggestions.
 
 **Next engine layer:** `mg-harness`, a local endpoint dispatcher that lets the
 AI call scoped tools through typed schemas. The first slice exists with

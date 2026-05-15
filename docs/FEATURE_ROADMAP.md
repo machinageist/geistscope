@@ -44,7 +44,7 @@ Features:
 - "Send to replay", "Send to fuzz", "Create finding", and "Ask AI" actions.
 - Auth profiles for controlled test accounts and roles. Started with the
   `session` crate, `mg-engagement` credential commands, harness `session.*`
-  endpoints, and TUI browser use.
+  endpoints, TUI browser use, and session header injection for crawl/probe/fuzz.
 - Cookie/token redaction and storage outside model-visible context.
 - Keyboard-first workflow with stable panes and no layout jumps.
 
