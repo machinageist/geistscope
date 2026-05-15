@@ -1639,6 +1639,7 @@ dependencies = [
  "mg-recopilot",
  "mg-report",
  "payload-engine",
+ "security-graph",
  "serde",
  "serde_json",
  "session",
@@ -2681,6 +2682,20 @@ checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "security-graph"
+version = "0.1.0"
+dependencies = [
+ "engagement",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "time",
+ "url",
 ]
 
 [[package]]

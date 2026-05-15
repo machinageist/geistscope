@@ -101,7 +101,11 @@ Current-feature improvements:
 Goal: move from disconnected tool artifacts toward persistent operational
 intelligence without breaking the current local workspace model.
 
-Status: planned.
+Status: started. `security-graph` now provides typed node/edge records,
+deterministic IDs, local JSONL storage under each engagement, ingestion from
+recon summaries, crawl endpoint inventories, probe reports, and finding
+frontmatter, plus harness endpoints for ingestion, summary, and bounded
+neighbor reads.
 
 Features:
 
@@ -109,8 +113,9 @@ Features:
   cookies, APIs, findings, technologies, and replay chains.
 - Edge schema for calls, authenticates_to, references, discovered_by,
   vulnerable_to, related_to, and replayed_from.
-- Local deterministic JSONL graph storage under each engagement.
+- Local deterministic JSONL graph storage under each engagement. Started.
 - Harness endpoints for graph ingestion, summary, and bounded neighbor reads.
+  Started.
 - Adapter boundary for future Postgres plus graph/vector extensions.
 
 Current-feature improvements:

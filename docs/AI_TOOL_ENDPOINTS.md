@@ -109,6 +109,9 @@ Errors should be explicit:
 | `fuzzer.run` | `high_active` | `mg-fuzz` | Run bounded payload tests |
 | `oob.allocate` | `read_only` | planned Interactsh client | Create callback token/domain |
 | `oob.poll` | `passive_remote` | planned Interactsh client | Fetch callback evidence |
+| `graph.ingest` | `read_only` | `security-graph` | Ingest local engagement artifacts into graph JSONL |
+| `graph.summary` | `read_only` | `security-graph` | Summarize graph counts and bounded sample nodes |
+| `graph.neighbors` | `read_only` | `security-graph` | Read a bounded neighborhood for one graph node |
 | `finding.create` | `read_only` | `mg-engagement` | Create finding markdown |
 | `finding.read` | `read_only` | `mg-engagement` | Read bounded finding markdown by ID |
 | `chain.read` | `read_only` | `ai-prioritize` output | Read bounded exploit-chain analysis artifacts |
@@ -171,7 +174,9 @@ local model, apply the same schema validation in the harness before dispatch.
    In progress: `endpoint.registry`, `engagement.open`, `scope.check`, and
    confirmed `recon.run`, scoped `finding.create`, `engagement.status`, and
    bounded `finding.read` are implemented. Session profile write/read endpoints
-   are also implemented with redacted output.
+   are also implemented with redacted output. Graph ingestion, graph summary,
+   and bounded graph-neighbor endpoints are implemented on the local
+   `security-graph` JSONL store.
 3. Add `--json`/machine-output parity where current binaries lack it.
 4. Build TUI actions on top of the same dispatcher.
 5. Add a model-provider adapter that can produce endpoint requests only.
@@ -232,6 +237,32 @@ Example finding draft:
     "evidence_refs": [
       "evidence://acme-bounty/replay/replay-20260515-120102"
     ]
+  }
+}
+```
+
+Example graph ingestion:
+
+```json
+{
+  "endpoint": "graph.ingest",
+  "version": "2026-05-15",
+  "engagement": "acme-bounty",
+  "args": {}
+}
+```
+
+Example graph neighborhood lookup:
+
+```json
+{
+  "endpoint": "graph.neighbors",
+  "version": "2026-05-15",
+  "engagement": "acme-bounty",
+  "args": {
+    "kind": "host",
+    "key": "api.acme.example.com",
+    "limit": 25
   }
 }
 ```

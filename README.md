@@ -93,6 +93,7 @@ an engagement has a configured session profile.
 |---------|--------------|
 | `session` | Engagement auth/session config and header resolution for tools without plaintext token storage |
 | `payload-engine` | Stack-aware payload selection for fuzzing and harness planning |
+| `security-graph` | Local-first operational intelligence graph with deterministic node/edge IDs |
 | `mg-report` | Shared report-generation library used by the CLI and harness endpoint |
 
 ## Governing docs

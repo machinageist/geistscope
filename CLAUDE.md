@@ -25,6 +25,7 @@ geistscope/
 │   ├── engagement/        # lib: workspace layout, scope, audit, findings
 │   ├── session/           # lib: session.json config + auth header resolution
 │   ├── payload-engine/    # lib: stack-aware payload selection
+│   ├── security-graph/    # lib: local-first graph model + JSONL store
 │   ├── http-client/       # lib: shared reqwest wrapper
 │   ├── llm-client/        # lib: Anthropic + Ollama
 │   ├── fingerprint/       # lib+bin: tech stack detection
@@ -80,6 +81,9 @@ engagements/<name>/
 ├── findings/
 │   ├── <id>-<slug>.md
 │   └── <id>-<slug>-replay-<date>.json
+├── graph/
+│   ├── nodes.jsonl        # security-graph nodes
+│   └── edges.jsonl        # security-graph edges
 ├── re/<binary>/
 │   ├── manifest.json        # optional: arch, mitigations, notes
 │   ├── raw/<func>.c         # operator-supplied decompiled pseudocode
@@ -131,8 +135,9 @@ actions, scope visibility, and AI-assisted next-test suggestions.
 **Next engine layer:** `mg-harness`, a local endpoint dispatcher that lets the
 AI call scoped tools through typed schemas. The first slice exists with
 `endpoint.registry`, `engagement.open`, `engagement.status`, `scope.check`,
-confirmed `recon.run`, scoped `finding.create`, and bounded `finding.read`.
-See `docs/AI_TOOL_ENDPOINTS.md`.
+confirmed `recon.run`, scoped `finding.create`, bounded `finding.read`, session
+endpoints, and graph endpoints (`graph.ingest`, `graph.summary`,
+`graph.neighbors`). See `docs/AI_TOOL_ENDPOINTS.md`.
 
 High-priority candidates: Interactsh/OOB integration, request corpus import,
 subdomain takeover checks, GraphQL/OpenAPI testing, two-account access-control

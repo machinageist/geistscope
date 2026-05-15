@@ -11,8 +11,10 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use engagement::{Engagement, Finding, Severity, Status};
+use security_graph::{FileGraphStore, GraphStore, NodeKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -123,6 +125,8 @@ pub enum HarnessError {
     AiFuzz(#[from] mg_aifuzz::AiFuzzError),
     #[error("exploitgen: {0}")]
     ExploitGen(#[from] mg_exploitgen::ExploitGenError),
+    #[error("graph: {0}")]
+    Graph(#[from] security_graph::SecurityGraphError),
     #[error("session: {0}")]
     Session(#[from] session::SessionError),
 }
@@ -200,6 +204,9 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "recon.run" => handle_recon_run(cfg, &invocation).await,
         "session.set" => handle_session_set(cfg, &invocation).await,
         "session.get_headers" => handle_session_get_headers(cfg, &invocation).await,
+        "graph.ingest" => handle_graph_ingest(cfg, &invocation).await,
+        "graph.summary" => handle_graph_summary(cfg, &invocation).await,
+        "graph.neighbors" => handle_graph_neighbors(cfg, &invocation).await,
         "chain.read" => handle_chain_read(cfg, &invocation).await,
         "report.generate" => handle_report_generate(cfg, &invocation).await,
         "report.disclose" => handle_report_disclose(cfg, &invocation).await,
@@ -312,6 +319,24 @@ pub fn registry() -> Vec<EndpointSpec> {
             description: "Poll OOB callback logs.",
         },
         EndpointSpec {
+            name: "graph.ingest",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Ingest current engagement artifacts into the local security graph.",
+        },
+        EndpointSpec {
+            name: "graph.summary",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Summarize the local security graph with bounded sample nodes.",
+        },
+        EndpointSpec {
+            name: "graph.neighbors",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Read a bounded incoming/outgoing neighborhood for one graph node.",
+        },
+        EndpointSpec {
             name: "finding.create",
             risk: RiskClass::ReadOnly,
             implemented: true,
@@ -408,6 +433,136 @@ fn endpoint_registry() -> EndpointResult {
         reason: None,
         policy: None,
     }
+}
+
+// Handle graph.ingest
+async fn handle_graph_ingest(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let report = security_graph::ingest_engagement(&eng)?;
+    let nodes_added = report.nodes_added();
+    let edges_added = report.edges_added();
+    let store = FileGraphStore::for_engagement(&eng);
+    let nodes_path = store.nodes_path();
+    let edges_path = store.edges_path();
+
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!(
+            "endpoint=graph.ingest nodes_added={nodes_added} edges_added={edges_added}"
+        )),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!(
+            "graph ingested: {nodes_added} new nodes, {edges_added} new edges"
+        )),
+        output_files: vec![display_path(&nodes_path), display_path(&edges_path)],
+        evidence_refs: vec![format!("evidence://{}/graph", invocation.engagement)],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "report": report,
+            "nodes_added": nodes_added,
+            "edges_added": edges_added,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle graph.summary
+async fn handle_graph_summary(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let sample_limit = optional_usize(&invocation.args, "sample_limit", 10)?.min(50);
+    let store = FileGraphStore::for_engagement(&eng);
+    let summary = store.summary(sample_limit)?;
+    let nodes_path = store.nodes_path();
+    let edges_path = store.edges_path();
+
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!(
+            "endpoint=graph.summary nodes={} edges={}",
+            summary.node_count, summary.edge_count
+        )),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!(
+            "graph summary: {} nodes, {} edges",
+            summary.node_count, summary.edge_count
+        )),
+        output_files: vec![display_path(&nodes_path), display_path(&edges_path)],
+        evidence_refs: vec![format!("evidence://{}/graph", invocation.engagement)],
+        redactions: BTreeMap::new(),
+        data: Some(json!(summary)),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle graph.neighbors
+async fn handle_graph_neighbors(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let node_id = if let Some(node_id) = optional_string_opt(&invocation.args, "node_id")? {
+        node_id
+    } else {
+        let kind = NodeKind::from_str(&required_string(&invocation.args, "kind")?)?;
+        let key = required_string(&invocation.args, "key")?;
+        security_graph::node_id(kind, &key)
+    };
+    let limit = optional_usize(&invocation.args, "limit", 25)?.min(100);
+    let store = FileGraphStore::for_engagement(&eng);
+    let neighbors = store.neighbors(&node_id, limit)?;
+
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!(
+            "endpoint=graph.neighbors node_id={} count={}",
+            node_id,
+            neighbors.neighbors.len()
+        )),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!(
+            "graph neighbors: {} neighbor(s) for {}",
+            neighbors.neighbors.len(),
+            node_id
+        )),
+        output_files: vec![
+            display_path(&store.nodes_path()),
+            display_path(&store.edges_path()),
+        ],
+        evidence_refs: vec![format!(
+            "evidence://{}/graph/{}",
+            invocation.engagement, node_id
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(json!(neighbors)),
+        reason: None,
+        policy: None,
+    })
 }
 
 // Handle engagement.open
@@ -1861,6 +2016,61 @@ mod tests {
                 .contains("analysis_markdown")
         );
         assert!(data["markdown"].as_str().unwrap().contains("## Chains"));
+    }
+
+    #[tokio::test]
+    async fn graph_ingest_summary_and_neighbors_round_trip() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        fs::write(
+            eng.recon_dir().join("summary.json"),
+            r#"{
+              "engagement":"acme",
+              "target":"example.com",
+              "generated_at":"2026-05-15T00:00:00Z",
+              "host_count":1,
+              "hosts":[{
+                "hostname":"api.example.com",
+                "ips":["127.0.0.1"],
+                "source":"ct_log",
+                "http_accessible":true,
+                "fingerprint":{"server":"nginx","framework":"express"},
+                "open_ports":[80,443],
+                "services":["http","https"]
+              }]
+            }"#,
+        )
+        .unwrap();
+
+        let ingest_result = dispatch(&cfg, invocation("graph.ingest")).await;
+        assert_eq!(ingest_result.status, EndpointStatus::Ok);
+        assert!(Path::new(ingest_result.output_files.first().unwrap()).exists());
+
+        let mut summary_inv = invocation("graph.summary");
+        summary_inv.args = json!({ "sample_limit": 5 });
+        let summary_result = dispatch(&cfg, summary_inv).await;
+        assert_eq!(summary_result.status, EndpointStatus::Ok);
+        let summary_data = summary_result.data.unwrap();
+        assert!(summary_data["node_count"].as_u64().unwrap() >= 3);
+        assert!(summary_data["edge_count"].as_u64().unwrap() >= 1);
+        assert!(summary_data["node_kinds"]["host"].as_u64().unwrap() >= 2);
+
+        let mut neighbors_inv = invocation("graph.neighbors");
+        neighbors_inv.args = json!({
+            "kind": "host",
+            "key": "example.com",
+            "limit": 10,
+        });
+        let neighbors_result = dispatch(&cfg, neighbors_inv).await;
+        assert_eq!(neighbors_result.status, EndpointStatus::Ok);
+        let neighbors_data = neighbors_result.data.unwrap();
+        assert!(
+            neighbors_data["neighbors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["node"]["label"] == "api.example.com")
+        );
     }
 
     #[tokio::test]
