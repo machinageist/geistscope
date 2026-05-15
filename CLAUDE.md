@@ -6,8 +6,12 @@ This file orients Claude Code sessions for the GeistScope project.
 
 GeistScope is a professional bug bounty and red-team workstation designed so an
 AI operator can assist during authorized engagements without receiving raw shell
-access or unbounded authority. The current implementation is a Rust CLI/TUI
-suite that writes to a shared filesystem layout (the "engagement directory").
+access or unbounded authority. The strategic direction is an AI-native
+offensive security operating system built around operational memory,
+deterministic replay, a persistent security graph, browser-native
+instrumentation, and investigation workflows. The current implementation is a
+Rust CLI/TUI suite that writes to a shared filesystem layout (the "engagement
+directory").
 
 The product direction is a TUI-based bug-hunting browser backed by a local AI
 harness. That harness should expose scoped, audited tool endpoints around the
@@ -45,6 +49,7 @@ Important docs:
 
 ```
 docs/PRODUCT_DOCTRINE.md       # product definition + coding doctrine
+docs/STRATEGIC_HANDOFF.md      # productionization + platform evolution plan
 docs/BUG_HUNTING_METHODOLOGY.md # authorized testing methodology
 docs/AI_TOOL_ENDPOINTS.md      # model-callable tool endpoint contract
 docs/FEATURE_ROADMAP.md        # prioritized implementation roadmap
@@ -138,6 +143,7 @@ diffing, shared rate limits, and evidence/report generation.
 | File | Purpose |
 |---|---|
 | `docs/PRODUCT_DOCTRINE.md` | Governs product direction, coding decisions, and AI-harness safety |
+| `docs/STRATEGIC_HANDOFF.md` | Governs platform evolution toward graph, replay, browser instrumentation, and investigation workflows |
 | `docs/AI_TOOL_ENDPOINTS.md` | Endpoint schema, risk classes, scope/audit/redaction policy |
 | `docs/BUG_HUNTING_METHODOLOGY.md` | Field workflow for bug bounty, pentest, and red-team use |
 | `docs/FEATURE_ROADMAP.md` | Current and suggested feature roadmap |

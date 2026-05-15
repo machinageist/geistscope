@@ -2,6 +2,18 @@
 
 Last updated: 2026-05-15
 
+## Strategic Platform Direction
+
+GeistScope should evolve from a set of offensive security tools into an
+AI-native operating system for authorized investigations. The key architecture
+change is persistent operational intelligence: a security graph, deterministic
+replay, browser-native instrumentation, and investigation-centric workflows that
+sit above the current engagement files.
+
+The near-term implementation should keep the filesystem workspace as the local
+source of truth while introducing adapter boundaries that can later support
+Postgres-backed graph and replay storage.
+
 ## Current Snapshot
 
 GeistScope has a working Rust engine for engagement setup, recon, crawling,
@@ -83,6 +95,43 @@ Current-feature improvements:
 - Use `chain-analysis.md/json` from `ai-prioritize` to drive chained follow-up
   tests. Started.
 - Add prompt-injection regression fixtures from crawled HTML and JS comments.
+
+## P1: Security Graph Foundation
+
+Goal: move from disconnected tool artifacts toward persistent operational
+intelligence without breaking the current local workspace model.
+
+Status: planned.
+
+Features:
+
+- Entity schema for hosts, URLs, parameters, identities, JWTs, sessions,
+  cookies, APIs, findings, technologies, and replay chains.
+- Edge schema for calls, authenticates_to, references, discovered_by,
+  vulnerable_to, related_to, and replayed_from.
+- Local deterministic JSONL graph storage under each engagement.
+- Harness endpoints for graph ingestion, summary, and bounded neighbor reads.
+- Adapter boundary for future Postgres plus graph/vector extensions.
+
+Current-feature improvements:
+
+- Ingest `recon/summary.json`, crawl endpoint inventories, `probe-report.json`,
+  and finding frontmatter before adding new scanners.
+- Keep graph reads bounded and model-visible output redacted.
+
+## P1: Replay And Action Lineage
+
+Goal: make every meaningful action timestamped, attributable, diffable, and
+reproducible.
+
+Status: planned.
+
+Features:
+
+- Raw request/response capture where authorized and available.
+- Session, cookie, timing, DOM, websocket, and browser-state references.
+- Deterministic replay chains with partial replay and environment diffing.
+- Patch-validation replay for consulting retests.
 
 ## P1: Recon And Surface Quality
 

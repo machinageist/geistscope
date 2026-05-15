@@ -5,9 +5,12 @@ Last updated: 2026-05-15
 ## Purpose
 
 GeistScope is a professional bug hunting workstation for authorized bug bounty,
-pentest, and red-team engagements. The near-term product is a TUI-based web
-browser and attack-surface console. The core is an AI harness that can call a
-dedicated set of scoped security-tool endpoints.
+pentest, and red-team engagements. The strategic product is an AI-native
+offensive security operating system: operational memory, deterministic replay,
+a persistent security graph, browser-native instrumentation, investigation
+workflows, and AI-assisted reasoning over scoped evidence. The near-term
+product is a TUI-based web browser and attack-surface console. The core is an
+AI harness that can call a dedicated set of scoped security-tool endpoints.
 
 The current implementation is a Rust workspace of CLI tools that share a
 file-native engagement directory. That remains the foundation. The next product
@@ -29,7 +32,8 @@ solo consultant or bug bounty researcher:
   client reporting.
 
 This means "AI harness" is not a chat wrapper. It is a tool registry, policy
-gate, evidence store, and reasoning loop around the existing Rust engine.
+gate, evidence store, graph/replay access layer, and reasoning loop around the
+existing Rust engine.
 
 ## Non-Negotiable Design Rules
 
@@ -70,6 +74,11 @@ gate, evidence store, and reasoning loop around the existing Rust engine.
 8. UX is for repeat work.
    The TUI should optimize scanning, comparing, replaying, annotating, and
    reporting. Avoid decorative UI and marketing-style flows inside the tool.
+
+9. Operational memory is the product moat.
+   Files are acceptable local artifacts, but the platform must converge toward
+   a unified graph and replay store that can correlate entities, evidence,
+   hypotheses, and attack chains across tool runs.
 
 ## Coding Doctrine
 
@@ -121,6 +130,8 @@ TUI browser
   -> local AI harness
        -> policy gate
        -> tool registry
+       -> security graph
+       -> replay store
        -> evidence store
        -> model provider adapter
        -> Rust tool endpoints

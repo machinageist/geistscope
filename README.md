@@ -2,8 +2,9 @@
 
 Professional bug bounty and red-team tooling for human + AI collaboration.
 The current system is a Rust CLI/TUI suite that writes to a shared engagement
-workspace. The product direction is a TUI-based bug-hunting browser with a
-scoped AI harness and dedicated tool endpoints at its core.
+workspace. The product direction is an AI-native offensive security operating
+system: a TUI-based bug-hunting browser, scoped AI harness, deterministic replay
+layer, and persistent security graph around dedicated tool endpoints.
 
 ## Architecture
 
@@ -99,6 +100,7 @@ an engagement has a configured session profile.
 | File | Purpose |
 |------|---------|
 | `docs/PRODUCT_DOCTRINE.md` | Product definition, coding doctrine, AI-harness safety rules |
+| `docs/STRATEGIC_HANDOFF.md` | Productionization and platform evolution plan |
 | `docs/BUG_HUNTING_METHODOLOGY.md` | Authorized testing workflow and bug-class coverage model |
 | `docs/AI_TOOL_ENDPOINTS.md` | Provider-neutral endpoint contract for model-callable tools |
 | `docs/FEATURE_ROADMAP.md` | Prioritized TUI browser, harness, recon, OOB, reporting roadmap |
