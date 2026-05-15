@@ -29,7 +29,7 @@ geistscope/
 │   ├── mg-scan/           # lib+bin: async TCP port scanner
 │   ├── mg-recon/          # bin: 4-stage recon orchestrator
 │   ├── ai-prioritize/     # bin: LLM-ranked attack surface + chain analysis
-│   ├── mg-crawl/          # bin: BFS crawler + JS secret extraction
+│   ├── mg-crawl/          # bin: BFS crawler + JS/API/GraphQL/library extraction
 │   ├── mg-probe/          # bin: passive posture + optional active endpoint checks
 │   ├── mg-fuzz/           # bin: Burp Intruder-style payload fuzzer
 │   ├── mg-replay/         # bin: Burp Repeater-style finding verification

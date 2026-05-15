@@ -23,7 +23,7 @@ mg-recon              ← subdomain enum + fingerprint + port scan → summary.j
       │
       ├── ai-prioritize   ← LLM ranks attack surface using skill files
       │
-      ├── mg-crawl        ← BFS crawler; extracts JS secrets + API endpoints
+      ├── mg-crawl        ← BFS crawler; extracts JS secrets, endpoints, GraphQL/library signals
       │
       ├── mg-probe        ← Passive security posture: headers, CORS, cookies, debug paths
       │
@@ -67,7 +67,7 @@ mg-report generate target-bounty 2026-05-15-001
 | `mg-fingerprint` | HTTP tech stack detection                           |
 | `mg-recon`       | Orchestrates the full 4-stage recon pipeline        |
 | `ai-prioritize`  | LLM-ranked attack surface and exploit-chain analysis |
-| `mg-crawl`       | BFS web crawler with JS secret/endpoint extraction  |
+| `mg-crawl`       | BFS crawler with JS secrets, endpoints, internal refs, GraphQL and library signals |
 | `mg-probe`       | Passive posture checker with optional low-volume active endpoint probes |
 | `mg-fuzz`        | Burp Intruder-style HTTP fuzzer                     |
 | `mg-replay`      | Burp Repeater-style finding verification            |

@@ -40,8 +40,9 @@ Current coverage:
 - `subdomain-enum` discovers domains from CT logs and active DNS brute force.
 - `mg-scan` finds open TCP ports and banners.
 - `mg-fingerprint` records HTTP stack hints.
-- `mg-crawl` maps same-origin pages, JavaScript, forms, endpoints, and redacted
-  secret candidates.
+- `mg-crawl` maps same-origin pages, JavaScript, forms, enriched endpoints,
+  GraphQL candidates, internal references, vulnerable library hints, and
+  redacted secret candidates.
 - `mg-probe` checks headers, CORS, cookies, debug paths, and stack traces.
   With `--active`, it also runs bounded harmless marker reflection, single-quote
   SQL error, and no-follow open redirect checks against crawler endpoints.
@@ -111,7 +112,7 @@ GeistScope should support these bug classes as first-class workflows:
 |---|---|---|
 | Broken access control, IDOR, BOLA/BFLA | `mg-fuzz`, `mg-replay`, skills | Auth profiles, two-account diffing, object-ID miner |
 | Auth/session/JWT/OAuth | Skills only | Cookie/token vault, session replay, OAuth flow notes |
-| API testing | Crawl endpoints, GraphQL skill | OpenAPI import, REST parameter map, GraphQL operation explorer |
+| API testing | Crawl endpoints and GraphQL candidates | OpenAPI import, REST parameter map, GraphQL operation explorer |
 | SSRF/OOB/blind bugs | SSRF payloads | Interactsh-compatible callback allocation and polling |
 | XSS/client-side | XSS payloads, crawl HTML | DOM sink/source extraction, CSP-aware PoC helper |
 | SQLi/SSTI/command injection | Payload sets plus `payload-engine` stack-aware variants | Safer baseline probes, richer DB/template fingerprint hints |

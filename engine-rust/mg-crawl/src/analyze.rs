@@ -27,6 +27,53 @@ pub struct SecretMatch {
 pub struct EndpointMatch {
     pub path: String,
     pub source_url: String,
+    #[serde(default = "default_method")]
+    pub method: String,
+    #[serde(default = "default_source")]
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_format: Option<String>,
+    #[serde(default)]
+    pub params: Vec<String>,
+    #[serde(default)]
+    pub graphql: bool,
+}
+
+impl EndpointMatch {
+    // Build a basic endpoint row with query params extracted from the path
+    pub fn new(path: impl Into<String>, source_url: impl Into<String>, source: &str) -> Self {
+        let path = path.into();
+        Self {
+            params: query_params_from_path(&path),
+            path,
+            source_url: source_url.into(),
+            method: "GET".into(),
+            source: source.into(),
+            body_format: None,
+            graphql: false,
+        }
+    }
+
+    // Build a richer endpoint row for static JS call-site extraction
+    pub fn with_details(
+        path: impl Into<String>,
+        source_url: impl Into<String>,
+        method: impl Into<String>,
+        source: impl Into<String>,
+        body_format: Option<String>,
+        graphql: bool,
+    ) -> Self {
+        let path = path.into();
+        Self {
+            params: query_params_from_path(&path),
+            path,
+            source_url: source_url.into(),
+            method: method.into(),
+            source: source.into(),
+            body_format,
+            graphql,
+        }
+    }
 }
 
 // Compiled regex catalog — initialized once, reused across all JS files
@@ -148,10 +195,7 @@ pub fn find_endpoints(js: &str, source_url: &str) -> Vec<EndpointMatch> {
             if let Some(m) = cap.get(1) {
                 let path = m.as_str().to_string();
                 if seen.insert(path.clone()) {
-                    out.push(EndpointMatch {
-                        path,
-                        source_url: source_url.to_string(),
-                    });
+                    out.push(EndpointMatch::new(path, source_url, "js_regex"));
                 }
             }
         }
@@ -169,6 +213,37 @@ fn sha256_hex(data: &str) -> String {
     let mut h = Sha256::new();
     h.update(data.as_bytes());
     hex::encode(h.finalize())
+}
+
+// Provide serde default method for older endpoint rows
+fn default_method() -> String {
+    "GET".into()
+}
+
+// Provide serde default source for older endpoint rows
+fn default_source() -> String {
+    "unknown".into()
+}
+
+// Extract query parameter names from a path or URL string
+fn query_params_from_path(path: &str) -> Vec<String> {
+    let Some((_, query)) = path.split_once('?') else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
+    query
+        .split('&')
+        .filter_map(|pair| {
+            let key = pair.split_once('=').map(|(key, _)| key).unwrap_or(pair);
+            let key = key.trim();
+            if key.is_empty() {
+                None
+            } else {
+                let key = key.to_string();
+                seen.insert(key.clone()).then_some(key)
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

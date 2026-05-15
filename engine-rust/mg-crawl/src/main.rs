@@ -14,6 +14,7 @@
 mod analyze;
 mod crawl;
 mod extract;
+mod js_analyzer;
 
 use std::path::Path;
 
@@ -54,6 +55,10 @@ struct Args {
     /// Do not honor robots.txt Disallow directives
     #[arg(long)]
     ignore_robots: bool,
+
+    /// Do not attempt a read-only GraphQL introspection query when JS suggests GraphQL
+    #[arg(long)]
+    no_graphql_introspection: bool,
 
     /// Re-crawl even if crawl output already exists for this host
     #[arg(long)]
@@ -114,6 +119,7 @@ async fn main() -> Result<()> {
         start_urls: args.urls.clone(),
         max_depth: args.depth,
         ignore_robots: args.ignore_robots,
+        graphql_introspection: !args.no_graphql_introspection,
         crawl_dir: crawl_dir.clone(),
         scope_fn,
     };

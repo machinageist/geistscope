@@ -129,6 +129,49 @@ impl Client {
         }
     }
 
+    // Issue a JSON POST with retry-with-jittered-backoff on transient failures
+    pub async fn post_json(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<Response, HttpError> {
+        self.throttle().await;
+        let mut attempt = 0u32;
+        loop {
+            match self
+                .inner
+                .post(url)
+                .header("User-Agent", self.next_ua())
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(r) => return Ok(r),
+                Err(_) if attempt < self.config.max_retries => {
+                    attempt += 1;
+                    let base_ms = 300u64 * (1u64 << attempt);
+                    let jitter_ms = fastrand::u64(0..200);
+                    tokio::time::sleep(Duration::from_millis(base_ms + jitter_ms)).await;
+                }
+                Err(e) => return Err(HttpError::Network(e)),
+            }
+        }
+    }
+
+    // JSON POST and return body as text; returns Status error on 4xx/5xx
+    pub async fn post_json_text(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<String, HttpError> {
+        let resp = self.post_json(url, body).await?;
+        let status = resp.status().as_u16();
+        if status >= 400 {
+            return Err(HttpError::Status(status));
+        }
+        Ok(resp.text().await?)
+    }
+
     // GET and deserialize JSON; returns Status error on 4xx/5xx
     pub async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, HttpError> {
         let resp = self.get(url).await?;

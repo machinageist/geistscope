@@ -100,6 +100,8 @@ Features:
 Current-feature improvements:
 
 - Keep `mg-crawl` robots and rate-limit behavior, but add better parser coverage.
+  Started with enriched JS call-site endpoints, GraphQL candidates/introspection,
+  internal-reference extraction, and embedded vulnerable-library hints.
 - Keep `mg-probe` semi-active checks bounded and scope-aware. Started with
   `--active` reflected-marker, single-quote SQL error, and no-follow open
   redirect probes from crawler endpoints.

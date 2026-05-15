@@ -66,6 +66,7 @@ Any confirmed finding becomes a polished, HackerOne-ready report automatically.
 - 2026-05-15: Implemented the §5 `payload-engine` crate and wired `mg-fuzz --context-aware` into it. The new library exposes payload context/types, stack-aware payload selection for SQLi/XSS/SSTI/SSRF/traversal/IDOR/open redirect/command injection, and engagement summary inference from recon fingerprints. `mg-fuzz` now replaces built-in payload set names with context-aware variants when `--context-aware` is set or `recon/summary.json` exists; file and numeric payload specs still use the legacy loader.
 - 2026-05-15: Implemented the §8 exploit-chain reasoning pass. `ai-prioritize` now makes a second LLM call after ranking, writes `recon/chain-analysis.md` and `recon/chain-analysis.json`, includes bounded `probe-report.json` evidence when present, and records the run in audit. Added read-only harness endpoint `chain.read` so Claude Code can load bounded chain artifacts.
 - 2026-05-15: Implemented the §9 `mg-report` crate and harness endpoint. `mg-report generate` reads one finding, wraps evidence as untrusted model data, drafts a HackerOne-style report, computes CVSS 3.1 locally from a vector, supports deterministic `--offline` generation, and writes `<finding>-report.md`. `mg-harness report.generate` now exposes the same flow with bounded JSON output.
+- 2026-05-15: Implemented the §7 `mg-crawl` JS analyzer slice. Added `js_analyzer.rs`, enriched `endpoints.json` rows with method/source/body/params/GraphQL flags, writes `internal-refs.json`, `vulnerable-libraries.json`, and `graphql-candidates.json`, and performs a bounded in-scope GraphQL introspection POST when JS signals GraphQL. Cross-host absolute URLs are kept out of active endpoint rows and retained only as reference evidence.
 
 ---
 
@@ -806,7 +807,7 @@ New binaries must be added to the install loop in `README.md` and the wiki.
 - [x] `mg-fuzz --context-aware` using payload-engine
 - [ ] `mg-oob serve / get-url / poll` binary with HTTP + DNS listeners
 - [ ] Harness `oob.*` endpoints wired to `mg-oob`
-- [ ] `mg-crawl` JS analyzer with GraphQL introspection, library CVE list, internal-ref extraction
+- [x] `mg-crawl` JS analyzer with GraphQL introspection, library CVE list, internal-ref extraction
 - [x] `ai-prioritize` chain-reasoning second pass writing `chain-analysis.md`
 - [x] `mg-report generate` producing HackerOne-formatted Markdown with CVSS score
 - [x] Harness `report.generate` endpoint
