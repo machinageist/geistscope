@@ -95,9 +95,11 @@ Every crate must pass `cargo clippy -- -D warnings` before commit.
 **`mg-tui` is the foundation for the product UI.** It currently reads engagement
 files and renders engagements, hosts, findings, fuzz results, logs, harness
 activity, and browser inspection with page search plus redacted response
-headers/cookies. The next UI step is not a marketing GUI; it is a TUI
-bug-hunting browser with traffic navigation, replay/fuzz actions, scope
-visibility, and AI-assisted next-test suggestions.
+headers/cookies. When an engagement is selected, browser requests can apply the
+env-backed auth headers configured in `session.json` without rendering secret
+values. The next UI step is not a marketing GUI; it is a TUI bug-hunting browser
+with traffic navigation, replay/fuzz actions, scope visibility, and AI-assisted
+next-test suggestions.
 
 **Next engine layer:** `mg-harness`, a local endpoint dispatcher that lets the
 AI call scoped tools through typed schemas. The first slice exists with

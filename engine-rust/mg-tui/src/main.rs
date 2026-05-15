@@ -18,7 +18,7 @@ mod views;
 
 use anyhow::Result;
 use app::{App, Tab};
-use browser_fetch::{AppMsg, FetchResult, fetch_page, fetch_post};
+use browser_fetch::{AppMsg, FetchResult, fetch_page_with_headers, fetch_post_with_headers};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
@@ -27,8 +27,10 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use engagement::Engagement;
 use html_render::{FieldType, parse_field_marker};
 use ratatui::{Terminal, backend::CrosstermBackend};
+use reqwest::header::HeaderMap;
 use std::{
     env, io,
     path::PathBuf,
@@ -165,13 +167,51 @@ fn apply_page(app: &mut App, r: FetchResult, tx: &Sender<AppMsg>) {
 }
 
 // Kick off a page fetch in a background thread
-fn navigate(url: String, tx: &Sender<AppMsg>) {
+fn navigate(app: &mut App, url: String, tx: &Sender<AppMsg>) {
+    let default_headers = match browser_session_headers(app) {
+        Ok(headers) => headers,
+        Err(err) => {
+            app.browser.loading = false;
+            app.browser.error = Some(err);
+            return;
+        }
+    };
     let tx = tx.clone();
     std::thread::spawn(move || {
         let _ = tx.send(AppMsg::Page(
-            fetch_page(&url).map(Box::new).map_err(|e| e.to_string()),
+            fetch_page_with_headers(&url, default_headers)
+                .map(Box::new)
+                .map_err(|e| e.to_string()),
         ));
     });
+}
+
+// Return session headers for the selected engagement without exposing values
+fn browser_session_headers(app: &mut App) -> Result<HeaderMap, String> {
+    let Some(name) = app.selected_engagement.clone() else {
+        app.browser.session_status = "no engagement".to_string();
+        return Ok(HeaderMap::new());
+    };
+
+    let engagement = Engagement::load_named(&app.engagements_dir, &name)
+        .map_err(|err| format!("session {name}: {err}"))?;
+    match session::load_session_config(&engagement) {
+        Ok(_) => {
+            let headers = session::get_auth_headers_sync(&engagement)
+                .map_err(|err| format!("session {name}: {err}"))?;
+            app.browser.session_status = if headers.is_empty() {
+                format!("{name}: profile loaded (0 headers)")
+            } else {
+                format!("{name}: {} auth header(s) applied", headers.len())
+            };
+            Ok(headers)
+        }
+        Err(session::SessionError::NotConfigured) => {
+            app.browser.session_status = format!("{name}: no session profile");
+            Ok(HeaderMap::new())
+        }
+        Err(err) => Err(format!("session {name}: {err}")),
+    }
 }
 
 // Dispatch keyboard events
@@ -226,7 +266,7 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
             if let Some(url) = app.browser.selected_link_url().map(str::to_string) {
                 let resolved = resolve_url(&url, &app.browser.url);
                 app.browser.begin_navigate(&resolved);
-                navigate(resolved, tx);
+                navigate(app, resolved, tx);
             }
         }
 
@@ -236,7 +276,7 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
         }
         KeyCode::Char('b') if app.tab == Tab::Browser => {
             if let Some(prev) = app.browser.go_back() {
-                navigate(prev, tx);
+                navigate(app, prev, tx);
             }
         }
         KeyCode::Char('R') if app.tab == Tab::Browser => {
@@ -244,7 +284,7 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
             if !url.is_empty() {
                 app.browser.loading = true;
                 app.browser.error = None;
-                navigate(url, tx);
+                navigate(app, url, tx);
             }
         }
         KeyCode::Char('/') if app.tab == Tab::Browser => app.browser.begin_find(),
@@ -423,10 +463,18 @@ fn submit_form(app: &mut App, form_idx: usize, tx: &Sender<AppMsg>) {
     if method == "post" {
         let url = action.clone();
         app.browser.begin_navigate(&url);
+        let default_headers = match browser_session_headers(app) {
+            Ok(headers) => headers,
+            Err(err) => {
+                app.browser.loading = false;
+                app.browser.error = Some(err);
+                return;
+            }
+        };
         let tx2 = tx.clone();
         std::thread::spawn(move || {
             let _ = tx2.send(AppMsg::Page(
-                fetch_post(&url, &params)
+                fetch_post_with_headers(&url, &params, default_headers)
                     .map(Box::new)
                     .map_err(|e| e.to_string()),
             ));
@@ -434,7 +482,7 @@ fn submit_form(app: &mut App, form_idx: usize, tx: &Sender<AppMsg>) {
     } else {
         let url = build_get_url(&action, &params);
         app.browser.begin_navigate(&url);
-        navigate(url, tx);
+        navigate(app, url, tx);
     }
 }
 
@@ -476,7 +524,7 @@ fn handle_url_bar_key(app: &mut App, code: KeyCode, tx: &Sender<AppMsg>) {
             if !raw.is_empty() {
                 let url = ensure_scheme(raw);
                 app.browser.begin_navigate(&url);
-                navigate(url, tx);
+                navigate(app, url, tx);
             } else {
                 app.browser.url_editing = false;
             }
@@ -582,7 +630,7 @@ fn follow_link_at_row(app: &mut App, line_idx: usize, click_col: u16, tx: &Sende
         if let Some(url) = app.browser.selected_link_url().map(str::to_string) {
             let resolved = resolve_url(&url, &app.browser.url);
             app.browser.begin_navigate(&resolved);
-            navigate(resolved, tx);
+            navigate(app, resolved, tx);
         }
     }
 }

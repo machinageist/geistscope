@@ -10,7 +10,7 @@ tool endpoints.
 | Crate            | Type     | Binary           | Purpose                                                              |
 | ---------------- | -------- | ---------------- | -------------------------------------------------------------------- |
 | `engagement`     | lib+bin  | `mg-engagement`  | Bug bounty engagement workspace: scope, audit, findings              |
-| `session`        | lib      | —                | Engagement session config and auth header resolution                 |
+| `session`        | lib      | —                | Engagement session config and auth header resolution for tools       |
 | `http-client`    | lib      | —                | Shared reqwest wrapper: UA rotation, rate limit, jittered retry      |
 | `llm-client`     | lib      | —                | Unified Ollama (local) + Anthropic LLM interface                     |
 | `fingerprint`    | lib+bin  | `mg-fingerprint` | HTTP response → tech stack detection                                 |
@@ -23,7 +23,7 @@ tool endpoints.
 | `mg-probe`       | bin      | `mg-probe`       | Passive security posture: headers, CORS, cookies, debug path exposure |
 | `mg-fuzz`        | bin      | `mg-fuzz`        | Burp Intruder-style payload fuzzer: sniper / battering-ram / pitchfork / cluster-bomb |
 | `mg-replay`      | bin      | `mg-replay`      | Replay curl evidence from findings; verdict: still_vulnerable / appears_fixed |
-| `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with harness status, response inspector, and search |
+| `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with harness status, response inspector, search, and session headers |
 | `mg-harness`     | lib+bin  | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls                     |
 
 ## Dependency graph

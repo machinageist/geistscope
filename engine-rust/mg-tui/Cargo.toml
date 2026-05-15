@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 engagement = { path = "../engagement" }
 mg-harness = { path = "../mg-harness" }
+session = { path = "../session" }
 ratatui = "0.29"
 crossterm = "0.28"
 tokio = { version = "1", features = ["full"] }

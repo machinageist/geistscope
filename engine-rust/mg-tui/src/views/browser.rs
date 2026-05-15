@@ -263,6 +263,18 @@ fn render_inspector(f: &mut Frame, app: &App, area: Rect) {
             &b.url,
             area.width.saturating_sub(2) as usize,
         )),
+        Line::from(vec![
+            Span::styled(
+                "Auth ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(truncate_for_width(
+                &b.session_status,
+                area.width.saturating_sub(7) as usize,
+            )),
+        ]),
         Line::raw(""),
         Line::from(vec![
             Span::styled(

@@ -31,7 +31,8 @@ Goal: make `mg-tui` the daily driver for a solo researcher.
 Status: started. `mg-tui` now includes a Harness tab that displays endpoint
 registry status plus harness activity parsed from `audit.log`. The Browser tab
 now has a request/response inspector with method, final URL, status, MIME type,
-page inventory, redacted cookie/header display, and in-page search.
+page inventory, redacted cookie/header display, in-page search, and selected
+engagement session headers.
 
 Features:
 
@@ -42,7 +43,7 @@ Features:
 - HAR/Burp/Caido import into a request corpus.
 - "Send to replay", "Send to fuzz", "Create finding", and "Ask AI" actions.
 - Auth profiles for controlled test accounts and roles. Started with the
-  `session` crate for env-backed token headers.
+  `session` crate for env-backed token headers and TUI browser use.
 - Cookie/token redaction and storage outside model-visible context.
 - Keyboard-first workflow with stable panes and no layout jumps.
 

@@ -87,6 +87,11 @@ pub enum SessionError {
 
 // Load auth headers for an engagement; empty when no session.json exists
 pub async fn get_auth_headers(engagement: &Engagement) -> Result<HeaderMap, SessionError> {
+    get_auth_headers_sync(engagement)
+}
+
+// Load auth headers for blocking callers such as the TUI browser
+pub fn get_auth_headers_sync(engagement: &Engagement) -> Result<HeaderMap, SessionError> {
     let config = match load_session_config(engagement) {
         Ok(config) => config,
         Err(SessionError::NotConfigured) => return Ok(HeaderMap::new()),

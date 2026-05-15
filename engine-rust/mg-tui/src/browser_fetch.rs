@@ -42,13 +42,17 @@ pub enum AppMsg {
 }
 
 // Build a reusable reqwest blocking client
-fn make_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+fn make_client(default_headers: HeaderMap) -> Result<reqwest::blocking::Client, String> {
+    let builder = reqwest::blocking::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; mg-tui/0.1)")
         .timeout(Duration::from_secs(TIMEOUT_SECS))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(|e| e.to_string())
+        .redirect(reqwest::redirect::Policy::limited(10));
+    let builder = if default_headers.is_empty() {
+        builder
+    } else {
+        builder.default_headers(default_headers)
+    };
+    builder.build().map_err(|e| e.to_string())
 }
 
 // Convert a reqwest response into a FetchResult
@@ -83,16 +87,23 @@ fn process_response(
     })
 }
 
-// Fetch a URL, render the response body, return result or error string
-pub fn fetch_page(url: &str) -> Result<FetchResult, String> {
-    let client = make_client()?;
+// Fetch a URL with caller-provided default headers
+pub fn fetch_page_with_headers(
+    url: &str,
+    default_headers: HeaderMap,
+) -> Result<FetchResult, String> {
+    let client = make_client(default_headers)?;
     let resp = client.get(url).send().map_err(|e| e.to_string())?;
     process_response("GET", resp)
 }
 
-// POST form params to a URL and render the response
-pub fn fetch_post(url: &str, params: &[(String, String)]) -> Result<FetchResult, String> {
-    let client = make_client()?;
+// POST form params with caller-provided default headers
+pub fn fetch_post_with_headers(
+    url: &str,
+    params: &[(String, String)],
+    default_headers: HeaderMap,
+) -> Result<FetchResult, String> {
+    let client = make_client(default_headers)?;
     let resp = client
         .post(url)
         .form(params)
@@ -104,7 +115,7 @@ pub fn fetch_post(url: &str, params: &[(String, String)]) -> Result<FetchResult,
 // Download an image URL and render it to halfblock terminal lines
 // Returns None on any error (network, decode, wrong MIME) so callers can ignore silently
 pub fn fetch_image(src: &str, index: usize) -> Option<ImageFetchResult> {
-    let client = make_client().ok()?;
+    let client = make_client(HeaderMap::new()).ok()?;
     let resp = client.get(src).send().ok()?;
 
     // Reject non-image content types

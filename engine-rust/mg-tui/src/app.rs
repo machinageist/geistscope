@@ -63,6 +63,7 @@ pub struct BrowserState {
     pub url_buf: String,
     pub url_editing: bool,
     pub request_method: String,
+    pub session_status: String,
     pub status: u16,
     pub content_type: String,
     pub response_headers: Vec<(String, String)>,
@@ -344,6 +345,7 @@ impl App {
             should_quit: false,
             browser: BrowserState {
                 request_method: "GET".to_string(),
+                session_status: "no engagement".to_string(),
                 show_inspector: true,
                 ..BrowserState::default()
             },
