@@ -1601,6 +1601,7 @@ dependencies = [
  "clap",
  "engagement",
  "mg-recon",
+ "mg-report",
  "serde",
  "serde_json",
  "session",
@@ -1659,6 +1660,19 @@ dependencies = [
  "sha2",
  "tempfile",
  "time",
+ "tokio",
+]
+
+[[package]]
+name = "mg-report"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "llm-client",
+ "serde",
+ "thiserror",
  "tokio",
 ]
 

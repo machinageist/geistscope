@@ -151,7 +151,10 @@ A reportable finding needs:
 - Remediation guidance.
 
 `mg-replay` should be used before submission or client delivery whenever possible.
-The report generator should never submit automatically.
+`mg-report generate` drafts HackerOne-style Markdown from a local finding and
+computes the CVSS 3.1 score locally from the vector; model output is used for
+language, not trusted numeric scoring. The report generator should never submit
+automatically.
 
 ## 8. Consulting Practice Support
 

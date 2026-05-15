@@ -113,7 +113,7 @@ Errors should be explicit:
 | `finding.read` | `read_only` | `mg-engagement` | Read bounded finding markdown by ID |
 | `chain.read` | `read_only` | `ai-prioritize` output | Read bounded exploit-chain analysis artifacts |
 | `finding.replay` | `low_active` | `mg-replay` | Retest finding evidence |
-| `report.draft` | `read_only` | planned | Generate bounty/client report draft |
+| `report.generate` | `read_only` | `mg-report` | Generate a bounty report from one finding |
 | `skill.match` | `read_only` | `ai-prioritize` skill loader | Match evidence to bug-class skills |
 | `risk.rank` | `read_only` | `ai-prioritize` | Rank targets and hypotheses |
 

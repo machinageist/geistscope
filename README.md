@@ -28,12 +28,11 @@ mg-recon              ← subdomain enum + fingerprint + port scan → summary.j
       ├── mg-probe        ← Passive security posture: headers, CORS, cookies, debug paths
       │
       ├── mg-fuzz         ← Payload fuzzer (Burp Intruder equivalent)
+      ├── mg-replay       ← Finding verification (Burp Repeater equivalent)
       │
-      └── mg-replay       ← Finding verification (Burp Repeater equivalent)
+      ├── mg-report       ← HackerOne-ready report generation with local CVSS scoring
       │
       └── mg-tui          ← Terminal dashboard / TUI browser foundation
-
-Planned:
 
 mg-harness            ← Scoped AI tool endpoint dispatcher
 ```
@@ -45,7 +44,7 @@ mg-harness            ← Scoped AI tool endpoint dispatcher
 cd engine-rust
 cargo build --workspace
 for crate in engagement subdomain-enum mg-scan fingerprint mg-recon \
-             ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-tui mg-harness; do
+             ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-report mg-tui mg-harness; do
     cargo install --path $crate
 done
 
@@ -55,6 +54,7 @@ mg-recon target-bounty
 mg-crawl target-bounty https://www.target.example.com
 mg-probe target-bounty
 ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
+mg-report generate target-bounty 2026-05-15-001
 ```
 
 ## Binaries
@@ -71,6 +71,7 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 | `mg-probe`       | Passive posture checker with optional low-volume active endpoint probes |
 | `mg-fuzz`        | Burp Intruder-style HTTP fuzzer                     |
 | `mg-replay`      | Burp Repeater-style finding verification            |
+| `mg-report`      | HackerOne-ready report drafts with local CVSS 3.1 scoring |
 | `mg-tui`         | Ratatui dashboard/browser: engagements, hosts, findings, fuzz, logs, harness status, host pivoting, page rendering, inspector, search, and session headers |
 | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls |
 
@@ -91,6 +92,7 @@ an engagement has a configured session profile.
 |---------|--------------|
 | `session` | Engagement auth/session config and header resolution for tools without plaintext token storage |
 | `payload-engine` | Stack-aware payload selection for fuzzing and harness planning |
+| `mg-report` | Shared report-generation library used by the CLI and harness endpoint |
 
 ## Governing docs
 

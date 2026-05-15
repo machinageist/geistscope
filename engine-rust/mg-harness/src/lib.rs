@@ -115,6 +115,8 @@ pub enum HarnessError {
     TimeFormat(#[from] time::error::Format),
     #[error("recon: {0}")]
     Recon(#[from] anyhow::Error),
+    #[error("report: {0}")]
+    Report(#[from] mg_report::ReportError),
     #[error("session: {0}")]
     Session(#[from] session::SessionError),
 }
@@ -193,6 +195,7 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "session.set" => handle_session_set(cfg, &invocation).await,
         "session.get_headers" => handle_session_get_headers(cfg, &invocation).await,
         "chain.read" => handle_chain_read(cfg, &invocation).await,
+        "report.generate" => handle_report_generate(cfg, &invocation).await,
         "finding.read" => handle_finding_read(cfg, &invocation).await,
         "finding.create" => handle_finding_create(cfg, &invocation).await,
         _ => Ok(result_blocked(
@@ -321,10 +324,10 @@ pub fn registry() -> Vec<EndpointSpec> {
             description: "Retest finding evidence.",
         },
         EndpointSpec {
-            name: "report.draft",
+            name: "report.generate",
             risk: RiskClass::ReadOnly,
-            implemented: false,
-            description: "Draft a bounty or consulting report from local evidence.",
+            implemented: true,
+            description: "Generate a bounty report from one local finding.",
         },
         EndpointSpec {
             name: "risk.rank",
@@ -873,6 +876,52 @@ async fn handle_chain_read(
             "markdown": markdown,
             "json_truncated": json_truncated,
             "markdown_truncated": md_truncated,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle report.generate
+async fn handle_report_generate(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let finding_id = required_string(&invocation.args, "finding_id")?;
+    let model = optional_string(&invocation.args, "model", "claude-sonnet-4-6")?;
+    let ollama_model = optional_string(&invocation.args, "ollama_model", "llama3.2")?;
+    let offline = optional_bool(&invocation.args, "offline", false)?;
+    let force = optional_bool(&invocation.args, "force", false)?;
+    let output = mg_report::generate_report(&mg_report::ReportConfig {
+        engagements_dir: cfg.engagements_dir.clone(),
+        engagement: invocation.engagement.clone(),
+        finding_id: finding_id.clone(),
+        model,
+        ollama_model,
+        offline,
+        force,
+    })
+    .await?;
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("report generated for finding {finding_id}")),
+        output_files: vec![display_path(&output.report_path)],
+        evidence_refs: vec![format!(
+            "evidence://{}/report/{}",
+            invocation.engagement, output.finding_id
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "finding_id": output.finding_id,
+            "finding_path": display_path(&output.finding_path),
+            "report_path": display_path(&output.report_path),
+            "cvss_vector": output.cvss_vector,
+            "cvss_score": output.cvss_score,
+            "severity": output.severity,
+            "generated": output.generated,
         })),
         reason: None,
         policy: None,
@@ -1460,6 +1509,36 @@ mod tests {
                 .contains("analysis_markdown")
         );
         assert!(data["markdown"].as_str().unwrap().contains("## Chains"));
+    }
+
+    #[tokio::test]
+    async fn report_generate_writes_offline_report() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        let finding = Finding {
+            id: "2026-05-15-001".into(),
+            title: "Open redirect on login".into(),
+            severity: Severity::Medium,
+            status: Status::Confirmed,
+            target: "www.example.com".into(),
+            created: "2026-05-15T00:00:00Z".into(),
+            body: "## Summary\n\nLogin redirects to arbitrary URLs.\n\n## Steps to reproduce\n\n1. Visit /login?next=https://evil.example\n\n## Impact\n\nPhishing and OAuth chain risk.\n\n## Evidence\n\nGET /login?next=https://evil.example -> 302\n\n## Remediation\n\nAllowlist redirect targets.\n".into(),
+        };
+        finding.write_to(&eng.findings_dir()).unwrap();
+        let mut inv = invocation("report.generate");
+        inv.args = json!({
+            "finding_id": "2026-05-15-001",
+            "offline": true,
+            "force": true,
+        });
+
+        let result = dispatch(&cfg, inv).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        let report_path = data["report_path"].as_str().unwrap();
+        assert!(Path::new(report_path).exists());
+        assert!(data["cvss_score"].as_f64().unwrap() > 0.0);
     }
 
     #[test]

@@ -33,6 +33,7 @@ geistscope/
 │   ├── mg-probe/          # bin: passive posture + optional active endpoint checks
 │   ├── mg-fuzz/           # bin: Burp Intruder-style payload fuzzer
 │   ├── mg-replay/         # bin: Burp Repeater-style finding verification
+│   ├── mg-report/         # lib+bin: bounty report generation + CVSS scoring
 │   └── mg-harness/        # lib+bin: scoped AI/TUI endpoint dispatcher
 └── docs/                  # Design notes (currently sparse)
 ```

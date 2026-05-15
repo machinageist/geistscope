@@ -142,10 +142,14 @@ Current-feature improvements:
 
 ## P2: Reporting And Consulting
 
+Status: started. `mg-report generate` now turns one local finding into a
+HackerOne-style Markdown report, computes CVSS 3.1 locally from a vector, and is
+available through the read-only harness endpoint `report.generate`.
+
 Features:
 
 - Evidence vault with redaction review.
-- Bounty report drafts using platform-specific fields.
+- Bounty report drafts using platform-specific fields. Started.
 - Client report generator with executive summary, scope, methodology, findings,
   evidence appendix, and retest section.
 - CVSS, Bugcrowd VRT, and HackerOne-style severity mapping.

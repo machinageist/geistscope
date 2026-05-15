@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 engagement = { path = "../engagement" }
 mg-recon = { path = "../mg-recon" }
+mg-report = { path = "../mg-report" }
 session = { path = "../session" }
 anyhow = "1"
 clap = { version = "4.5", features = ["derive", "env"] }

@@ -15,6 +15,7 @@ members = [
     "mg-replay",
     "mg-tui",
     "mg-harness",
+    "mg-report",
     "session",
     "payload-engine",
 ]
