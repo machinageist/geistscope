@@ -94,6 +94,7 @@ Errors should be explicit:
 | Endpoint | Risk | Current mapping | Purpose |
 |---|---|---|---|
 | `engagement.open` | `read_only` | `mg-engagement` files | Load engagement summary |
+| `engagement.status` | `read_only` | `mg-engagement` files | Summarize output files and engagement counts |
 | `scope.check` | `read_only` | `engagement` crate | Decide if target/action is allowed |
 | `audit.append` | `read_only` | `engagement` crate | Persist tool/AI activity |
 | `recon.run` | `high_active` | `mg-recon` | Run subdomain, fingerprint, scan summary |
@@ -107,6 +108,7 @@ Errors should be explicit:
 | `oob.allocate` | `read_only` | planned Interactsh client | Create callback token/domain |
 | `oob.poll` | `passive_remote` | planned Interactsh client | Fetch callback evidence |
 | `finding.create` | `read_only` | `mg-engagement` | Create finding markdown |
+| `finding.read` | `read_only` | `mg-engagement` | Read bounded finding markdown by ID |
 | `finding.replay` | `low_active` | `mg-replay` | Retest finding evidence |
 | `report.draft` | `read_only` | planned | Generate bounty/client report draft |
 | `skill.match` | `read_only` | `ai-prioritize` skill loader | Match evidence to bug-class skills |
@@ -164,7 +166,8 @@ local model, apply the same schema validation in the harness before dispatch.
    the first `mg-harness` slice.
 2. Add a local `mg-harness` crate that dispatches current CLI/library functions.
    In progress: `endpoint.registry`, `engagement.open`, `scope.check`, and
-   confirmed `recon.run`, and scoped `finding.create` are implemented.
+   confirmed `recon.run`, scoped `finding.create`, `engagement.status`, and
+   bounded `finding.read` are implemented.
 3. Add `--json`/machine-output parity where current binaries lack it.
 4. Build TUI actions on top of the same dispatcher.
 5. Add a model-provider adapter that can produce endpoint requests only.

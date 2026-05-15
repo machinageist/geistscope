@@ -9,6 +9,7 @@
  *******************************************************************/
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use engagement::{Engagement, Finding, Severity, Status};
@@ -20,6 +21,7 @@ use time::format_description::well_known::Rfc3339;
 use url::Url;
 
 const HARNESS_VERSION: &str = "2026-05-15";
+const MAX_MODEL_VISIBLE_BYTES: usize = 256 * 1024;
 
 // Risk classes used by endpoint policy
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +105,8 @@ pub enum HarnessError {
     UnknownEndpoint(String),
     #[error("invalid endpoint arguments: {0}")]
     InvalidArgs(String),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
     #[error("engagement: {0}")]
     Engagement(#[from] engagement::EngagementError),
     #[error("json: {0}")]
@@ -181,8 +185,10 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
     let dispatch_result = match endpoint.as_str() {
         "endpoint.registry" => Ok(endpoint_registry()),
         "engagement.open" => handle_engagement_open(cfg, &invocation).await,
+        "engagement.status" => handle_engagement_status(cfg, &invocation).await,
         "scope.check" => handle_scope_check(cfg, &invocation).await,
         "recon.run" => handle_recon_run(cfg, &invocation).await,
+        "finding.read" => handle_finding_read(cfg, &invocation).await,
         "finding.create" => handle_finding_create(cfg, &invocation).await,
         _ => Ok(result_blocked(
             endpoint.clone(),
@@ -212,6 +218,12 @@ pub fn registry() -> Vec<EndpointSpec> {
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Load engagement metadata, scope, and key workspace file paths.",
+        },
+        EndpointSpec {
+            name: "engagement.status",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Summarize current engagement output files and counts.",
         },
         EndpointSpec {
             name: "scope.check",
@@ -272,6 +284,12 @@ pub fn registry() -> Vec<EndpointSpec> {
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Create a finding skeleton from evidence references.",
+        },
+        EndpointSpec {
+            name: "finding.read",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Read one finding markdown file by finding ID.",
         },
         EndpointSpec {
             name: "finding.replay",
@@ -371,6 +389,63 @@ async fn handle_engagement_open(
     })
 }
 
+// Handle engagement.status
+async fn handle_engagement_status(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let recon_dir = eng.recon_dir();
+    let crawl_dir = eng.crawl_dir();
+    let findings_dir = eng.findings_dir();
+    let audit_path = eng.root.join("audit.log");
+    let summary_path = recon_dir.join("summary.json");
+    let priorities_path = recon_dir.join("priorities.json");
+    let probe_path = recon_dir.join("probe-report.json");
+
+    let data = json!({
+        "engagement": invocation.engagement,
+        "target": eng.meta.target,
+        "files": {
+            "summary": file_state(&summary_path),
+            "priorities": file_state(&priorities_path),
+            "probe_report": file_state(&probe_path),
+            "audit_log": file_state(&audit_path),
+        },
+        "counts": {
+            "crawl_hosts": count_dirs(&crawl_dir),
+            "findings": count_files_with_extension(&findings_dir, "md"),
+            "fuzz_reports": count_files_with_prefix_suffix(&recon_dir, "fuzz-", ".json"),
+            "audit_lines": count_lines(&audit_path),
+        },
+        "paths": {
+            "root": display_path(&eng.root),
+            "recon": display_path(&recon_dir),
+            "crawl": display_path(&crawl_dir),
+            "findings": display_path(&findings_dir),
+        }
+    });
+
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some("endpoint=engagement.status"),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("engagement {} status loaded", invocation.engagement)),
+        output_files: vec![display_path(&summary_path), display_path(&priorities_path)],
+        evidence_refs: Vec::new(),
+        redactions: BTreeMap::new(),
+        data: Some(data),
+        reason: None,
+        policy: None,
+    })
+}
+
 // Handle finding.create
 async fn handle_finding_create(
     cfg: &HarnessConfig,
@@ -429,6 +504,50 @@ async fn handle_finding_create(
             "id": finding.id,
             "severity": finding.severity.as_str(),
             "status": finding.status.as_str(),
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle finding.read
+async fn handle_finding_read(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let finding_id = required_string(&invocation.args, "finding_id")?;
+    validate_finding_id(&finding_id)?;
+    let path = find_finding_path(&eng.findings_dir(), &finding_id)?;
+    let raw = fs::read_to_string(&path)?;
+    let (markdown, truncated) = truncate_model_visible(&raw);
+    let mut redactions = BTreeMap::new();
+    if truncated {
+        redactions.insert("truncated_bytes".into(), raw.len().saturating_sub(markdown.len()));
+    }
+
+    let _ = eng.audit(
+        "mg-harness",
+        &finding_id,
+        Some(&format!("endpoint=finding.read path={}", path.display())),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("finding {finding_id} loaded")),
+        output_files: vec![display_path(&path)],
+        evidence_refs: vec![format!(
+            "evidence://{}/finding/{}",
+            invocation.engagement, finding_id
+        )],
+        redactions,
+        data: Some(json!({
+            "finding_id": finding_id,
+            "path": display_path(&path),
+            "markdown": markdown,
+            "truncated": truncated,
         })),
         reason: None,
         policy: None,
@@ -612,6 +731,114 @@ fn optional_string_array(args: &Value, key: &str) -> Result<Vec<String>, Harness
         .collect()
 }
 
+// Validate a finding ID before matching local files
+fn validate_finding_id(finding_id: &str) -> Result<(), HarnessError> {
+    if finding_id.is_empty()
+        || finding_id.contains('/')
+        || finding_id.contains('\\')
+        || finding_id.chars().any(char::is_control)
+    {
+        return Err(HarnessError::InvalidArgs(
+            "finding_id must be a safe file prefix".into(),
+        ));
+    }
+    Ok(())
+}
+
+// Find a finding markdown path by ID prefix
+fn find_finding_path(findings_dir: &Path, finding_id: &str) -> Result<PathBuf, HarnessError> {
+    let entries = fs::read_dir(findings_dir)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with(finding_id) && name.ends_with(".md") {
+            return Ok(path);
+        }
+    }
+    Err(HarnessError::InvalidArgs(format!(
+        "finding `{finding_id}` not found"
+    )))
+}
+
+// Truncate model-visible markdown to the configured cap
+fn truncate_model_visible(raw: &str) -> (String, bool) {
+    if raw.len() <= MAX_MODEL_VISIBLE_BYTES {
+        return (raw.to_string(), false);
+    }
+    let mut end = MAX_MODEL_VISIBLE_BYTES;
+    while !raw.is_char_boundary(end) {
+        end -= 1;
+    }
+    (raw[..end].to_string(), true)
+}
+
+// Return file state for status JSON
+fn file_state(path: &Path) -> Value {
+    match fs::metadata(path) {
+        Ok(meta) => json!({
+            "exists": true,
+            "bytes": meta.len(),
+            "path": display_path(path),
+        }),
+        Err(_) => json!({
+            "exists": false,
+            "bytes": 0,
+            "path": display_path(path),
+        }),
+    }
+}
+
+// Count child directories
+fn count_dirs(path: &Path) -> usize {
+    fs::read_dir(path)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.file_type().is_ok_and(|ty| ty.is_dir()))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+// Count files with a specific extension
+fn count_files_with_extension(path: &Path, extension: &str) -> usize {
+    fs::read_dir(path)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == extension))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+// Count files by prefix and suffix
+fn count_files_with_prefix_suffix(path: &Path, prefix: &str, suffix: &str) -> usize {
+    fs::read_dir(path)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.starts_with(prefix) && name.ends_with(suffix))
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+// Count lines in a UTF-8 text file
+fn count_lines(path: &Path) -> usize {
+    fs::read_to_string(path)
+        .map(|raw| raw.lines().count())
+        .unwrap_or(0)
+}
+
 // Parse severity from endpoint args
 fn parse_severity(raw: &str) -> Result<Severity, HarnessError> {
     match raw.to_lowercase().as_str() {
@@ -772,6 +999,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn engagement_status_returns_counts() {
+        let cfg = test_config();
+        let result = dispatch(&cfg, invocation("engagement.status")).await;
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        assert_eq!(data["counts"]["findings"], 0);
+        assert!(data["files"]["audit_log"]["exists"].as_bool().unwrap());
+    }
+
+    #[tokio::test]
     async fn scope_check_normalizes_url_hosts() {
         let cfg = test_config();
         let mut inv = invocation("scope.check");
@@ -829,6 +1066,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn finding_read_loads_created_markdown() {
+        let cfg = test_config();
+        let mut create = invocation("finding.create");
+        create.args = json!({
+            "title": "Readable finding",
+            "target": "https://api.example.com/v1/users/2"
+        });
+        let create_result = dispatch(&cfg, create).await;
+        let finding_id = create_result.data.unwrap()["id"].as_str().unwrap().to_string();
+
+        let mut read = invocation("finding.read");
+        read.args = json!({ "finding_id": finding_id });
+        let read_result = dispatch(&cfg, read).await;
+        assert_eq!(read_result.status, EndpointStatus::Ok);
+        let data = read_result.data.unwrap();
+        assert!(data["markdown"].as_str().unwrap().contains("Readable finding"));
+        assert_eq!(data["truncated"], false);
+    }
+
+    #[tokio::test]
+    async fn finding_read_rejects_path_like_ids() {
+        let cfg = test_config();
+        let mut read = invocation("finding.read");
+        read.args = json!({ "finding_id": "../escape" });
+        let result = dispatch(&cfg, read).await;
+        assert_eq!(result.status, EndpointStatus::Error);
+        assert_eq!(result.policy.as_deref(), Some("endpoint.error"));
+    }
+
+    #[tokio::test]
     async fn finding_create_blocks_out_of_scope_target() {
         let cfg = test_config();
         let mut inv = invocation("finding.create");
@@ -847,5 +1114,13 @@ mod tests {
         assert!(parse_ports("0-1024").is_err());
         assert!(parse_ports("9000-80").is_err());
         assert!(parse_ports("443").is_err());
+    }
+
+    #[test]
+    fn model_visible_truncation_respects_utf8() {
+        let raw = format!("{}é", "a".repeat(MAX_MODEL_VISIBLE_BYTES));
+        let (truncated, did_truncate) = truncate_model_visible(&raw);
+        assert!(did_truncate);
+        assert!(truncated.is_char_boundary(truncated.len()));
     }
 }

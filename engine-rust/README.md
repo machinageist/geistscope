@@ -61,9 +61,11 @@ Implemented harness endpoints:
 
 - `endpoint.registry`
 - `engagement.open`
+- `engagement.status`
 - `scope.check`
 - `recon.run` (requires `confirmed: true`)
 - `finding.create`
+- `finding.read`
 
 ## Engagement directory layout
 

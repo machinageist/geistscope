@@ -55,8 +55,8 @@ Goal: route AI assistance through scoped endpoints instead of free-form shell.
 
 Status: started. `mg-harness` now provides a JSON invocation CLI and library
 dispatcher with endpoint registry, version/risk checks, confirmation gating,
-scope checks, and implemented `engagement.open`, `scope.check`, `recon.run`, and
-`finding.create`.
+scope checks, and implemented `engagement.open`, `engagement.status`,
+`scope.check`, `recon.run`, `finding.create`, and `finding.read`.
 
 Features:
 

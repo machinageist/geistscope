@@ -99,8 +99,8 @@ visibility, and AI-assisted next-test suggestions.
 
 **Next engine layer:** `mg-harness`, a local endpoint dispatcher that lets the
 AI call scoped tools through typed schemas. The first slice exists with
-`endpoint.registry`, `engagement.open`, `scope.check`, confirmed `recon.run`,
-and scoped `finding.create`.
+`endpoint.registry`, `engagement.open`, `engagement.status`, `scope.check`,
+confirmed `recon.run`, scoped `finding.create`, and bounded `finding.read`.
 See `docs/AI_TOOL_ENDPOINTS.md`.
 
 High-priority candidates: Interactsh/OOB integration, request corpus import,
