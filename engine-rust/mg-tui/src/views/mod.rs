@@ -13,3 +13,4 @@ pub mod fuzz;
 pub mod harness;
 pub mod hosts;
 pub mod logs;
+pub mod requests;

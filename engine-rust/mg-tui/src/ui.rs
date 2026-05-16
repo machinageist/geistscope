@@ -7,7 +7,7 @@
  *******************************************************************/
 
 use crate::app::{App, Tab};
-use crate::views::{browser, engagements, findings, fuzz, harness, hosts, logs};
+use crate::views::{browser, engagements, findings, fuzz, harness, hosts, logs, requests};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -32,6 +32,7 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.tab {
         Tab::Engagements => engagements::render(f, app, chunks[1]),
         Tab::Hosts => hosts::render(f, app, chunks[1]),
+        Tab::Requests => requests::render(f, app, chunks[1]),
         Tab::Findings => findings::render(f, app, chunks[1]),
         Tab::Fuzz => fuzz::render(f, app, chunks[1]),
         Tab::Logs => logs::render(f, app, chunks[1]),

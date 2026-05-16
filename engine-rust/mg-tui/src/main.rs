@@ -270,6 +270,19 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers, tx: &Sender
             }
         }
 
+        KeyCode::Enter if app.tab == Tab::Requests => {
+            if let Some(url) = app
+                .data
+                .requests
+                .get(app.request_cursor)
+                .map(|request| request.url.clone())
+            {
+                app.tab = Tab::Browser;
+                app.browser.begin_navigate(&url);
+                navigate(app, url, tx);
+            }
+        }
+
         KeyCode::Enter if app.tab == Tab::Browser => {
             if let Some(url) = app.browser.selected_link_url().map(str::to_string) {
                 let resolved = resolve_url(&url, &app.browser.url);

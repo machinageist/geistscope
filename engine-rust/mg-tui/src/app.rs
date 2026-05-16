@@ -17,6 +17,7 @@ use std::path::PathBuf;
 pub enum Tab {
     Engagements,
     Hosts,
+    Requests,
     Findings,
     Fuzz,
     Logs,
@@ -28,6 +29,7 @@ impl Tab {
     pub const ALL: &'static [Tab] = &[
         Tab::Engagements,
         Tab::Hosts,
+        Tab::Requests,
         Tab::Findings,
         Tab::Fuzz,
         Tab::Logs,
@@ -39,6 +41,7 @@ impl Tab {
         match self {
             Tab::Engagements => "Engagements",
             Tab::Hosts => "Hosts",
+            Tab::Requests => "Requests",
             Tab::Findings => "Findings",
             Tab::Fuzz => "Fuzz",
             Tab::Logs => "Logs",
@@ -315,6 +318,7 @@ pub struct App {
     pub selected_engagement: Option<String>,
     pub data: EngagementData,
     pub host_cursor: usize,
+    pub request_cursor: usize,
     pub finding_cursor: usize,
     pub fuzz_cursor: usize,
     pub log_offset: usize,
@@ -336,6 +340,7 @@ impl App {
             selected_engagement: None,
             data: EngagementData::default(),
             host_cursor: 0,
+            request_cursor: 0,
             finding_cursor: 0,
             fuzz_cursor: 0,
             log_offset: 0,
@@ -367,6 +372,7 @@ impl App {
             self.data = load_engagement_data(&self.engagements_dir, &name);
             self.selected_engagement = Some(name);
             self.host_cursor = 0;
+            self.request_cursor = 0;
             self.finding_cursor = 0;
             self.fuzz_cursor = 0;
             self.log_offset = 0;
@@ -385,6 +391,11 @@ impl App {
             Tab::Hosts => {
                 if self.host_cursor > 0 {
                     self.host_cursor -= 1;
+                }
+            }
+            Tab::Requests => {
+                if self.request_cursor > 0 {
+                    self.request_cursor -= 1;
                 }
             }
             Tab::Findings => {
@@ -426,6 +437,11 @@ impl App {
             Tab::Hosts => {
                 if self.host_cursor + 1 < self.data.hosts.len() {
                     self.host_cursor += 1;
+                }
+            }
+            Tab::Requests => {
+                if self.request_cursor + 1 < self.data.requests.len() {
+                    self.request_cursor += 1;
                 }
             }
             Tab::Findings => {

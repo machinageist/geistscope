@@ -51,6 +51,21 @@ pub struct FuzzEntry {
     pub interesting: bool,
 }
 
+// Request corpus row built from traffic/corpus.jsonl
+#[derive(Clone, Debug)]
+pub struct RequestEntry {
+    pub id: String,
+    pub method: String,
+    pub url: String,
+    pub host: String,
+    pub path: String,
+    pub status: Option<u16>,
+    pub mime: String,
+    pub auth_state: String,
+    pub source: String,
+    pub captured_at: String,
+}
+
 // Parsed harness event from audit.log
 #[derive(Clone, Debug, Default)]
 pub struct HarnessEvent {
@@ -75,6 +90,7 @@ pub struct HarnessData {
 #[derive(Clone, Debug, Default)]
 pub struct EngagementData {
     pub hosts: Vec<HostRecord>,
+    pub requests: Vec<RequestEntry>,
     pub findings: Vec<FindingEntry>,
     pub fuzz_results: Vec<FuzzEntry>,
     pub log_lines: Vec<String>,
@@ -171,6 +187,7 @@ pub fn load_engagement_data(engagements_dir: &Path, name: &str) -> EngagementDat
     let harness = load_harness(&log_lines);
     EngagementData {
         hosts: load_hosts(&dir),
+        requests: load_requests(&dir),
         findings: load_findings(&dir),
         fuzz_results: load_fuzz(&dir),
         log_lines,
@@ -205,6 +222,42 @@ fn load_hosts(dir: &Path) -> Vec<HostRecord> {
             })
         })
         .collect()
+}
+
+// Load normalized request corpus rows from traffic/corpus.jsonl
+fn load_requests(dir: &Path) -> Vec<RequestEntry> {
+    let path = dir.join("traffic").join("corpus.jsonl");
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(_) => return Vec::new(),
+    };
+    let mut rows: Vec<RequestEntry> = raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let record: engagement::TrafficRecord = serde_json::from_str(line).ok()?;
+            let status = record.response.as_ref().map(|response| response.status);
+            let mime = record
+                .response
+                .as_ref()
+                .and_then(|response| response.mime.clone())
+                .unwrap_or_default();
+            Some(RequestEntry {
+                id: record.id,
+                method: record.method,
+                url: record.url,
+                host: record.host,
+                path: record.path,
+                status,
+                mime,
+                auth_state: record.auth_state.as_str().to_string(),
+                source: record.source,
+                captured_at: record.captured_at,
+            })
+        })
+        .collect();
+    rows.sort_by(|left, right| right.captured_at.cmp(&left.captured_at));
+    rows
 }
 
 // Parse finding markdown frontmatter for id, title, severity, host
