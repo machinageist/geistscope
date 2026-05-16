@@ -10,10 +10,18 @@
 pub mod engagement;
 pub mod finding;
 pub mod scope;
+pub mod traffic;
 
 pub use engagement::{Engagement, EngagementMeta};
 pub use finding::{Finding, Severity, Status};
 pub use scope::Scope;
+pub use traffic::{
+    AuthState, BodyRef, HeaderRecord, ImportSummary, ResponseDiff, ResponseFingerprint,
+    TrafficFilter, TrafficImportFormat, TrafficRecord, TrafficResponse, TrafficStore,
+    diff_response_fingerprints, find_traffic_record, import_traffic_file, load_traffic_records,
+    raw_http_request, response_fingerprint_from_parts, response_fingerprint_from_record,
+    search_traffic_records,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngagementError {

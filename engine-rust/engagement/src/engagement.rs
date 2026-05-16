@@ -51,6 +51,8 @@ impl Engagement {
         fs::create_dir_all(root.join("recon"))?;
         fs::create_dir_all(root.join("crawl"))?;
         fs::create_dir_all(root.join("findings"))?;
+        fs::create_dir_all(root.join("traffic").join("bodies"))?;
+        fs::create_dir_all(root.join("traffic").join("replays"))?;
 
         write_json(&root.join("engagement.json"), &meta)?;
         Scope::default_for(&meta.target).save(&root.join("scope.json"))?;
@@ -169,6 +171,22 @@ impl Engagement {
     pub fn findings_dir(&self) -> PathBuf {
         self.root.join("findings")
     }
+    // Return path to the traffic corpus directory
+    pub fn traffic_dir(&self) -> PathBuf {
+        self.root.join("traffic")
+    }
+    // Return path to the traffic corpus JSONL index
+    pub fn traffic_corpus_path(&self) -> PathBuf {
+        self.traffic_dir().join("corpus.jsonl")
+    }
+    // Return path to stored request/response body blobs
+    pub fn traffic_bodies_dir(&self) -> PathBuf {
+        self.traffic_dir().join("bodies")
+    }
+    // Return path to replay results derived from corpus requests
+    pub fn traffic_replays_dir(&self) -> PathBuf {
+        self.traffic_dir().join("replays")
+    }
     // Return path to the reverse-engineering directory
     pub fn re_dir(&self) -> PathBuf {
         self.root.join("re")
@@ -276,6 +294,8 @@ mod tests {
         assert!(e.root.join("recon").is_dir());
         assert!(e.root.join("crawl").is_dir());
         assert!(e.root.join("findings").is_dir());
+        assert!(e.root.join("traffic").join("bodies").is_dir());
+        assert!(e.root.join("traffic").join("replays").is_dir());
     }
 
     #[test]

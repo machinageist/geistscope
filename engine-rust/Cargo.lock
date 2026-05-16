@@ -654,12 +654,16 @@ name = "engagement"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
+ "hex",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "time",
+ "url",
 ]
 
 [[package]]
@@ -1639,6 +1643,7 @@ dependencies = [
  "mg-recopilot",
  "mg-report",
  "payload-engine",
+ "reqwest",
  "security-graph",
  "serde",
  "serde_json",
