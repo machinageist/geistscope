@@ -100,6 +100,47 @@ pub enum Command {
         #[arg(long)]
         url: String,
     },
+    /// Import and inspect normalized request/response traffic
+    Traffic {
+        name: String,
+        #[command(subcommand)]
+        command: TrafficCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TrafficCommand {
+    /// Import HAR, Burp XML, or Caido JSON traffic into traffic/corpus.jsonl
+    Import {
+        file: String,
+        /// Import format: auto|har|burp|caido
+        #[arg(long, default_value = "auto")]
+        format: String,
+    },
+    /// List indexed corpus requests with optional filters
+    List {
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        method: Option<String>,
+        #[arg(long)]
+        status: Option<u16>,
+        #[arg(long)]
+        mime: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        path_contains: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Show one request by ID or unambiguous ID prefix
+    Show {
+        request_id: String,
+        /// Emit a raw HTTP request template instead of JSON metadata
+        #[arg(long)]
+        raw: bool,
+    },
 }
 
 pub fn get_args() -> Args {

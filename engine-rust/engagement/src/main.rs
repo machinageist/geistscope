@@ -6,7 +6,9 @@
 mod cli;
 
 use anyhow::{Context, Result, anyhow};
-use engagement::{Engagement, EngagementMeta, Finding, Severity, Status};
+use engagement::{
+    Engagement, EngagementMeta, Finding, Severity, Status, TrafficFilter, TrafficImportFormat,
+};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -45,6 +47,16 @@ struct CredentialsSetInput {
     token_header: String,
     token_prefix: String,
     login_method: Option<String>,
+}
+
+struct TrafficListInput {
+    host: Option<String>,
+    method: Option<String>,
+    status: Option<u16>,
+    mime: Option<String>,
+    source: Option<String>,
+    path_contains: Option<String>,
+    limit: usize,
 }
 
 fn parse_severity(s: &str) -> Result<Severity> {
@@ -336,6 +348,90 @@ fn cmd_finding(
     Ok(())
 }
 
+fn cmd_traffic_import(root: &Path, name: &str, file: &str, format: &str) -> Result<()> {
+    let engagement = Engagement::load_named(root, name)?;
+    let format = TrafficImportFormat::parse(format)?;
+    let summary = engagement::import_traffic_file(&engagement, Path::new(file), format)?;
+    let _ = engagement.audit(
+        "mg-engagement",
+        &engagement.meta.target,
+        Some(&format!(
+            "traffic-import format={} imported={} skipped={} source={}",
+            summary.format, summary.imported, summary.skipped, summary.source
+        )),
+    );
+    println!(
+        "imported {} request(s), skipped {} duplicate(s) into {}",
+        summary.imported, summary.skipped, summary.corpus_path
+    );
+    Ok(())
+}
+
+fn cmd_traffic_list(root: &Path, name: &str, input: TrafficListInput) -> Result<()> {
+    let engagement = Engagement::load_named(root, name)?;
+    let records = engagement::search_traffic_records(
+        &engagement,
+        &TrafficFilter {
+            host: input.host,
+            method: input.method,
+            path_contains: input.path_contains,
+            status: input.status,
+            mime: input.mime,
+            auth_state: None,
+            source: input.source,
+            limit: Some(input.limit),
+        },
+    )?;
+    if records.is_empty() {
+        println!("no traffic records found for {name}");
+        return Ok(());
+    }
+
+    println!(
+        "{:<20} {:<6} {:<4} {:<22} {:<28} {:<13} SOURCE",
+        "ID", "METHOD", "STAT", "HOST", "PATH", "AUTH"
+    );
+    for record in &records {
+        let status = record
+            .response
+            .as_ref()
+            .map(|response| response.status.to_string())
+            .unwrap_or_else(|| "-".into());
+        println!(
+            "{:<20} {:<6} {:<4} {:<22} {:<28} {:<13} {}",
+            record.id,
+            record.method,
+            status,
+            truncate(&record.host, 22),
+            truncate(&record.path, 28),
+            record.auth_state.as_str(),
+            record.source
+        );
+    }
+    Ok(())
+}
+
+fn cmd_traffic_show(root: &Path, name: &str, request_id: &str, raw: bool) -> Result<()> {
+    let engagement = Engagement::load_named(root, name)?;
+    let record = engagement::find_traffic_record(&engagement, request_id)?;
+    if raw {
+        println!("{}", engagement::raw_http_request(&engagement, &record)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+    }
+    Ok(())
+}
+
+fn truncate(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        return value.to_string();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+    format!("{}...", value.chars().take(width - 3).collect::<String>())
+}
+
 fn main() -> Result<()> {
     let args = cli::get_args();
     let root = Path::new(&args.root);
@@ -391,6 +487,35 @@ fn main() -> Result<()> {
             },
         ),
         cli::Command::CredentialsTest { name, url } => cmd_credentials_test(root, &name, &url),
+        cli::Command::Traffic { name, command } => match command {
+            cli::TrafficCommand::Import { file, format } => {
+                cmd_traffic_import(root, &name, &file, &format)
+            }
+            cli::TrafficCommand::List {
+                host,
+                method,
+                status,
+                mime,
+                source,
+                path_contains,
+                limit,
+            } => cmd_traffic_list(
+                root,
+                &name,
+                TrafficListInput {
+                    host,
+                    method,
+                    status,
+                    mime,
+                    source,
+                    path_contains,
+                    limit,
+                },
+            ),
+            cli::TrafficCommand::Show { request_id, raw } => {
+                cmd_traffic_show(root, &name, &request_id, raw)
+            }
+        },
     }
 }
 
