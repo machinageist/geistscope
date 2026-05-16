@@ -12,8 +12,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 
-use engagement::{Engagement, Finding, Severity, Status};
+use engagement::{
+    AuthState, Engagement, Finding, Severity, Status, TrafficFilter, TrafficImportFormat,
+};
 use security_graph::{FileGraphStore, GraphStore, NodeKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -129,6 +132,8 @@ pub enum HarnessError {
     Graph(#[from] security_graph::SecurityGraphError),
     #[error("session: {0}")]
     Session(#[from] session::SessionError),
+    #[error("http: {0}")]
+    Http(#[from] reqwest::Error),
 }
 
 impl HarnessConfig {
@@ -204,6 +209,10 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "recon.run" => handle_recon_run(cfg, &invocation).await,
         "session.set" => handle_session_set(cfg, &invocation).await,
         "session.get_headers" => handle_session_get_headers(cfg, &invocation).await,
+        "request.import" => handle_request_import(cfg, &invocation).await,
+        "request.search" => handle_request_search(cfg, &invocation).await,
+        "request.read" => handle_request_read(cfg, &invocation).await,
+        "request.replay" => handle_request_replay(cfg, &invocation).await,
         "graph.ingest" => handle_graph_ingest(cfg, &invocation).await,
         "graph.summary" => handle_graph_summary(cfg, &invocation).await,
         "graph.neighbors" => handle_graph_neighbors(cfg, &invocation).await,
@@ -289,9 +298,27 @@ pub fn registry() -> Vec<EndpointSpec> {
             description: "Run passive and semi-active posture checks.",
         },
         EndpointSpec {
+            name: "request.import",
+            risk: RiskClass::StateChange,
+            implemented: true,
+            description: "Import HAR, Burp XML, or Caido JSON traffic into the engagement corpus.",
+        },
+        EndpointSpec {
+            name: "request.search",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Search the normalized request corpus with bounded filters.",
+        },
+        EndpointSpec {
+            name: "request.read",
+            risk: RiskClass::ReadOnly,
+            implemented: true,
+            description: "Read one normalized request record by request ID or prefix.",
+        },
+        EndpointSpec {
             name: "request.replay",
             risk: RiskClass::LowActive,
-            implemented: false,
+            implemented: true,
             description: "Replay one captured request and compare the response.",
         },
         EndpointSpec {
@@ -575,9 +602,11 @@ async fn handle_engagement_open(
     let recon_dir = display_path(&eng.recon_dir());
     let crawl_dir = display_path(&eng.crawl_dir());
     let findings_dir = display_path(&eng.findings_dir());
+    let traffic_dir = display_path(&eng.traffic_dir());
     let summary_path = eng.recon_dir().join("summary.json");
     let priorities_path = eng.recon_dir().join("priorities.json");
     let probe_path = eng.recon_dir().join("probe-report.json");
+    let traffic_corpus_path = eng.traffic_corpus_path();
 
     let data = json!({
         "meta": eng.meta,
@@ -587,6 +616,8 @@ async fn handle_engagement_open(
             "recon": recon_dir,
             "crawl": crawl_dir,
             "findings": findings_dir,
+            "traffic": traffic_dir,
+            "traffic_corpus": display_path(&traffic_corpus_path),
             "summary": display_path(&summary_path),
             "priorities": display_path(&priorities_path),
             "probe_report": display_path(&probe_path),
@@ -595,6 +626,7 @@ async fn handle_engagement_open(
             "summary": summary_path.exists(),
             "priorities": priorities_path.exists(),
             "probe_report": probe_path.exists(),
+            "traffic_corpus": traffic_corpus_path.exists(),
         }
     });
 
@@ -631,6 +663,7 @@ async fn handle_engagement_status(
     let summary_path = recon_dir.join("summary.json");
     let priorities_path = recon_dir.join("priorities.json");
     let probe_path = recon_dir.join("probe-report.json");
+    let traffic_corpus_path = eng.traffic_corpus_path();
 
     let data = json!({
         "engagement": invocation.engagement,
@@ -639,10 +672,12 @@ async fn handle_engagement_status(
             "summary": file_state(&summary_path),
             "priorities": file_state(&priorities_path),
             "probe_report": file_state(&probe_path),
+            "traffic_corpus": file_state(&traffic_corpus_path),
             "audit_log": file_state(&audit_path),
         },
         "counts": {
             "crawl_hosts": count_dirs(&crawl_dir),
+            "traffic_requests": count_lines(&traffic_corpus_path),
             "findings": count_files_with_extension(&findings_dir, "md"),
             "fuzz_reports": count_files_with_prefix_suffix(&recon_dir, "fuzz-", ".json"),
             "audit_lines": count_lines(&audit_path),
@@ -652,6 +687,7 @@ async fn handle_engagement_status(
             "recon": display_path(&recon_dir),
             "crawl": display_path(&crawl_dir),
             "findings": display_path(&findings_dir),
+            "traffic": display_path(&eng.traffic_dir()),
         }
     });
 
@@ -1019,6 +1055,226 @@ async fn handle_session_get_headers(
             "headers": redacted_headers,
             "header_count": header_count,
         })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle request.import
+async fn handle_request_import(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let file = required_string(&invocation.args, "file")?;
+    let format = optional_string(&invocation.args, "format", "auto")?;
+    let summary = engagement::import_traffic_file(
+        &eng,
+        Path::new(&file),
+        TrafficImportFormat::parse(&format)?,
+    )?;
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!(
+            "endpoint=request.import imported={} skipped={} format={}",
+            summary.imported, summary.skipped, summary.format
+        )),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::StateChange,
+        summary: Some(format!(
+            "imported {} request(s), skipped {} duplicate(s)",
+            summary.imported, summary.skipped
+        )),
+        output_files: vec![summary.corpus_path.clone()],
+        evidence_refs: vec![format!("evidence://{}/traffic", invocation.engagement)],
+        redactions: BTreeMap::new(),
+        data: Some(json!({ "summary": summary })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle request.search
+async fn handle_request_search(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let limit = optional_usize(&invocation.args, "limit", 25)?.min(100);
+    let filter = TrafficFilter {
+        host: optional_string_opt(&invocation.args, "host")?,
+        method: optional_string_opt(&invocation.args, "method")?,
+        path_contains: optional_string_opt(&invocation.args, "path_contains")?,
+        status: optional_u16_opt(&invocation.args, "status")?,
+        mime: optional_string_opt(&invocation.args, "mime")?,
+        auth_state: optional_auth_state(&invocation.args, "auth_state")?,
+        source: optional_string_opt(&invocation.args, "source")?,
+        limit: Some(limit),
+    };
+    let records = engagement::search_traffic_records(&eng, &filter)?;
+    let items: Vec<Value> = records.iter().map(traffic_record_summary).collect();
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!(
+            "endpoint=request.search count={} limit={limit}",
+            items.len()
+        )),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("request search returned {} record(s)", items.len())),
+        output_files: vec![display_path(&eng.traffic_corpus_path())],
+        evidence_refs: vec![format!("evidence://{}/traffic", invocation.engagement)],
+        redactions: BTreeMap::new(),
+        data: Some(json!({
+            "count": items.len(),
+            "limit": limit,
+            "requests": items,
+        })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle request.read
+async fn handle_request_read(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let request_id = required_string(&invocation.args, "request_id")?;
+    let include_raw = optional_bool(&invocation.args, "include_raw", false)?;
+    let record = engagement::find_traffic_record(&eng, &request_id)?;
+    let mut data = traffic_record_detail(&record);
+    if include_raw {
+        data["raw_request_template"] = json!(model_safe_raw_request(&record));
+    }
+    let _ = eng.audit(
+        "mg-harness",
+        &record.host,
+        Some(&format!("endpoint=request.read request_id={}", record.id)),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!("request {} loaded", record.id)),
+        output_files: vec![display_path(&eng.traffic_corpus_path())],
+        evidence_refs: vec![format!(
+            "evidence://{}/traffic/{}",
+            invocation.engagement, record.id
+        )],
+        redactions: BTreeMap::new(),
+        data: Some(data),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle request.replay
+async fn handle_request_replay(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let request_id = required_string(&invocation.args, "request_id")?;
+    let timeout_ms = optional_u64(&invocation.args, "timeout_ms", 15_000)?;
+    let insecure = optional_bool(&invocation.args, "insecure", false)?;
+    let record = engagement::find_traffic_record(&eng, &request_id)?;
+    ensure_target_in_scope(&eng, &record.url)?;
+
+    let session_headers = session::get_auth_headers_sync(&eng)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .redirect(reqwest::redirect::Policy::none())
+        .danger_accept_invalid_certs(insecure)
+        .default_headers(session_headers)
+        .user_agent("mg-harness/0.1 request.replay")
+        .build()?;
+
+    let method = reqwest::Method::from_bytes(record.method.as_bytes())
+        .map_err(|err| HarnessError::InvalidArgs(format!("invalid method: {err}")))?;
+    let mut builder = client.request(method, &record.url);
+    for header in &record.request_headers {
+        if header.redacted || should_skip_replay_header(&header.name) {
+            continue;
+        }
+        builder = builder.header(header.name.as_str(), header.value.as_str());
+    }
+    if let Some(body) = &record.request_body {
+        builder = builder.body(read_body_ref(&eng, body)?);
+    }
+
+    let started = Instant::now();
+    let response = builder.send().await?;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let status = response.status().as_u16();
+    let headers = response_headers_to_pairs(response.headers());
+    let body = read_limited_response_bytes(response, MAX_MODEL_VISIBLE_BYTES).await?;
+    let replay_fingerprint =
+        engagement::response_fingerprint_from_parts(status, &headers, &body, None);
+    let original_fingerprint = record
+        .response
+        .as_ref()
+        .map(engagement::response_fingerprint_from_record);
+    let diff = original_fingerprint
+        .as_ref()
+        .map(|original| engagement::diff_response_fingerprints(original, &replay_fingerprint));
+
+    fs::create_dir_all(eng.traffic_replays_dir())?;
+    let replayed_at = now_rfc3339()?;
+    let report_path = eng.traffic_replays_dir().join(format!(
+        "{}-{}.json",
+        record.id,
+        safe_timestamp(&replayed_at)
+    ));
+    let report = json!({
+        "engagement": invocation.engagement,
+        "request_id": record.id.clone(),
+        "url": redact_sensitive_url(&record.url),
+        "method": record.method.clone(),
+        "replayed_at": replayed_at,
+        "elapsed_ms": elapsed_ms,
+        "original": original_fingerprint,
+        "replay": replay_fingerprint,
+        "diff": diff,
+    });
+    fs::write(&report_path, serde_json::to_string_pretty(&report)?)?;
+
+    let _ = eng.audit(
+        "mg-harness",
+        &record.host,
+        Some(&format!(
+            "endpoint=request.replay request_id={} status={} elapsed_ms={elapsed_ms}",
+            record.id, status
+        )),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::LowActive,
+        summary: Some(format!("replayed {} -> {}", record.id, status)),
+        output_files: vec![display_path(&report_path)],
+        evidence_refs: vec![
+            format!("evidence://{}/traffic/{}", invocation.engagement, record.id),
+            format!(
+                "evidence://{}/traffic/replay/{}",
+                invocation.engagement, record.id
+            ),
+        ],
+        redactions: BTreeMap::new(),
+        data: Some(report),
         reason: None,
         policy: None,
     })
@@ -1530,6 +1786,34 @@ fn optional_u32(args: &Value, key: &str, default: u32) -> Result<u32, HarnessErr
         .map_err(|_| HarnessError::InvalidArgs(format!("arg `{key}` is too large")))
 }
 
+// Extract an optional u16 argument
+fn optional_u16_opt(args: &Value, key: &str) -> Result<Option<u16>, HarnessError> {
+    let Some(value) = args.get(key) else {
+        return Ok(None);
+    };
+    let raw = value
+        .as_u64()
+        .ok_or_else(|| HarnessError::InvalidArgs(format!("arg `{key}` must be a u16")))?;
+    let parsed = u16::try_from(raw)
+        .map_err(|_| HarnessError::InvalidArgs(format!("arg `{key}` is too large")))?;
+    Ok(Some(parsed))
+}
+
+// Extract an optional traffic auth state argument
+fn optional_auth_state(args: &Value, key: &str) -> Result<Option<AuthState>, HarnessError> {
+    let Some(raw) = optional_string_opt(args, key)? else {
+        return Ok(None);
+    };
+    match raw.as_str() {
+        "unknown" => Ok(Some(AuthState::Unknown)),
+        "anonymous" => Ok(Some(AuthState::Anonymous)),
+        "authenticated" => Ok(Some(AuthState::Authenticated)),
+        other => Err(HarnessError::InvalidArgs(format!(
+            "unknown auth_state `{other}`"
+        ))),
+    }
+}
+
 // Extract an optional array of strings
 fn optional_string_array(args: &Value, key: &str) -> Result<Vec<String>, HarnessError> {
     let Some(value) = args.get(key) else {
@@ -1726,6 +2010,195 @@ fn normalize_target(target: &str) -> Result<String, HarnessError> {
     Ok(normalized)
 }
 
+// Build a compact model-safe request row
+fn traffic_record_summary(record: &engagement::TrafficRecord) -> Value {
+    json!({
+        "id": record.id.clone(),
+        "method": record.method.clone(),
+        "url": redact_sensitive_url(&record.url),
+        "host": record.host.clone(),
+        "path": record.path.clone(),
+        "params": record.params.clone(),
+        "status": record.response.as_ref().map(|response| response.status),
+        "mime": record.response.as_ref().and_then(|response| response.mime.clone()),
+        "body_len": record.response.as_ref().map(|response| response.body_len),
+        "auth_state": record.auth_state.as_str(),
+        "source": record.source.clone(),
+        "captured_at": record.captured_at.clone(),
+    })
+}
+
+// Build a bounded model-safe request detail object
+fn traffic_record_detail(record: &engagement::TrafficRecord) -> Value {
+    json!({
+        "id": record.id.clone(),
+        "source": record.source.clone(),
+        "captured_at": record.captured_at.clone(),
+        "method": record.method.clone(),
+        "url": redact_sensitive_url(&record.url),
+        "host": record.host.clone(),
+        "path": record.path.clone(),
+        "params": record.params.clone(),
+        "request_headers": record.request_headers.clone(),
+        "request_body": record.request_body.as_ref().map(|body| json!({
+            "len": body.len,
+            "sha256": body.sha256.clone(),
+            "truncated": body.truncated,
+        })),
+        "response": record.response.as_ref().map(|response| json!({
+            "status": response.status,
+            "mime": response.mime.clone(),
+            "body_len": response.body_len,
+            "body_sha256": response.body_sha256.clone(),
+            "redirect_location": response.redirect_location.as_ref().map(|url| redact_sensitive_url(url)),
+            "cookie_names": response.cookie_names.clone(),
+            "html_title": response.html_title.clone(),
+            "json_shape": response.json_shape.clone(),
+        })),
+        "auth_state": record.auth_state.as_str(),
+    })
+}
+
+// Render a raw request skeleton without model-visible request body contents
+fn model_safe_raw_request(record: &engagement::TrafficRecord) -> String {
+    let redacted_url = redact_sensitive_url(&record.url);
+    let path = Url::parse(&redacted_url)
+        .ok()
+        .map(|url| {
+            let mut path = url.path().to_string();
+            if let Some(query) = url.query() {
+                path.push('?');
+                path.push_str(query);
+            }
+            path
+        })
+        .unwrap_or_else(|| record.path.clone());
+    let mut out = format!(
+        "{} {path} HTTP/1.1\r\nHost: {}\r\n",
+        record.method, record.host
+    );
+    for header in &record.request_headers {
+        if !header.name.eq_ignore_ascii_case("host") {
+            out.push_str(&format!("{}: {}\r\n", header.name, header.value));
+        }
+    }
+    out.push_str("\r\n");
+    if let Some(body) = &record.request_body {
+        out.push_str(&format!(
+            "<body omitted: {} bytes sha256={} truncated={}>\n",
+            body.len, body.sha256, body.truncated
+        ));
+    }
+    out
+}
+
+// Read a stored body blob from inside the engagement workspace
+fn read_body_ref(
+    engagement: &Engagement,
+    body: &engagement::BodyRef,
+) -> Result<Vec<u8>, HarnessError> {
+    let path = Path::new(&body.path);
+    let abs_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        engagement.root.join(path)
+    };
+    Ok(fs::read(abs_path)?)
+}
+
+// Skip headers that reqwest/session/default request construction owns
+fn should_skip_replay_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "host"
+            | "content-length"
+            | "connection"
+            | "authorization"
+            | "proxy-authorization"
+            | "cookie"
+            | "set-cookie"
+    )
+}
+
+// Convert response headers into string pairs for fingerprinting
+fn response_headers_to_pairs(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("<binary>").to_string(),
+            )
+        })
+        .collect()
+}
+
+// Read at most a bounded response body into memory
+async fn read_limited_response_bytes(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, HarnessError> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        let remaining = limit.saturating_sub(body.len());
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(chunk.len());
+        body.extend_from_slice(&chunk[..take]);
+        if take < chunk.len() {
+            break;
+        }
+    }
+    Ok(body)
+}
+
+// Redact sensitive query parameter values before returning URLs to model-visible callers
+fn redact_sensitive_url(raw: &str) -> String {
+    let Ok(mut url) = Url::parse(raw) else {
+        return raw.to_string();
+    };
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(name, value)| {
+            let value = if is_sensitive_param(&name) {
+                "<redacted>".into()
+            } else {
+                value.into_owned()
+            };
+            (name.into_owned(), value)
+        })
+        .collect();
+    if !pairs.is_empty() {
+        url.query_pairs_mut().clear().extend_pairs(pairs);
+    }
+    url.to_string()
+}
+
+fn is_sensitive_param(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "token"
+            | "access_token"
+            | "refresh_token"
+            | "id_token"
+            | "auth"
+            | "api_key"
+            | "key"
+            | "session"
+            | "password"
+            | "code"
+    )
+}
+
+// Compact an RFC3339 timestamp for filenames
+fn safe_timestamp(timestamp: &str) -> String {
+    timestamp
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
 // Convert a path into a display string
 fn display_path(path: &Path) -> String {
     path.display().to_string()
@@ -1860,9 +2333,92 @@ mod tests {
     #[tokio::test]
     async fn registered_unimplemented_endpoint_is_blocked() {
         let cfg = test_config();
-        let result = dispatch(&cfg, invocation("request.replay")).await;
+        let result = dispatch(&cfg, invocation("crawl.run")).await;
         assert_eq!(result.status, EndpointStatus::Blocked);
         assert_eq!(result.policy.as_deref(), Some("endpoint.not_implemented"));
+    }
+
+    #[tokio::test]
+    async fn request_import_search_and_read_round_trip() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        let har_path = cfg.engagements_dir.join("traffic.har");
+        fs::write(
+            &har_path,
+            r#"{
+              "log": {"entries": [{
+                "startedDateTime": "2026-05-15T00:00:00Z",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.example.com/v1/users?access_token=secret&id=1",
+                  "headers": [{"name":"Authorization","value":"Bearer secret"}],
+                  "queryString": [{"name":"id","value":"1"}]
+                },
+                "response": {
+                  "status": 200,
+                  "headers": [{"name":"Content-Type","value":"application/json"}],
+                  "content": {"mimeType":"application/json","text":"{\"id\":1,\"name\":\"Ada\"}"}
+                }
+              }]}}
+            "#,
+        )
+        .unwrap();
+
+        let mut import = invocation("request.import");
+        import.confirmed = true;
+        import.args = json!({
+            "file": har_path.display().to_string(),
+            "format": "har",
+        });
+        let import_result = dispatch(&cfg, import).await;
+        assert_eq!(
+            import_result.status,
+            EndpointStatus::Ok,
+            "{import_result:?}"
+        );
+        assert!(eng.traffic_corpus_path().exists());
+
+        let mut search = invocation("request.search");
+        search.args = json!({ "host": "api.example.com", "limit": 5 });
+        let search_result = dispatch(&cfg, search).await;
+        assert_eq!(search_result.status, EndpointStatus::Ok);
+        let search_data = search_result.data.unwrap();
+        let request_id = search_data["requests"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(search_data["requests"][0]["status"], 200);
+        assert!(
+            search_data["requests"][0]["url"]
+                .as_str()
+                .unwrap()
+                .contains("access_token=%3Credacted%3E")
+        );
+
+        let mut read = invocation("request.read");
+        read.args = json!({ "request_id": request_id, "include_raw": true });
+        let read_result = dispatch(&cfg, read).await;
+        assert_eq!(read_result.status, EndpointStatus::Ok);
+        let read_data = read_result.data.unwrap();
+        assert_eq!(read_data["request_headers"][0]["value"], "<redacted>");
+        assert!(
+            read_data["raw_request_template"]
+                .as_str()
+                .unwrap()
+                .contains("<redacted>")
+        );
+        assert!(
+            read_data["raw_request_template"]
+                .as_str()
+                .unwrap()
+                .contains("access_token=%3Credacted%3E")
+        );
+        assert!(
+            read_data["response"]["json_shape"]
+                .as_str()
+                .unwrap()
+                .contains("name:string")
+        );
     }
 
     #[tokio::test]
