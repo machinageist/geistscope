@@ -514,6 +514,12 @@ pub fn ingest_engagement(engagement: &Engagement) -> Result<GraphIngestReport, S
         sources.push(display_path(&endpoints_path));
     }
 
+    let traffic_path = engagement.traffic_corpus_path();
+    if traffic_path.exists() {
+        ingest_traffic_corpus(engagement, &store, &traffic_path, &timestamp)?;
+        sources.push(display_path(&traffic_path));
+    }
+
     let probe_path = engagement.recon_dir().join("probe-report.json");
     if probe_path.exists() {
         ingest_probe_report(engagement, &store, &probe_path, &timestamp)?;
@@ -769,6 +775,115 @@ fn ingest_crawl_endpoints(
                 SecurityEdge::new(EdgeKind::References, &url_id, &api_id, "graphql", timestamp)
                     .evidence(evidence.clone()),
             )?;
+        }
+    }
+    Ok(())
+}
+
+// Ingest normalized request/response corpus records
+fn ingest_traffic_corpus(
+    engagement: &Engagement,
+    store: &FileGraphStore,
+    path: &Path,
+    timestamp: &str,
+) -> Result<(), SecurityGraphError> {
+    let records = engagement::load_traffic_records(engagement)?;
+    for record in records {
+        let evidence = EvidenceRef::new(
+            format!("evidence://{}/traffic/{}", engagement.meta.name, record.id),
+            Some(path),
+        );
+        let host_id = node_id(NodeKind::Host, &record.host);
+        let url_id = node_id(NodeKind::Url, &record.url);
+        store.upsert_node(
+            SecurityNode::new(NodeKind::Host, &record.host, &record.host, timestamp)
+                .property("source", json!("traffic_corpus"))
+                .evidence(evidence.clone()),
+        )?;
+
+        let mut url_node = SecurityNode::new(NodeKind::Url, &record.url, &record.url, timestamp)
+            .property("source", json!(record.source))
+            .property("request_id", json!(record.id))
+            .property("method", json!(record.method))
+            .property("path", json!(record.path))
+            .property("params", json!(record.params))
+            .property("auth_state", json!(record.auth_state.as_str()))
+            .property("captured_at", json!(record.captured_at))
+            .evidence(evidence.clone());
+        if let Some(response) = &record.response {
+            url_node
+                .properties
+                .insert("status".into(), json!(response.status));
+            url_node
+                .properties
+                .insert("mime".into(), json!(response.mime));
+            url_node
+                .properties
+                .insert("body_len".into(), json!(response.body_len));
+            url_node
+                .properties
+                .insert("html_title".into(), json!(response.html_title));
+            url_node
+                .properties
+                .insert("json_shape".into(), json!(response.json_shape));
+        }
+        store.upsert_node(url_node)?;
+
+        store.upsert_edge(
+            SecurityEdge::new(
+                EdgeKind::Calls,
+                &host_id,
+                &url_id,
+                format!("traffic:{}", record.method),
+                timestamp,
+            )
+            .property("method", json!(record.method))
+            .property("request_id", json!(record.id))
+            .evidence(evidence.clone()),
+        )?;
+
+        for param in &record.params {
+            let param_key = format!("{}#{}", record.url, param);
+            let param_id = node_id(NodeKind::Parameter, &param_key);
+            store.upsert_node(
+                SecurityNode::new(NodeKind::Parameter, &param_key, param, timestamp)
+                    .property("url", json!(record.url))
+                    .property("request_id", json!(record.id))
+                    .evidence(evidence.clone()),
+            )?;
+            store.upsert_edge(
+                SecurityEdge::new(
+                    EdgeKind::References,
+                    &url_id,
+                    &param_id,
+                    "traffic_param",
+                    timestamp,
+                )
+                .evidence(evidence.clone()),
+            )?;
+        }
+
+        if let Some(response) = &record.response {
+            for cookie in &response.cookie_names {
+                let cookie_key = format!("{}:{}", record.host, cookie);
+                let cookie_id = node_id(NodeKind::Cookie, &cookie_key);
+                store.upsert_node(
+                    SecurityNode::new(NodeKind::Cookie, &cookie_key, cookie, timestamp)
+                        .property("host", json!(record.host))
+                        .property("request_id", json!(record.id))
+                        .evidence(evidence.clone()),
+                )?;
+                store.upsert_edge(
+                    SecurityEdge::new(
+                        EdgeKind::References,
+                        &url_id,
+                        &cookie_id,
+                        "set_cookie",
+                        timestamp,
+                    )
+                    .evidence(evidence.clone()),
+                )?;
+            }
         }
     }
     Ok(())
