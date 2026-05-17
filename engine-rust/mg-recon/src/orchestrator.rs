@@ -81,10 +81,24 @@ pub async fn run(cfg: RunConfig) -> Result<()> {
     );
 
     // stage 1: discover subdomains
-    let subdomains = stage_subdomains(&cfg, &eng, &scope).await?;
+    let mut subdomains = stage_subdomains(&cfg, &eng, &scope).await?;
+    // fall back to the apex host so apex-only targets still flow through the pipeline
     if subdomains.is_empty() {
-        eprintln!("no subdomains found — stopping");
-        return Ok(());
+        match resolve_apex(&eng.meta.target, cfg.timeout_ms).await {
+            Some(entry) => {
+                eprintln!(
+                    "  no subdomains — falling back to apex {} ({} IP{})",
+                    entry.name,
+                    entry.ips.len(),
+                    if entry.ips.len() == 1 { "" } else { "s" }
+                );
+                subdomains.push(entry);
+            }
+            None => {
+                eprintln!("no subdomains found and apex did not resolve — stopping");
+                return Ok(());
+            }
+        }
     }
 
     // stage 2: fingerprint each discovered host over HTTPS
@@ -101,6 +115,27 @@ pub async fn run(cfg: RunConfig) -> Result<()> {
         cfg.eng_root.display()
     );
     Ok(())
+}
+
+// Resolve the apex hostname so apex-only targets still get fingerprinted, scanned, and summarised
+async fn resolve_apex(target: &str, timeout_ms: u64) -> Option<SubdomainEntry> {
+    let ips: Vec<String> = match tokio::time::timeout(
+        Duration::from_millis(timeout_ms),
+        tokio::net::lookup_host(format!("{target}:0")),
+    )
+    .await
+    {
+        Ok(Ok(addrs)) => addrs.map(|a| a.ip().to_string()).collect(),
+        _ => return None,
+    };
+    if ips.is_empty() {
+        return None;
+    }
+    Some(SubdomainEntry {
+        name: target.to_string(),
+        ips,
+        source: "apex".into(),
+    })
 }
 
 // Stage 1: CT log query + DNS brute force, scope-filtered, written to recon/subdomain-enum.json

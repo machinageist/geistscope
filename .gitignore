@@ -1,6 +1,8 @@
+.claude
 target/
 .DS_Store
 .env
 *.pem
 *.key
-engagements/*/session.json
+engagements/*
+engine-rust/engagements/*

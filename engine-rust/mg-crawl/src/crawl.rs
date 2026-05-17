@@ -406,12 +406,13 @@ fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
     Ok(())
 }
 
-// Deduplicate endpoint matches by (path, source_url) pair
+// Deduplicate endpoint matches by (path, method) — the testable surface
+// keeps the first-observed source_url as evidence so provenance isn't lost
 fn dedup_endpoints(endpoints: Vec<EndpointMatch>) -> Vec<EndpointMatch> {
     let mut seen = HashSet::new();
     endpoints
         .into_iter()
-        .filter(|e| seen.insert((e.path.clone(), e.source_url.clone())))
+        .filter(|e| seen.insert((e.path.clone(), e.method.clone())))
         .collect()
 }
 
@@ -476,5 +477,21 @@ mod tests {
         assert!(dis.contains("/admin"));
         assert!(dis.contains("/private"));
         assert!(!dis.contains("/"));
+    }
+
+    #[test]
+    fn dedup_endpoints_collapses_same_path_across_pages() {
+        let endpoints = vec![
+            EndpointMatch::with_details("/api/x", "https://h/a", "GET", "js_string", None, false),
+            EndpointMatch::with_details("/api/x", "https://h/b", "GET", "js_string", None, false),
+            EndpointMatch::with_details("/api/x", "https://h/c", "POST", "js_fetch", None, false),
+            EndpointMatch::with_details("/api/y", "https://h/a", "GET", "js_string", None, false),
+        ];
+        let out = dedup_endpoints(endpoints);
+        assert_eq!(out.len(), 3);
+        let paths: Vec<&str> = out.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"/api/x"));
+        assert!(paths.contains(&"/api/y"));
+        assert!(out.iter().any(|e| e.path == "/api/x" && e.method == "POST"));
     }
 }
