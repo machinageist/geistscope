@@ -28,6 +28,9 @@ tool endpoints.
 | `mg-report`      | lib+bin  | `mg-report`      | Generate bounty-ready reports from findings with local CVSS 3.1 scoring |
 | `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with host pivoting, harness status, inspector, search, and session headers |
 | `mg-harness`     | lib+bin  | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls                     |
+| `mg-recopilot`   | bin      | `mg-recopilot`   | Decompiled-pseudocode analysis: reads RE output, writes structured findings   |
+| `mg-aifuzz`      | bin      | `mg-aifuzz`      | Adversarial LLM-endpoint fuzzer; requires operator consent before sending     |
+| `mg-exploitgen`  | bin      | `mg-exploitgen`  | CVE-driven exploit scaffolding from CVE description + target-env JSON         |
 
 `mg-engagement credentials-set` writes `session.json` using env-var references
 only. `mg-harness session.get_headers` resolves headers for tools but returns
@@ -70,7 +73,7 @@ mg-harness -> engagement/http-client/llm-client/current tool libraries
 mg-tui     -> mg-harness endpoints for replay, fuzz, OOB, reporting, ranking
 ```
 
-See `../docs/AI_TOOL_ENDPOINTS.md` before implementing this layer.
+Add typed endpoint wrappers — no arbitrary command execution.
 
 Implemented harness endpoints:
 

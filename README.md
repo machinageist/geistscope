@@ -54,7 +54,7 @@ mg-recon target-bounty
 mg-crawl target-bounty https://www.target.example.com
 mg-probe target-bounty
 ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
-mg-report generate target-bounty 2026-05-15-001
+mg-report generate target-bounty YYYYMMDD-001
 ```
 
 ## Binaries
@@ -110,7 +110,6 @@ docker compose -f tests/target/docker-compose.yml down -v
 
 - Rust 1.82+ (edition 2024, let-chain syntax)
 - `ANTHROPIC_API_KEY` for ai-prioritize (falls back to Ollama if unset)
-- Bug-hunting skill files at `~/.claude/bug-hunting-skills/` (for ai-prioritize)
 
 ## License
 
