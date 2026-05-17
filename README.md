@@ -9,9 +9,8 @@ layer, and persistent security graph around dedicated tool endpoints.
 ## Architecture
 
 ```text
-engine-rust/          Rust workspace: CLIs, libraries, TUI
-docs/                 Product doctrine, methodology, AI endpoint contract, roadmap
-CLAUDE.md             AI session orientation (read this first)
+crates/               Rust workspace: CLIs, libraries, TUI
+tests/                Integration smoke tests
 ```
 
 ## Pipeline overview
@@ -42,7 +41,7 @@ mg-harness            ← Scoped AI tool endpoint dispatcher
 
 ```bash
 # Build and install everything
-cd engine-rust
+cd crates
 cargo build --workspace
 for crate in engagement subdomain-enum mg-scan fingerprint mg-recon \
              ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-report mg-tui mg-harness; do
@@ -95,17 +94,6 @@ an engagement has a configured session profile.
 | `payload-engine` | Stack-aware payload selection for fuzzing and harness planning |
 | `security-graph` | Local-first operational intelligence graph with deterministic node/edge IDs |
 | `mg-report` | Shared report-generation library used by the CLI and harness endpoint |
-
-## Governing docs
-
-| File | Purpose |
-|------|---------|
-| `docs/PRODUCT_DOCTRINE.md` | Product definition, coding doctrine, AI-harness safety rules |
-| `docs/STRATEGIC_HANDOFF.md` | Productionization and platform evolution plan |
-| `docs/BUG_HUNTING_METHODOLOGY.md` | Authorized testing workflow and bug-class coverage model |
-| `docs/AI_TOOL_ENDPOINTS.md` | Provider-neutral endpoint contract for model-callable tools |
-| `docs/FEATURE_ROADMAP.md` | Prioritized TUI browser, harness, recon, OOB, reporting roadmap |
-| `docs/RESEARCH_SOURCES.md` | Web and local sources used to shape the methodology |
 
 ## Integration Smoke Test
 
