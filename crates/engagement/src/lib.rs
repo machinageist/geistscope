@@ -10,10 +10,12 @@
 pub mod engagement;
 pub mod finding;
 pub mod scope;
+pub mod tool_finding;
 pub mod traffic;
 
 pub use engagement::{Engagement, EngagementMeta};
 pub use finding::{Finding, Severity, Status};
+pub use tool_finding::{FindingSeverity, ToolFinding, write_finding};
 pub use scope::Scope;
 pub use traffic::{
     AuthState, BodyRef, HeaderRecord, ImportSummary, ResponseDiff, ResponseFingerprint,
