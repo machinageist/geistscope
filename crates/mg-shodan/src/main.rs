@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -330,6 +330,28 @@ async fn main() -> Result<()> {
     }
     if !search_matches.is_empty() {
         println!("\nSearch matches: {}", search_matches.len());
+    }
+
+    // Write findings for each CVE (HIGH) and each versioned service (MEDIUM)
+    for cve in &cves {
+        let tf = ToolFinding::new(AUDIT_TOOL, format!("Shodan CVE: {cve}"), FindingSeverity::High)
+            .url(format!("shodan://{target}"))
+            .evidence(format!("CVE {cve} listed in Shodan host data for {ip}"))
+            .recommendation("Patch the vulnerable service or restrict access");
+        let _ = write_finding(&eng, &tf);
+    }
+    for svc in &services {
+        if !svc.version.is_empty() {
+            let tf = ToolFinding::new(
+                AUDIT_TOOL,
+                format!("Exposed service with version: {} {}", svc.product, svc.version),
+                FindingSeverity::Medium,
+            )
+            .url(format!("shodan://{target}"))
+            .evidence(format!("Port {}/{}: {} {}", svc.port, svc.transport, svc.product, svc.version))
+            .recommendation("Restrict service exposure and update to a patched version");
+            let _ = write_finding(&eng, &tf);
+        }
     }
 
     // Write JSON output

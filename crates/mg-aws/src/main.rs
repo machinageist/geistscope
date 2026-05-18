@@ -23,7 +23,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use url::Url;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -371,6 +371,16 @@ async fn main() -> Result<()> {
     }
     if let Some(ami) = &ami_id {
         println!("AMI ID:        {ami}");
+    }
+
+    // Write HIGH finding when IAM credentials are extracted
+    if high_severity {
+        let role = role_name.as_deref().unwrap_or("unknown");
+        let tf = ToolFinding::new(AUDIT_TOOL, "AWS IAM Credentials Extracted via SSRF", FindingSeverity::High)
+            .url(args.ssrf_url.clone())
+            .evidence(format!("IAM role={role} credentials obtained via IMDS {version_used}"))
+            .recommendation("Require IMDSv2 token-hop-limit=1; restrict outbound SSRF at the application layer");
+        let _ = write_finding(&eng, &tf);
     }
 
     // Write JSON output

@@ -24,7 +24,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -368,6 +368,16 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&results)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Emit standardized findings for HIGH-value secret types
+    const HIGH_TYPES: &[&str] = &["aws_key", "api_key", "jwt_token", "password"];
+    for f in results.findings.iter().filter(|f| HIGH_TYPES.contains(&f.finding_type.as_str())) {
+        let tf = ToolFinding::new(AUDIT_TOOL, format!("JS Secret: {}", f.finding_type), FindingSeverity::High)
+            .url(f.source_url.clone())
+            .evidence(format!("Type: {} — value: {}", f.finding_type, f.value))
+            .recommendation("Remove secrets from client-side JavaScript; use server-side secret management");
+        let _ = write_finding(&eng, &tf);
+    }
 
     // Audit log
     let detail = format!(

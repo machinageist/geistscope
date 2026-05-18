@@ -22,7 +22,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -379,6 +379,17 @@ async fn main() -> Result<()> {
     std::fs::write(&out_path, json).context("write output")?;
 
     eprintln!("  written: {}", out_path.display());
+
+    // Emit MEDIUM finding if SNMP port 161 responds (potential info disclosure)
+    for pr in &output.open_ports {
+        if pr.port == 161 {
+            let tf = ToolFinding::new(AUDIT_TOOL, "SNMP Port Open", FindingSeverity::Medium)
+                .url(format!("udp://{}:{}", pr.host, pr.port))
+                .evidence(format!("Service: {} — response received on port 161", pr.service.as_deref().unwrap_or("snmp")))
+                .recommendation("Restrict SNMP access; use SNMPv3 with authentication; change default community strings");
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

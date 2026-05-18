@@ -21,7 +21,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use url::Url;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -424,6 +424,25 @@ async fn main() -> Result<()> {
         "\n=== OAuth Analysis Complete: {} finding(s) ===",
         all_findings.len()
     );
+
+    // Write findings for each confirmed OAuth issue
+    for f in &all_findings {
+        let severity = match f.severity.as_str() {
+            SEVERITY_HIGH => FindingSeverity::High,
+            SEVERITY_MEDIUM => FindingSeverity::Medium,
+            _ => continue,
+        };
+        let tf = ToolFinding::new(AUDIT_TOOL, format!("OAuth: {}", f.check), severity)
+            .url(f.url.clone())
+            .evidence(f.detail.clone())
+            .recommendation(match f.check.as_str() {
+                "redirect_bypass" => "Validate redirect_uri against an explicit allowlist; never accept arbitrary domains",
+                "missing_state" => "Require a cryptographically random state parameter on every authorization request",
+                "pkce_not_enforced" => "Reject authorization requests that lack a code_challenge when PKCE is advertised",
+                _ => "Review OAuth 2.0 security best practices (RFC 9700)",
+            });
+        let _ = write_finding(&eng, &tf);
+    }
 
     // Write results JSON
     let out_dir = eng.root.join(OUTPUT_SUBDIR);

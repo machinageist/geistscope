@@ -20,7 +20,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -344,6 +344,15 @@ async fn main() -> Result<()> {
     println!("Found credentials: {}", found.len());
     for fc in &found {
         println!("  [FOUND] {}:{}", fc.username, fc.password);
+    }
+
+    // Write HIGH finding per discovered credential pair
+    for fc in &found {
+        let tf = ToolFinding::new(AUDIT_TOOL, "Valid Credential Found", FindingSeverity::High)
+            .url(args.target_url.clone())
+            .evidence(format!("username={} password=<redacted>", fc.username))
+            .recommendation("Implement account lockout, rate limiting, and MFA on the login endpoint");
+        let _ = write_finding(&eng, &tf);
     }
 
     // Write results JSON
