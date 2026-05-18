@@ -27,6 +27,9 @@ use time::format_description::well_known::Rfc3339;
 use fingerprint::Fingerprint;
 use llm_client::LlmClient;
 
+// Maximum number of findings injected into the LLM context
+const MAX_FINDINGS_IN_CONTEXT: usize = 50;
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
@@ -205,8 +208,10 @@ async fn main() -> Result<()> {
     std::fs::write(&priorities_json_path, json).context("write priorities.json")?;
 
     eprintln!("  calling LLM for chain analysis...");
+    let findings = load_findings(&eng.root);
+    eprintln!("  loaded {} finding(s) from findings/", findings.len());
     let chain_markdown =
-        run_chain_analysis(&client, &summary_raw, &priority_markdown, &eng).await?;
+        run_chain_analysis(&client, &summary_raw, &priority_markdown, &eng, &findings).await?;
     write_chain_analysis(
         &chain_md_path,
         &chain_json_path,
@@ -214,6 +219,7 @@ async fn main() -> Result<()> {
         &run_ts,
         &summary.generated_at,
         chain_markdown,
+        findings.len(),
     )?;
 
     let _ = eng.audit(
@@ -227,6 +233,74 @@ async fn main() -> Result<()> {
     eprintln!("  written: {}", chain_md_path.display());
     eprintln!("  written: {}", chain_json_path.display());
     Ok(())
+}
+
+// ── Findings loader ──────────────────────────────────────────────────────────
+
+// Read all JSON files from engagements/<name>/findings/ and return parsed values
+pub fn load_findings(eng_dir: &Path) -> Vec<serde_json::Value> {
+    let findings_dir = eng_dir.join("findings");
+    if !findings_dir.exists() {
+        return Vec::new();
+    }
+    let mut entries: Vec<_> = match std::fs::read_dir(&findings_dir) {
+        Ok(rd) => rd.flatten().collect(),
+        Err(_) => return Vec::new(),
+    };
+    // sort by file name for deterministic ordering
+    entries.sort_by_key(|e| e.path());
+
+    let mut out = Vec::new();
+    for entry in entries {
+        let path = entry.path();
+        let Some(ext) = path.extension() else {
+            continue;
+        };
+        if ext != "json" {
+            continue;
+        }
+        // skip unreadable or unparseable files silently
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        out.push(value);
+    }
+    out
+}
+
+// Build a compact "## Confirmed Findings" section for LLM context
+fn findings_context_block(findings: &[serde_json::Value]) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("## Confirmed Findings\n\n");
+    out.push_str("| # | Title | Severity | Tool | URL |\n");
+    out.push_str("|---|-------|----------|------|-----|\n");
+    for (idx, f) in findings.iter().take(MAX_FINDINGS_IN_CONTEXT).enumerate() {
+        let title = f
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(no title)");
+        let severity = f
+            .get("severity")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let tool = f.get("tool").and_then(|v| v.as_str()).unwrap_or("-");
+        let url = f.get("url").and_then(|v| v.as_str()).unwrap_or("-");
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} |\n",
+            idx + 1,
+            title,
+            severity,
+            tool,
+            url
+        ));
+    }
+    out.push('\n');
+    out
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -324,22 +398,29 @@ fn append_to_priorities_md(
     Ok(())
 }
 
-// Run the chain-analysis LLM pass with bounded local evidence
+// Run the chain-analysis LLM pass with bounded local evidence and confirmed findings
 async fn run_chain_analysis(
     client: &LlmClient,
     summary_raw: &str,
     priorities_markdown: &str,
     eng: &engagement::Engagement,
+    findings: &[serde_json::Value],
 ) -> Result<String> {
     let probe_path = eng.recon_dir().join("probe-report.json");
     let probe_report = read_bounded_optional(&probe_path, 128 * 1024)?;
     let summary_bounded = bounded_text(summary_raw, 256 * 1024);
     let priorities_bounded = bounded_text(priorities_markdown, 96 * 1024);
+    let findings_block = findings_context_block(findings);
     let system = prompt::chain_system_prompt();
     let user = prompt::chain_user_prompt(
         &summary_bounded,
         &priorities_bounded,
         probe_report.as_deref(),
+        if findings_block.is_empty() {
+            None
+        } else {
+            Some(findings_block.as_str())
+        },
     );
     client
         .complete(system, &user)
@@ -355,6 +436,7 @@ fn write_chain_analysis(
     run_ts: &str,
     recon_ts: &str,
     analysis_markdown: String,
+    findings_count: usize,
 ) -> Result<()> {
     let md = format!(
         "# GeistScope Chain Analysis — {engagement}\n\n\
@@ -362,15 +444,22 @@ fn write_chain_analysis(
          {analysis_markdown}\n"
     );
     std::fs::write(md_path, md).context("write chain-analysis.md")?;
+    let mut source_files = vec![
+        "recon/summary.json".into(),
+        "recon/priorities.md".into(),
+        "recon/probe-report.json".into(),
+    ];
+    if findings_count > 0 {
+        source_files.push(format!(
+            "findings/*.json ({findings_count} file{})",
+            if findings_count == 1 { "" } else { "s" }
+        ));
+    }
     let file = ChainAnalysisFile {
         engagement: engagement.to_string(),
         generated_at: run_ts.to_string(),
         recon_at: recon_ts.to_string(),
-        source_files: vec![
-            "recon/summary.json".into(),
-            "recon/priorities.md".into(),
-            "recon/probe-report.json".into(),
-        ],
+        source_files,
         analysis_markdown,
     };
     let json = serde_json::to_string_pretty(&file).context("serialize chain-analysis.json")?;
@@ -452,6 +541,46 @@ mod tests {
     }
 
     #[test]
+    fn load_findings_reads_json_skips_non_json() {
+        let dir = tmp_dir();
+        let findings_dir = dir.join("findings");
+        std::fs::create_dir_all(&findings_dir).unwrap();
+        std::fs::write(
+            findings_dir.join("001-xss.json"),
+            r#"{"id":"001","title":"XSS","severity":"high","tool":"mg-xss","url":"https://ex.com"}"#,
+        )
+        .unwrap();
+        std::fs::write(findings_dir.join("note.md"), "not json").unwrap();
+        std::fs::write(findings_dir.join("bad.json"), "not valid json {{").unwrap();
+
+        let findings = load_findings(&dir);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["title"], "XSS");
+    }
+
+    #[test]
+    fn load_findings_caps_at_max_in_context_block() {
+        let dir = tmp_dir();
+        let findings_dir = dir.join("findings");
+        std::fs::create_dir_all(&findings_dir).unwrap();
+        for i in 0..55usize {
+            std::fs::write(
+                findings_dir.join(format!("{i:03}-f.json")),
+                format!(r#"{{"id":"{i}","title":"F{i}","severity":"low","tool":"t","url":"u"}}"#),
+            )
+            .unwrap();
+        }
+
+        let findings = load_findings(&dir);
+        assert_eq!(findings.len(), 55);
+        let block = findings_context_block(&findings);
+        // MAX_FINDINGS_IN_CONTEXT rows plus header rows should be present
+        let rows = block.lines().filter(|l| l.starts_with('|') && l.contains('|')).count();
+        // header + separator + 50 data rows = 52
+        assert_eq!(rows, 52);
+    }
+
+    #[test]
     fn bounded_optional_file_truncates_at_char_boundary() {
         let dir = tmp_dir();
         let path = dir.join("probe-report.json");
@@ -476,6 +605,7 @@ mod tests {
             "2026-05-15T00:00:00Z",
             "2026-05-14T00:00:00Z",
             "## Chains\n\nNone yet.".into(),
+            0,
         )
         .unwrap();
 
