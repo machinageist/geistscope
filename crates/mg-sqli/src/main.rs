@@ -26,7 +26,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -498,6 +498,25 @@ async fn main() -> Result<()> {
         output.time_confirmed,
         results_path.display()
     );
+
+    // Write findings for confirmed error-based SQLi
+    for r in output.error_results.iter().filter(|r| r.verdict == ErrorVerdict::Confirmed) {
+        let tf = ToolFinding::new("mg-sqli", "SQL Injection (Error-Based)", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("db={} payload={}", r.db_type.as_deref().unwrap_or("unknown"), r.payload))
+            .recommendation("Use parameterized queries / prepared statements; never interpolate user input into SQL");
+        let _ = write_finding(&eng, &tf);
+    }
+    // Write findings for confirmed time-based SQLi
+    for r in output.time_results.iter().filter(|r| r.verdict == TimeVerdict::Confirmed) {
+        let tf = ToolFinding::new("mg-sqli", "SQL Injection (Time-Based Blind)", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("payload={} baseline={}ms response={}ms", r.payload, r.baseline_ms, r.response_ms))
+            .recommendation("Use parameterized queries / prepared statements; never interpolate user input into SQL");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

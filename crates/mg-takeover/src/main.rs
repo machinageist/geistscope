@@ -26,7 +26,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -347,6 +347,17 @@ async fn main() -> Result<()> {
         output.vulnerable_count, output.subdomains_checked
     );
     println!("  results: {}", out_path.display());
+
+    // Write a finding for each confirmed takeover result
+    for r in &output.results {
+        if matches!(r.confidence, Confidence::Confirmed) {
+            let tf = ToolFinding::new("mg-takeover", "Subdomain Takeover", FindingSeverity::High)
+                .url(format!("https://{}", r.subdomain))
+                .evidence(format!("service={} cname={} snippet={}", r.service, r.final_cname, r.body_snippet))
+                .recommendation("Remove or reclaim the dangling CNAME record; update DNS before the service is claimed");
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

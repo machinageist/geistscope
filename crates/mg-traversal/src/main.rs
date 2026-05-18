@@ -20,7 +20,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -341,6 +341,16 @@ async fn main() -> Result<()> {
         output.confirmed,
         results_path.display()
     );
+
+    // Write finding for each confirmed path traversal result
+    for r in output.results.iter().filter(|r| r.verdict == TraversalVerdict::Confirmed) {
+        let tf = ToolFinding::new("mg-traversal", "Path Traversal / Local File Inclusion", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("payload={}", r.payload))
+            .recommendation("Validate and canonicalize file paths server-side; restrict accessible directories with a chroot or allowlist");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

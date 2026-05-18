@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -344,6 +344,15 @@ async fn main() -> Result<()> {
         output.total_queries,
         results_path.display()
     );
+
+    // Write finding for each exposed code result
+    for f in &output.findings {
+        let tf = ToolFinding::new("mg-github", "Sensitive Code Exposed in GitHub", FindingSeverity::Medium)
+            .url(f.html_url.clone())
+            .evidence(format!("repo={} path={} query={}", f.repo, f.path, f.query))
+            .recommendation("Remove sensitive data from the repository; rotate any exposed secrets; add a .gitignore or pre-commit hook");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

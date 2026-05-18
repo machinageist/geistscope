@@ -24,7 +24,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -419,6 +419,16 @@ async fn main() -> Result<()> {
         output.potential,
         results_path.display()
     );
+
+    // Write finding for each confirmed reflected XSS result
+    for r in output.results.iter().filter(|r| r.verdict == Verdict::Reflected) {
+        let tf = ToolFinding::new("mg-xss", "Reflected XSS", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("payload={} method={}", r.payload, r.method))
+            .recommendation("Encode output; apply Content-Security-Policy; validate and reject input containing HTML metacharacters");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

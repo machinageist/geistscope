@@ -23,7 +23,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -342,6 +342,15 @@ async fn main() -> Result<()> {
         private_count,
         results_path.display()
     );
+
+    // Write finding for each publicly-listable bucket
+    for r in output.results.iter().filter(|r| r.status == BucketStatus::PublicListing) {
+        let tf = ToolFinding::new("mg-cloud-enum", "Cloud Storage Bucket Public Listing", FindingSeverity::High)
+            .url(r.url.clone())
+            .evidence(format!("provider={} bucket={} http_status={}", r.provider, r.bucket, r.http_status))
+            .recommendation("Set bucket ACL to private; remove public-read permissions; enable access logging");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

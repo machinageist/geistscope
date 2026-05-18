@@ -23,7 +23,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -456,6 +456,16 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&results)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Write finding for each confirmed SSRF hit
+    for r in results.results.iter().filter(|r| r.verdict == Verdict::Confirmed) {
+        let tf = ToolFinding::new("mg-ssrf", "Server-Side Request Forgery (SSRF)", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("payload={} status={} body_preview={}", r.payload, r.status, r.body_preview))
+            .recommendation("Restrict outbound requests to an allowlist; enforce IMDS v2 on cloud instances");
+        let _ = write_finding(&eng, &tf);
+    }
 
     // Audit log
     let detail = format!("confirmed={confirmed_count} potential={potential_count}");

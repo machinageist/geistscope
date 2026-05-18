@@ -34,7 +34,7 @@ use ::time::OffsetDateTime;
 use ::time::format_description::well_known::Rfc3339;
 use x509_parser::prelude::*;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -623,6 +623,22 @@ async fn main() -> Result<()> {
         output.high_count, output.hosts_scanned
     );
     println!("  results: {}", out_path.display());
+
+    // Write findings for each HIGH and MEDIUM TLS issue per host
+    for r in &output.results {
+        for f in &r.findings {
+            let sev = match f.severity {
+                Severity::High => FindingSeverity::High,
+                Severity::Medium => FindingSeverity::Medium,
+                _ => continue,
+            };
+            let tf = ToolFinding::new("mg-tls-scan", &f.check, sev)
+                .url(format!("https://{}:{}", r.hostname, r.port))
+                .evidence(f.detail.clone())
+                .recommendation("Upgrade TLS configuration; refer to Mozilla SSL Configuration Generator");
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

@@ -19,7 +19,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -419,6 +419,15 @@ async fn main() -> Result<()> {
         output.confirmed,
         results_path.display()
     );
+
+    // Write finding for each confirmed XXE result
+    for r in output.results.iter().filter(|r| r.verdict == XxeVerdict::Confirmed) {
+        let tf = ToolFinding::new("mg-xxe", "XML External Entity Injection (XXE)", FindingSeverity::High)
+            .url(r.url.clone())
+            .evidence(format!("method={} payload={}", r.method, r.payload_label))
+            .recommendation("Disable external entity processing in the XML parser; use a safe XML library configuration");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

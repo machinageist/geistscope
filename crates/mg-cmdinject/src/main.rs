@@ -24,7 +24,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -573,6 +573,25 @@ async fn main() -> Result<()> {
         output.time_confirmed,
         results_path.display()
     );
+
+    // Write findings for confirmed error-based command injection
+    for r in output.error_results.iter().filter(|r| r.verdict == ErrorVerdict::Confirmed) {
+        let tf = ToolFinding::new("mg-cmdinject", "OS Command Injection (Error-Based)", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("indicator={} payload={}", r.indicator.as_deref().unwrap_or("unknown"), r.payload))
+            .recommendation("Never pass user input to shell execution functions; use allowlists and argument arrays");
+        let _ = write_finding(&eng, &tf);
+    }
+    // Write findings for confirmed time-based command injection
+    for r in output.time_results.iter().filter(|r| r.verdict == TimeVerdict::Confirmed) {
+        let tf = ToolFinding::new("mg-cmdinject", "OS Command Injection (Time-Based Blind)", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("payload={} baseline={}ms response={}ms", r.payload, r.baseline_ms, r.response_ms))
+            .recommendation("Never pass user input to shell execution functions; use allowlists and argument arrays");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

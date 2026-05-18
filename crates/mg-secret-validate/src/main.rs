@@ -23,7 +23,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -384,6 +384,14 @@ async fn main() -> Result<()> {
         output.valid_count,
         results_path.display()
     );
+
+    // Write finding for each valid (live) secret
+    for r in output.results.iter().filter(|r| r.validity == Validity::Valid) {
+        let tf = ToolFinding::new("mg-secret-validate", "Valid Leaked Secret Confirmed", FindingSeverity::High)
+            .evidence(format!("kind={:?} masked={} detail={}", r.kind, r.masked, r.detail))
+            .recommendation("Revoke and rotate the secret immediately; audit where it was exposed");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

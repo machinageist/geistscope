@@ -21,7 +21,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -417,6 +417,16 @@ async fn main() -> Result<()> {
         output.confirmed,
         results_path.display()
     );
+
+    // Write finding for each confirmed SSTI result
+    for r in &output.results {
+        let tf = ToolFinding::new("mg-ssti", "Server-Side Template Injection (SSTI)", FindingSeverity::High)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("engine={:?} rce={} evidence={}", r.engine, r.rce_confirmed, r.evidence))
+            .recommendation("Avoid passing user input to template rendering functions; use sandboxed template contexts");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

@@ -25,7 +25,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 use url::Url;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -421,6 +421,15 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&output)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Write finding for each IDOR result
+    for r in output.results.iter().filter(|r| r.verdict == Verdict::Idor) {
+        let tf = ToolFinding::new("mg-authz", "Insecure Direct Object Reference (IDOR)", FindingSeverity::High)
+            .url(r.url.clone())
+            .evidence(format!("method={} status_a={} status_b={}", r.method, r.status_a, r.status_b))
+            .recommendation("Enforce object-level authorization checks server-side; do not rely on client-supplied IDs");
+        let _ = write_finding(&eng, &tf);
+    }
 
     // Audit log
     let detail = format!(

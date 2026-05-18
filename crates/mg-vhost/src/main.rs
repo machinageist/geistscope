@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -412,6 +412,15 @@ async fn main() -> Result<()> {
         output.interesting,
         results_path.display()
     );
+
+    // Write finding for each discovered (interesting) virtual host
+    for r in output.results.iter().filter(|r| r.verdict == VhostVerdict::Interesting) {
+        let tf = ToolFinding::new("mg-vhost", "Virtual Host Discovered", FindingSeverity::Medium)
+            .url(format!("http://{}", r.host_header))
+            .evidence(format!("host_header={} status={} body_len={} reason={}", r.host_header, r.status, r.body_len, r.reason))
+            .recommendation("Review whether this virtual host should be publicly accessible; apply access controls if internal");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

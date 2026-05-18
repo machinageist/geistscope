@@ -27,7 +27,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -581,6 +581,14 @@ async fn main() -> Result<()> {
     .context("write dns-enum results JSON")?;
 
     eprintln!("mg-dns-enum: written {}", results_path.display());
+
+    // Write finding for each successful zone transfer
+    for zt in output.zone_transfers.iter().filter(|z| z.success) {
+        let tf = ToolFinding::new("mg-dns-enum", "DNS Zone Transfer Allowed (AXFR)", FindingSeverity::High)
+            .evidence(format!("nameserver={} domain={} records={}", zt.nameserver, args.domain, zt.record_count))
+            .recommendation("Restrict AXFR to authorized secondary nameservers only; configure zone transfer ACLs");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let axfr_success = output.zone_transfers.iter().filter(|z| z.success).count();
     let _ = eng.audit(

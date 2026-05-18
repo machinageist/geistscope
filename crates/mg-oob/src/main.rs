@@ -27,7 +27,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -282,6 +282,14 @@ async fn main() -> Result<()> {
         output.hits,
         out_path.display()
     );
+
+    // Write a finding for each confirmed OOB hit callback
+    for cb in output.callbacks.iter().filter(|c| c.hit) {
+        let tf = ToolFinding::new("mg-oob", "OOB Callback Received", FindingSeverity::High)
+            .evidence(format!("method={} path={} from={}", cb.method, cb.path, cb.source_ip))
+            .recommendation("Investigate the injected parameter that triggered the callback; confirms blind SSRF/XXE/CMDi");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

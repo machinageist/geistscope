@@ -24,7 +24,7 @@ use sha2::Sha256;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -328,6 +328,22 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&results)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("\n[*] Results written to {}", out_path.display());
+
+    // Write finding when secret is brute-forced
+    if let Some(ref s) = found_secret {
+        let tf = ToolFinding::new("mg-jwt", "JWT Secret Brute-Forced", FindingSeverity::High)
+            .evidence(format!("secret={s}"))
+            .recommendation("Rotate the JWT secret immediately; use a cryptographically random value of at least 256 bits");
+        let _ = write_finding(&eng, &tf);
+    }
+
+    // Write finding when algorithm confusion token is forged
+    if args.alg_confusion {
+        let tf = ToolFinding::new("mg-jwt", "JWT Algorithm Confusion (RS256→HS256)", FindingSeverity::High)
+            .evidence("Public key accepted as HMAC secret — forged token produced")
+            .recommendation("Verify the algorithm header server-side; reject HS256 on RS256-only endpoints");
+        let _ = write_finding(&eng, &tf);
+    }
 
     // Record audit log entry
     let detail = format!(

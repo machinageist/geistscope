@@ -24,7 +24,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -561,6 +561,24 @@ async fn main() -> Result<()> {
         output.findings_count,
         findings_path.display()
     );
+
+    // Write findings for introspection enabled (MEDIUM) and no depth limit (MEDIUM)
+    for r in &output.results {
+        if r.introspection_succeeded {
+            let tf = ToolFinding::new("mg-graphql", "GraphQL Introspection Enabled", FindingSeverity::Medium)
+                .url(r.endpoint.clone())
+                .evidence(format!("endpoint={}", r.endpoint))
+                .recommendation("Disable introspection in production; use field-level authorization instead");
+            let _ = write_finding(&eng, &tf);
+        }
+        if r.no_depth_limit {
+            let tf = ToolFinding::new("mg-graphql", "GraphQL Missing Query Depth Limit", FindingSeverity::Medium)
+                .url(r.endpoint.clone())
+                .evidence("10-level nested query returned data without error")
+                .recommendation("Implement query depth limiting and query complexity analysis");
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

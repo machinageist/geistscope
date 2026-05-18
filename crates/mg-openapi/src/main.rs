@@ -24,7 +24,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -527,6 +527,28 @@ async fn main() -> Result<()> {
         findings_count,
         results_path.display()
     );
+
+    // Write findings for auth bypass (HIGH) and sensitive exposure (MEDIUM)
+    for f in &results.findings {
+        let (title, sev, rec) = match f.kind {
+            FindingKind::AuthBypass => (
+                "API Endpoint Authentication Bypass",
+                FindingSeverity::High,
+                "Enforce authentication on all API endpoints; verify auth middleware is applied globally",
+            ),
+            FindingKind::SensitiveExposure => (
+                "API Response Contains Sensitive Keywords",
+                FindingSeverity::Medium,
+                "Audit API responses for unintended sensitive data exposure; apply field-level access controls",
+            ),
+            FindingKind::SlowEndpoint => continue,
+        };
+        let tf = ToolFinding::new("mg-openapi", title, sev)
+            .url(f.endpoint.clone())
+            .evidence(format!("method={} detail={}", f.method, f.detail))
+            .recommendation(rec);
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

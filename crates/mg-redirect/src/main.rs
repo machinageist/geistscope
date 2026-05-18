@@ -21,7 +21,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -358,6 +358,16 @@ async fn main() -> Result<()> {
         output.open_redirects,
         results_path.display()
     );
+
+    // Write finding for each confirmed open redirect
+    for r in output.results.iter().filter(|r| r.verdict == RedirectVerdict::OpenRedirect) {
+        let tf = ToolFinding::new("mg-redirect", "Open Redirect", FindingSeverity::Medium)
+            .url(r.url.clone())
+            .parameter(r.param.clone())
+            .evidence(format!("payload={} location={:?}", r.payload, r.location_header))
+            .recommendation("Validate redirect targets against an allowlist of trusted domains; reject absolute URLs");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,
