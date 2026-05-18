@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -445,6 +445,43 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&output)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Emit findings for documents with secrets or internal path exposure
+    for doc in &output.results {
+        // HIGH if software_versions contains credential-like strings (AWS key pattern)
+        // In practice the extractor puts software names in software_versions; still flag as HIGH
+        // since any secret embedded in document content is a HIGH finding
+        if !doc.flags.software_versions.is_empty()
+            && doc.flags.software_versions.iter().any(|s| s.contains("AKIA") || s.contains("secret"))
+        {
+            let tf = ToolFinding::new("mg-metadata", "Secret Found in Document Metadata", FindingSeverity::High)
+                .url(doc.url.clone())
+                .evidence(format!(
+                    "doc_type={} secrets={:?}",
+                    doc.doc_type, doc.flags.software_versions
+                ))
+                .recommendation(
+                    "Remove sensitive data from document metadata before publishing; \
+                     rotate any exposed credentials; audit document publishing pipeline"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+
+        // MEDIUM if internal filesystem paths are exposed
+        if !doc.flags.internal_paths.is_empty() {
+            let tf = ToolFinding::new("mg-metadata", "Internal Filesystem Path in Document Metadata", FindingSeverity::Medium)
+                .url(doc.url.clone())
+                .evidence(format!(
+                    "doc_type={} internal_paths={:?}",
+                    doc.doc_type, doc.flags.internal_paths
+                ))
+                .recommendation(
+                    "Strip document metadata before publishing; use PDF/Office metadata scrubbers; \
+                     check document conversion pipeline for path leakage"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(AUDIT_TOOL, &eng.meta.target, None);
 

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -238,6 +238,45 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&results)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // HIGH finding if any breach contains plaintext passwords
+    if results.has_passwords {
+        let breach_names: Vec<&str> = results
+            .breaches
+            .iter()
+            .filter(|b| b.has_passwords)
+            .map(|b| b.name.as_str())
+            .collect();
+        let tf = ToolFinding::new("mg-breach", "Credentials Exposed in Data Breach", FindingSeverity::High)
+            .url(format!("https://haveibeenpwned.com/DomainSearch/{}", args.domain))
+            .evidence(format!(
+                "domain={} breaches_with_passwords=[{}] total_accounts={}",
+                args.domain,
+                breach_names.join(", "),
+                total_accounts
+            ))
+            .recommendation(
+                "Force a password reset for all affected accounts; \
+                 implement MFA; monitor for credential stuffing attacks; \
+                 notify impacted users per breach notification obligations"
+            );
+        let _ = write_finding(&eng, &tf);
+    }
+
+    // MEDIUM finding listing total accounts breached regardless of password data
+    if total_accounts > 0 {
+        let tf = ToolFinding::new("mg-breach", "Corporate Email Addresses Found in Breach Data", FindingSeverity::Medium)
+            .url(format!("https://haveibeenpwned.com/DomainSearch/{}", args.domain))
+            .evidence(format!(
+                "domain={} total_accounts={} total_breaches={}",
+                args.domain, total_accounts, results.breaches.len()
+            ))
+            .recommendation(
+                "Review breach details; enforce MFA across all corporate accounts; \
+                 monitor for credential reuse and unauthorized access"
+            );
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(AUDIT_TOOL, &args.domain, None);
 

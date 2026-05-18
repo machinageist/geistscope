@@ -22,7 +22,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -294,6 +294,23 @@ async fn main() -> Result<()> {
             finding.url,
             finding.template_id,
         );
+
+        // Map nuclei severity to ToolFinding severity; only emit for high/critical/medium
+        let tool_severity = match finding.severity.to_lowercase().as_str() {
+            "critical" | "high" => Some(FindingSeverity::High),
+            "medium" => Some(FindingSeverity::Medium),
+            _ => None,
+        };
+        if let Some(sev) = tool_severity {
+            let tf = ToolFinding::new("mg-nuclei-bridge", finding.title.clone(), sev)
+                .url(finding.url.clone())
+                .evidence(format!(
+                    "template={} matched_at={} description={}",
+                    finding.template_id, finding.matched_at, finding.description
+                ))
+                .recommendation("Review nuclei template documentation for remediation guidance");
+            let _ = write_finding(&eng, &tf);
+        }
 
         normalized.push(finding);
     }

@@ -26,7 +26,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -468,6 +468,39 @@ async fn main() -> Result<()> {
     .context("write http2 results JSON")?;
 
     eprintln!("mg-http2: written {}", results_path.display());
+
+    // Emit findings for confirmed HTTP/2 issues
+    for r in &output.results {
+        if r.h2c_upgrade_accepted {
+            let tf = ToolFinding::new("mg-http2", "h2c Cleartext Upgrade Accepted", FindingSeverity::Medium)
+                .url(r.base_url.clone())
+                .evidence(format!(
+                    "host={} responded 101 Switching Protocols to h2c Upgrade request — \
+                     plaintext HTTP/2 negotiation accepted; traffic is unencrypted",
+                    r.host
+                ))
+                .recommendation(
+                    "Disable h2c cleartext upgrade; enforce TLS for all HTTP/2 traffic; \
+                     configure server to reject Upgrade: h2c headers"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+        if r.rapid_reset_risk {
+            let tf = ToolFinding::new("mg-http2", "HTTP/2 Rapid Reset Vulnerable Version Detected", FindingSeverity::Medium)
+                .url(r.base_url.clone())
+                .evidence(format!(
+                    "host={} server={} — {}",
+                    r.host,
+                    r.server_header.as_deref().unwrap_or("unknown"),
+                    r.rapid_reset_note
+                ))
+                .recommendation(
+                    "Upgrade nginx to >= 1.25.3 or Apache to >= 2.4.58 to patch CVE-2023-44487; \
+                     verify patch status with HTTP/2 rapid reset PoC tooling"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

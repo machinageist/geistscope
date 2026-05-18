@@ -25,7 +25,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -445,6 +445,39 @@ async fn main() -> Result<()> {
     .context("write smb results JSON")?;
 
     eprintln!("mg-smb: written {}", results_path.display());
+
+    // Emit findings for confirmed SMB issues
+    for r in &output.results {
+        if !r.smb_detected {
+            continue;
+        }
+        if r.null_session {
+            let tf = ToolFinding::new("mg-smb", "SMB Null Session Allowed", FindingSeverity::High)
+                .url(format!("smb://{}", r.host))
+                .evidence(format!(
+                    "dialect={} STATUS_SUCCESS received with empty credentials; signing_required={}",
+                    r.dialect, r.signing_required
+                ))
+                .recommendation(
+                    "Disable anonymous/guest SMB access; require authentication; \
+                     enforce SMB signing via Group Policy"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+        if !r.signing_required {
+            let tf = ToolFinding::new("mg-smb", "SMB Signing Not Required", FindingSeverity::Medium)
+                .url(format!("smb://{}", r.host))
+                .evidence(format!(
+                    "dialect={} signing_enabled={} signing_required=false — relay attack feasible",
+                    r.dialect, r.signing_enabled
+                ))
+                .recommendation(
+                    "Enable RequireSecuritySignature via Group Policy (GPO: Microsoft network server); \
+                     enforce SMB signing on all domain controllers"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

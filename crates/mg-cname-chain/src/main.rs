@@ -27,7 +27,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -376,6 +376,21 @@ async fn main() -> Result<()> {
     .context("write cname-chain results JSON")?;
 
     eprintln!("mg-cname-chain: written {}", results_path.display());
+
+    // Emit HIGH finding for each subdomain with an NXDOMAIN intermediate (hijackable CNAME)
+    for r in &output.results {
+        let has_nxdomain = r.anomalies.iter().any(|a| matches!(a, AnomalyKind::NxdomainIntermediate));
+        if has_nxdomain {
+            let chain_str = r.chain.join(" -> ");
+            let tf = ToolFinding::new("mg-cname-chain", "Hijackable CNAME Chain Detected", FindingSeverity::High)
+                .url(format!("dns://{}", r.subdomain))
+                .evidence(format!("chain: {chain_str} — intermediate resolves to NXDOMAIN (unclaimed resource)"))
+                .recommendation(
+                    "Remove the dangling CNAME record or claim the target resource before an attacker does"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

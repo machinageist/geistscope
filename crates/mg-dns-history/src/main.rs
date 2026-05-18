@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -377,6 +377,23 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&results)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Emit MEDIUM finding per stale IP not present in current recon — forgotten infrastructure
+    for stale in &results.stale_ips {
+        let tf = ToolFinding::new("mg-dns-history", "Forgotten Infrastructure Detected", FindingSeverity::Medium)
+            .url(format!("dns://{}", args.domain))
+            .evidence(format!(
+                "IP {} appeared in historical DNS records for {} but is absent from current recon/summary.json \
+                 (source={})",
+                stale.ip, args.domain, results.source
+            ))
+            .recommendation(
+                "Verify whether this IP is still owned by the organization; \
+                 decommission or firewall any forgotten assets; \
+                 review associated services for exposure"
+            );
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(AUDIT_TOOL, &args.domain, None);
 

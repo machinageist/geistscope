@@ -23,7 +23,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -293,6 +293,21 @@ async fn main() -> Result<()> {
         args.domain, args.port
     );
     eprintln!("  Feasibility: {reason}");
+
+    // Emit MEDIUM finding when target is private and TTL is low enough to be exploitable
+    if target_is_private && ttl_seconds <= LOW_TTL_THRESHOLD_SECS {
+        let tf = ToolFinding::new("mg-dns-rebind", "DNS Rebinding Attack Feasible", FindingSeverity::Medium)
+            .url(format!("http://{}:{}", args.domain, args.port))
+            .evidence(format!(
+                "target={} (private IP) domain={} port={} TTL={}s (<= {}s threshold)",
+                args.target, args.domain, args.port, ttl_seconds, LOW_TTL_THRESHOLD_SECS
+            ))
+            .recommendation(
+                "Increase DNS TTL above 60s; use CORS to restrict cross-origin XHR; \
+                 deploy DNS rebinding protection at the browser or server level"
+            );
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(
         AUDIT_TOOL,

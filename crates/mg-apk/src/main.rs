@@ -20,7 +20,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -288,6 +288,19 @@ fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&output)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Emit standardized findings for HIGH/MEDIUM results
+    for f in &output.findings {
+        let sev = match f.severity {
+            Severity::High => FindingSeverity::High,
+            Severity::Medium => FindingSeverity::Medium,
+            Severity::Low => continue,
+        };
+        let tf = ToolFinding::new(AUDIT_TOOL, &f.category, sev)
+            .evidence(format!("{} ({})", f.detail, f.location))
+            .recommendation("Review APK configuration and remove sensitive data from binary");
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(AUDIT_TOOL, &args.apk, None);
 

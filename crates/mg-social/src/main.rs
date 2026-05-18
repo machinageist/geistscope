@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -275,6 +275,30 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&results)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Emit MEDIUM finding when org members were enumerated (phishing/spear-phishing risk)
+    if !results.members.is_empty() {
+        let derived_total: usize = results.members.iter().map(|m| m.derived_emails.len()).sum();
+        let tf = ToolFinding::new(
+            "mg-social",
+            "Employee Enumeration via GitHub — Email Patterns Derived",
+            FindingSeverity::Medium,
+        )
+        .url(format!("https://github.com/orgs/{}/members", args.org))
+        .evidence(format!(
+            "org={} members_found={} derived_email_patterns={}{}",
+            args.org,
+            results.member_count,
+            derived_total,
+            args.domain.as_deref().map(|d| format!(" domain={d}")).unwrap_or_default()
+        ))
+        .recommendation(
+            "Set the org membership to private on GitHub; \
+             implement phishing-resistant MFA; \
+             train employees on spear-phishing awareness"
+        );
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(AUDIT_TOOL, &args.org, None);
 

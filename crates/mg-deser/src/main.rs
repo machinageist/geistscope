@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -331,6 +331,29 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&output)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Emit findings — HIGH for error_based, MEDIUM for candidates
+    for f in &output.findings {
+        let (sev, title) = match f.classification {
+            DeserClass::ErrorBased | DeserClass::ConfirmedOob => (
+                FindingSeverity::High,
+                format!("{} Deserialization Confirmed (Error-Based)", f.lang.to_uppercase()),
+            ),
+            DeserClass::Candidate => (
+                FindingSeverity::Medium,
+                format!("{} Deserialization Candidate Detected", f.lang.to_uppercase()),
+            ),
+        };
+        let tf = ToolFinding::new("mg-deser", title, sev)
+            .url(f.url.clone())
+            .evidence(format!("lang={} detail={}", f.lang, f.detail))
+            .recommendation(
+                "Avoid deserializing untrusted data; use safer alternatives (JSON, Protobuf); \
+                 implement type-safe deserialization with an allowlist; \
+                 consider RASP/WAF rules to block serialized object patterns"
+            );
+        let _ = write_finding(&eng, &tf);
+    }
 
     let _ = eng.audit(AUDIT_TOOL, &eng.meta.target, None);
 

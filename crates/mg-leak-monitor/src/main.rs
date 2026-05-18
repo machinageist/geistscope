@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -176,7 +176,7 @@ async fn main() -> Result<()> {
             }
 
             let new_items =
-                poll_query(&client, query, &mut state, &monitor_dir).await;
+                poll_query(&client, query, &mut state, &monitor_dir, &eng).await;
 
             match new_items {
                 Ok(count) => {
@@ -218,6 +218,7 @@ async fn poll_query(
     query: &str,
     state: &mut MonitorState,
     monitor_dir: &Path,
+    eng: &Engagement,
 ) -> Result<usize> {
     let resp = client
         .get(GITHUB_SEARCH_URL)
@@ -298,6 +299,21 @@ async fn poll_query(
 
         // Append to findings JSONL file
         append_finding(&findings_path, &finding);
+
+        // Emit HIGH tool finding per new leak hit
+        let tf = ToolFinding::new("mg-leak-monitor", "GitHub Secret Leak Detected", FindingSeverity::High)
+            .url(finding.url.clone())
+            .evidence(format!(
+                "query={} repo={} file={}",
+                finding.query, finding.repo, finding.file_path
+            ))
+            .recommendation(
+                "Rotate any exposed credentials immediately; \
+                 remove the secret from git history using git-filter-repo or BFG; \
+                 add pre-commit hooks (e.g. gitleaks) to prevent future leaks"
+            );
+        let _ = write_finding(eng, &tf);
+
         new_count += 1;
     }
 

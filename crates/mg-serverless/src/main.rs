@@ -21,7 +21,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use url::Url;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -348,6 +348,26 @@ async fn main() -> Result<()> {
     let json = serde_json::to_string_pretty(&output)?;
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
+
+    // Emit HIGH finding for each accessible probe that returned sensitive data
+    for probe in &output.probes {
+        if probe.accessible && probe.severity.is_some() {
+            let tf = ToolFinding::new("mg-serverless", probe.label.clone(), FindingSeverity::High)
+                .url(probe.ssrf_url.clone())
+                .evidence(format!(
+                    "metadata_url={} detail={} masked_value={}",
+                    probe.metadata_url,
+                    probe.detail,
+                    probe.masked_value.as_deref().unwrap_or("(none)")
+                ))
+                .recommendation(
+                    "Remediate the SSRF vulnerability that allows reaching the IMDS endpoint; \
+                     enforce IMDSv2 (require session tokens); restrict Lambda execution roles \
+                     to least-privilege; rotate any exposed credentials immediately"
+                );
+            let _ = write_finding(&eng, &tf);
+        }
+    }
 
     let _ = eng.audit(AUDIT_TOOL, &args.ssrf_url, None);
 
