@@ -1,0 +1,21 @@
+[package]
+name = "mg-cname-chain"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "mg-cname-chain"
+path = "src/main.rs"
+
+[dependencies]
+engagement = { path = "../engagement" }
+tokio = { version = "1", features = ["full"] }
+hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+time = { version = "0.3", features = ["formatting", "macros"] }
+
+[dev-dependencies]
+tempfile = "3"
