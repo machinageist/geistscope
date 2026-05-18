@@ -493,6 +493,119 @@ pub fn edge_id(kind: EdgeKind, from: &str, to: &str, discriminator: &str) -> Str
     )
 }
 
+// Ingest tool-written ToolFinding JSON files from engagements/<name>/findings/*.json
+pub fn ingest_tool_findings(
+    engagement: &Engagement,
+    store: &FileGraphStore,
+) -> Result<(), SecurityGraphError> {
+    let findings_dir = engagement.findings_dir();
+    if !findings_dir.exists() {
+        return Ok(());
+    }
+    let timestamp = now_rfc3339()?;
+    let mut paths: Vec<_> = fs::read_dir(&findings_dir)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
+
+    for path in &paths {
+        let value = match read_json(path) {
+            Ok(v) => v,
+            // silently skip unreadable or unparseable files
+            Err(_) => continue,
+        };
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("finding")
+            })
+            .to_string();
+        let title = value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("(untitled)")
+            .to_string();
+        let tool = value
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let evidence_uri = format!(
+            "evidence://{}/tool-finding/{}",
+            engagement.meta.name, id
+        );
+        let evidence_ref = EvidenceRef::new(&evidence_uri, Some(path));
+        let finding_key = format!("tool:{id}");
+        let finding_id = node_id(NodeKind::Finding, &finding_key);
+
+        // build finding node from all standard ToolFinding fields
+        let mut node =
+            SecurityNode::new(NodeKind::Finding, &finding_key, &title, &timestamp)
+                .property("source", json!(tool.as_str()))
+                .property("tool", clone_or_null(value.get("tool")))
+                .property("severity", clone_or_null(value.get("severity")))
+                .property("url", clone_or_null(value.get("url")))
+                .property("parameter", clone_or_null(value.get("parameter")))
+                .property("evidence", clone_or_null(value.get("evidence")))
+                .property(
+                    "recommendation",
+                    clone_or_null(value.get("recommendation")),
+                )
+                .property("timestamp", clone_or_null(value.get("timestamp")))
+                .evidence(evidence_ref.clone());
+        // attach the full raw JSON as metadata for harness callers
+        node.properties.insert("raw".into(), value.clone());
+        store.upsert_node(node)?;
+
+        // link finding → tool technology node if one exists (best-effort, skip if absent)
+        let tech_key = format!("tool:{}", tool.to_lowercase());
+        let tech_id = node_id(NodeKind::Technology, &tech_key);
+        let existing_nodes = store.nodes()?;
+        if existing_nodes.iter().any(|n| n.id == tech_id) {
+            store.upsert_edge(
+                SecurityEdge::new(
+                    EdgeKind::DiscoveredBy,
+                    &finding_id,
+                    &tech_id,
+                    &id,
+                    &timestamp,
+                )
+                .label(format!("discovered by {tool}"))
+                .evidence(evidence_ref),
+            )?;
+        }
+
+        // if the finding has a URL, link host → finding with VulnerableTo
+        if let Some(raw_url) = value.get("url").and_then(Value::as_str)
+            && !raw_url.is_empty()
+            && let Some(url_normalized) = normalize_url(raw_url)
+        {
+            let url_id = node_id(NodeKind::Url, &url_normalized);
+            store.upsert_node(
+                SecurityNode::new(NodeKind::Url, &url_normalized, &url_normalized, &timestamp)
+                    .property("source", json!(&tool))
+                    .evidence(EvidenceRef::new(&evidence_uri, Some(path))),
+            )?;
+            store.upsert_edge(
+                SecurityEdge::new(
+                    EdgeKind::VulnerableTo,
+                    &url_id,
+                    &finding_id,
+                    &id,
+                    &timestamp,
+                )
+                .evidence(EvidenceRef::new(&evidence_uri, Some(path))),
+            )?;
+        }
+    }
+    Ok(())
+}
+
 // Ingest existing engagement artifacts into the file-backed graph
 pub fn ingest_engagement(engagement: &Engagement) -> Result<GraphIngestReport, SecurityGraphError> {
     let store = FileGraphStore::for_engagement(engagement);
@@ -530,6 +643,9 @@ pub fn ingest_engagement(engagement: &Engagement) -> Result<GraphIngestReport, S
         ingest_finding(engagement, &store, &finding_path, &timestamp)?;
         sources.push(display_path(&finding_path));
     }
+
+    // also ingest ToolFinding JSON files written by the extended tool suite
+    ingest_tool_findings(engagement, &store)?;
 
     let after_nodes = store.nodes()?.len();
     let after_edges = store.edges()?.len();
@@ -1435,6 +1551,42 @@ mod tests {
         assert!(summary.node_kinds["host"] >= 2);
         assert!(summary.node_kinds["finding"] >= 2);
         assert!(summary.edge_kinds["vulnerable_to"] >= 2);
+    }
+
+    #[test]
+    fn ingest_tool_findings_creates_finding_nodes() {
+        let eng = test_engagement();
+        fs::write(
+            eng.findings_dir().join("001-xss.json"),
+            r#"{
+                "id": "001",
+                "title": "Reflected XSS",
+                "severity": "high",
+                "tool": "mg-xss",
+                "url": "https://api.example.com/search?q=1",
+                "parameter": "q",
+                "evidence": "<script>alert(1)</script>",
+                "recommendation": "Encode output",
+                "timestamp": "2026-05-18T00:00:00Z"
+            }"#,
+        )
+        .unwrap();
+        fs::write(eng.findings_dir().join("not-finding.md"), "---\n---\n").unwrap();
+        fs::write(eng.findings_dir().join("bad.json"), "invalid {").unwrap();
+
+        let store = FileGraphStore::for_engagement(&eng);
+        ingest_tool_findings(&eng, &store).unwrap();
+
+        let nodes = store.nodes().unwrap();
+        let finding = nodes.iter().find(|n| n.kind == NodeKind::Finding);
+        assert!(finding.is_some(), "expected a finding node");
+        let f = finding.unwrap();
+        assert_eq!(f.label, "Reflected XSS");
+        assert_eq!(f.properties["severity"], "high");
+
+        // URL node should also have been created
+        let url_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == NodeKind::Url).collect();
+        assert!(!url_nodes.is_empty(), "expected a url node from the finding");
     }
 
     #[test]
