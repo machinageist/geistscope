@@ -908,7 +908,7 @@ pub fn registry() -> Vec<EndpointSpec> {
         },
         EndpointSpec {
             name: "leak.monitor",
-            risk: RiskClass::Destructive,
+            risk: RiskClass::PassiveRemote,
             implemented: true,
             description: "Continuously monitor leak sources for target exposure.",
         },
@@ -2161,6 +2161,26 @@ async fn handle_exploit_scaffold(
     })
 }
 
+// Wall-clock limit for subprocess execution; tools that need longer should write
+// progress files and exit, then be polled separately
+const TOOL_SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(300);
+// Maximum bytes captured from each of stdout / stderr — protects the harness from
+// gigabyte log dumps. Truncated output gets a marker line appended.
+const TOOL_SUBPROCESS_OUTPUT_CAP: usize = 64 * 1024;
+
+// Truncate output bytes to the cap, returning a UTF-8 string with a marker if cut
+fn cap_subprocess_output(buf: &[u8]) -> String {
+    if buf.len() <= TOOL_SUBPROCESS_OUTPUT_CAP {
+        return String::from_utf8_lossy(buf).trim().to_string();
+    }
+    let mut s = String::from_utf8_lossy(&buf[..TOOL_SUBPROCESS_OUTPUT_CAP]).into_owned();
+    s.push_str(&format!(
+        "\n... [truncated: {} bytes hidden]",
+        buf.len() - TOOL_SUBPROCESS_OUTPUT_CAP
+    ));
+    s
+}
+
 // Run a tool binary as a subprocess, forwarding safe string params from the request
 async fn run_tool_binary(
     binary: &str,
@@ -2172,6 +2192,8 @@ async fn run_tool_binary(
 
     let mut cmd = Command::new(binary);
     cmd.arg(&eng.meta.name).arg("--engagements-dir").arg(engagements_dir);
+    // Kill the child on parent drop so timeouts actually free the process
+    cmd.kill_on_drop(true);
 
     // Forward extra string params from args as --key value pairs
     if let Some(obj) = req.args.as_object() {
@@ -2185,12 +2207,27 @@ async fn run_tool_binary(
         }
     }
 
-    let output = cmd.output().await?;
+    let exec = cmd.output();
+    let output = match tokio::time::timeout(TOOL_SUBPROCESS_TIMEOUT, exec).await {
+        Ok(res) => res?,
+        Err(_) => {
+            return Ok(json!({
+                "success": false,
+                "exit_code": serde_json::Value::Null,
+                "stdout": "",
+                "stderr": format!(
+                    "tool subprocess timed out after {}s",
+                    TOOL_SUBPROCESS_TIMEOUT.as_secs()
+                ),
+                "timed_out": true,
+            }));
+        }
+    };
     Ok(json!({
         "success": output.status.success(),
         "exit_code": output.status.code(),
-        "stdout": String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        "stderr": String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        "stdout": cap_subprocess_output(&output.stdout),
+        "stderr": cap_subprocess_output(&output.stderr),
     }))
 }
 
