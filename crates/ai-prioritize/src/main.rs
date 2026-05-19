@@ -29,6 +29,8 @@ use llm_client::LlmClient;
 
 // Maximum number of findings injected into the LLM context
 const MAX_FINDINGS_IN_CONTEXT: usize = 50;
+// Maximum per-finding JSON file size to parse; oversized files are skipped
+const MAX_FINDING_FILE_BYTES: u64 = 64 * 1024;
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -237,18 +239,27 @@ async fn main() -> Result<()> {
 
 // ── Findings loader ──────────────────────────────────────────────────────────
 
-// Read all JSON files from engagements/<name>/findings/ and return parsed values
+// Severity ranking used to order findings before truncation; higher number wins
+fn severity_rank(value: &serde_json::Value) -> u8 {
+    match value.get("severity").and_then(|v| v.as_str()) {
+        Some(s) if s.eq_ignore_ascii_case("HIGH") || s.eq_ignore_ascii_case("CRITICAL") => 4,
+        Some(s) if s.eq_ignore_ascii_case("MEDIUM") => 3,
+        Some(s) if s.eq_ignore_ascii_case("LOW") => 2,
+        Some(s) if s.eq_ignore_ascii_case("INFO") => 1,
+        _ => 0,
+    }
+}
+
+// Read all JSON findings from engagements/<name>/findings/, sorted by severity desc
 pub fn load_findings(eng_dir: &Path) -> Vec<serde_json::Value> {
     let findings_dir = eng_dir.join("findings");
     if !findings_dir.exists() {
         return Vec::new();
     }
-    let mut entries: Vec<_> = match std::fs::read_dir(&findings_dir) {
+    let entries: Vec<_> = match std::fs::read_dir(&findings_dir) {
         Ok(rd) => rd.flatten().collect(),
         Err(_) => return Vec::new(),
     };
-    // sort by file name for deterministic ordering
-    entries.sort_by_key(|e| e.path());
 
     let mut out = Vec::new();
     for entry in entries {
@@ -257,6 +268,12 @@ pub fn load_findings(eng_dir: &Path) -> Vec<serde_json::Value> {
             continue;
         };
         if ext != "json" {
+            continue;
+        }
+        // skip oversize files to bound parser memory
+        if let Ok(meta) = entry.metadata()
+            && meta.len() > MAX_FINDING_FILE_BYTES
+        {
             continue;
         }
         // skip unreadable or unparseable files silently
@@ -268,6 +285,8 @@ pub fn load_findings(eng_dir: &Path) -> Vec<serde_json::Value> {
         };
         out.push(value);
     }
+    // High → Medium → Low → Info → unknown
+    out.sort_by_key(|v| std::cmp::Reverse(severity_rank(v)));
     out
 }
 

@@ -510,6 +510,10 @@ pub fn ingest_tool_findings(
         .collect();
     paths.sort();
 
+    // Snapshot existing nodes once — was previously re-read per finding (O(n²))
+    let existing_node_ids: std::collections::HashSet<String> =
+        store.nodes()?.into_iter().map(|n| n.id).collect();
+
     for path in &paths {
         let value = match read_json(path) {
             Ok(v) => v,
@@ -565,8 +569,7 @@ pub fn ingest_tool_findings(
         // link finding → tool technology node if one exists (best-effort, skip if absent)
         let tech_key = format!("tool:{}", tool.to_lowercase());
         let tech_id = node_id(NodeKind::Technology, &tech_key);
-        let existing_nodes = store.nodes()?;
-        if existing_nodes.iter().any(|n| n.id == tech_id) {
+        if existing_node_ids.contains(&tech_id) {
             store.upsert_edge(
                 SecurityEdge::new(
                     EdgeKind::DiscoveredBy,
