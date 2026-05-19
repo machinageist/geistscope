@@ -7,6 +7,8 @@ on:
 # Opt into Node.js 24 runtime for JS-based actions ahead of the 2026-06-02 default
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   rust:
@@ -14,15 +16,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
       - name: Build workspace
         working-directory: crates
-        run: cargo build --workspace
+        run: cargo build --workspace --locked
       - name: Unit tests
         working-directory: crates
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
       - name: Clippy
         working-directory: crates
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --tests --locked -- -D warnings
       - name: Start vulnerable target
         run: docker compose -f tests/target/docker-compose.yml up -d --wait
       - name: Integration smoke test
