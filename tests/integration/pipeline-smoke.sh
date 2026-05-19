@@ -9,7 +9,7 @@ TARGET_URL="http://localhost:18080"
 rm -rf "$ENG_DIR"
 mkdir -p "$ENG_DIR"
 
-cd "$ROOT/engine-rust"
+cd "$ROOT/crates"
 
 MG_ENGAGEMENTS_DIR="$ENG_DIR" cargo run -q -p engagement --bin mg-engagement -- \
   init "$ENGAGEMENT" --target localhost --platform local

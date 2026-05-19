@@ -5,4 +5,4 @@ target/
 *.pem
 *.key
 engagements/*
-engine-rust/engagements/*
+crates/engagements/*
