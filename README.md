@@ -57,6 +57,32 @@ ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
 mg-report generate target-bounty YYYYMMDD-001
 ```
 
+### Docker
+
+A multi-stage `Dockerfile` ships all workspace binaries in one image; CI
+publishes it to `ghcr.io/<owner>/geistscope` on every push to `main` and on
+tagged releases. Mount a host directory at `/workspace/engagements` to persist
+findings between runs.
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/machinageist/geistscope:latest
+
+# Single-shot endpoint dispatch — same as the CLI
+echo '{"endpoint":"endpoint.registry","engagement":"foo"}' | \
+  docker run --rm -i -v "$PWD/engagements:/workspace/engagements" \
+    ghcr.io/machinageist/geistscope:latest dispatch
+
+# Chat REPL backed by a local Ollama on the host
+docker run --rm -it --network host \
+  -v "$PWD/engagements:/workspace/engagements" \
+  ghcr.io/machinageist/geistscope:latest chat my-engagement \
+  --backend ollama --base-url http://localhost:11434 --model qwen2.5-coder
+
+# Build locally
+docker build -t geistscope .
+```
+
 ## Binaries
 
 | Binary           | What it does                                        |
