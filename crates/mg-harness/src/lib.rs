@@ -8,6 +8,8 @@
  *                  and returns bounded JSON results for TUI or AI callers.
  *******************************************************************/
 
+pub mod chat;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
