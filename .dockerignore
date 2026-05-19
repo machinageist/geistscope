@@ -1,0 +1,20 @@
+# Keep the build context small and reproducible — only crates/ is needed for
+# the image build, everything else (CI configs, tests, docs, local state) just
+# slows down the daemon's tarball upload.
+
+.git
+.github
+.gitignore
+.dockerignore
+LICENSE
+README.md
+HANDOFF.md
+docs
+tests
+engagements
+**/target
+**/*.log
+.DS_Store
+.env
+*.pem
+*.key
