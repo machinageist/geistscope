@@ -199,12 +199,12 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
         });
     }
 
-    // unsafe-inline in script-src
+    // unsafe-inline in script-src — weakens defense but isn't itself an exploit
     if effective_script.iter().any(|s| s.eq_ignore_ascii_case("'unsafe-inline'")) {
         findings.push(CspFinding {
             directive: "script-src".into(),
             issue: "'unsafe-inline' allows inline script execution".into(),
-            severity: "HIGH".into(),
+            severity: "MEDIUM".into(),
             bypass_suggestion: "inject <script>alert(1)</script> directly into the page".into(),
         });
     }
@@ -214,7 +214,7 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
         findings.push(CspFinding {
             directive: "script-src".into(),
             issue: "'unsafe-eval' allows eval() and Function() constructor".into(),
-            severity: "HIGH".into(),
+            severity: "MEDIUM".into(),
             bypass_suggestion: "use eval() or setTimeout(string) to execute arbitrary code".into(),
         });
     }
@@ -224,7 +224,7 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
         findings.push(CspFinding {
             directive: "script-src".into(),
             issue: "'data:' URI scheme allows inline script via data URI".into(),
-            severity: "HIGH".into(),
+            severity: "MEDIUM".into(),
             bypass_suggestion: "use <script src=\"data:text/javascript,alert(1)\">".into(),
         });
     }

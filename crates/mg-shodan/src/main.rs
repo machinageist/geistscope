@@ -340,14 +340,18 @@ async fn main() -> Result<()> {
             .recommendation("Patch the vulnerable service or restrict access");
         let _ = write_finding(&eng, &tf);
     }
+    // Versioned-service exposure is informational — every banner-disclosed product
+    // would otherwise become a MEDIUM, flooding priorities. Emit Info and let the
+    // CVE-correlated findings above carry actual severity.
     for svc in &services {
         if !svc.version.is_empty() {
             let tf = ToolFinding::new(
                 AUDIT_TOOL,
                 format!("Exposed service with version: {} {}", svc.product, svc.version),
-                FindingSeverity::Medium,
+                FindingSeverity::Info,
             )
             .url(format!("shodan://{target}"))
+            .discriminator(format!("{}/{}", svc.port, svc.transport))
             .evidence(format!("Port {}/{}: {} {}", svc.port, svc.transport, svc.product, svc.version))
             .recommendation("Restrict service exposure and update to a patched version");
             let _ = write_finding(&eng, &tf);
