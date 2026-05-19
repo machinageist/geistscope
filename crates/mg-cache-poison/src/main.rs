@@ -23,7 +23,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -460,18 +460,48 @@ async fn main() -> Result<()> {
             .filter(|r| r.verdict == PoisonVerdict::Confirmed)
             .count();
 
-    // Print confirmed findings
+    // Print confirmed findings and emit standardized ToolFinding records
     for r in &header_results {
         if r.verdict == PoisonVerdict::Confirmed || r.verdict == PoisonVerdict::StatusOverride {
             eprintln!(
                 "  [cache-poison] {} header={} verdict={:?}",
                 r.url, r.header, r.verdict
             );
+            let severity = if r.verdict == PoisonVerdict::Confirmed {
+                FindingSeverity::High
+            } else {
+                FindingSeverity::Medium
+            };
+            let tf = ToolFinding::new(
+                AUDIT_TOOL,
+                format!("Cache poisoning via unkeyed header: {}", r.header),
+                severity,
+            )
+            .url(r.url.clone())
+            .discriminator(r.header.clone())
+            .evidence(format!(
+                "header={} value={} clean_status={} verdict={:?} reflected={}",
+                r.header, r.poison_value, r.clean_status, r.verdict, r.reflected
+            ))
+            .recommendation("Add the offending header to the cache key or strip it before caching");
+            let _ = write_finding(&eng, &tf);
         }
     }
     for r in &fat_get_results {
         if r.verdict == PoisonVerdict::Confirmed {
             eprintln!("  [fat-get] {} body_differs=true", r.url);
+            let tf = ToolFinding::new(
+                AUDIT_TOOL,
+                "Cache poisoning via fat GET (request-with-body)",
+                FindingSeverity::High,
+            )
+            .url(r.url.clone())
+            .evidence(format!(
+                "clean_status={} fat_status={} body_differs=true",
+                r.clean_status, r.fat_status
+            ))
+            .recommendation("Reject GET requests carrying a body, or include the body hash in the cache key");
+            let _ = write_finding(&eng, &tf);
         }
     }
 

@@ -21,7 +21,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -369,14 +369,33 @@ async fn main() -> Result<()> {
         .filter(|r| r.verdict == Verdict::ServerError)
         .count();
 
-    // Print notable findings
+    // Print notable findings and emit standardized ToolFinding records
     for r in &results {
-        if r.verdict != Verdict::NoEffect {
-            eprintln!(
-                "  [{:?}] {} probe={} payload={}",
-                r.verdict, r.url, r.probe_type, r.payload_label
-            );
+        if r.verdict == Verdict::NoEffect {
+            continue;
         }
+        eprintln!(
+            "  [{:?}] {} probe={} payload={}",
+            r.verdict, r.url, r.probe_type, r.payload_label
+        );
+        let severity = match r.verdict {
+            Verdict::Reflected => FindingSeverity::High,
+            Verdict::ServerError => FindingSeverity::Medium,
+            Verdict::NoEffect => continue,
+        };
+        let tf = ToolFinding::new(
+            AUDIT_TOOL,
+            format!("Prototype pollution: {} ({})", r.probe_type, r.payload_label),
+            severity,
+        )
+        .url(r.url.clone())
+        .discriminator(format!("{}/{}", r.probe_type, r.payload_label))
+        .evidence(format!(
+            "verdict={:?} probe={} payload={}",
+            r.verdict, r.probe_type, r.payload_label
+        ))
+        .recommendation("Sanitize or reject __proto__/constructor keys in user-supplied JSON and URL params");
+        let _ = write_finding(&eng, &tf);
     }
 
     let ts = now_rfc3339();

@@ -29,7 +29,7 @@ use tokio::net::TcpStream;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsConnector;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -522,7 +522,7 @@ async fn main() -> Result<()> {
         .filter(|r| r.verdict == Verdict::Potential)
         .count();
 
-    // Print findings summary
+    // Print findings summary and emit standardized ToolFinding records
     println!("\n=== Smuggling Findings ===");
     for r in all_results
         .iter()
@@ -533,6 +533,24 @@ async fn main() -> Result<()> {
             r.verdict, r.host, r.kind, r.first_status, r.second_status,
             r.baseline_ms, r.second_ms
         );
+        let severity = match r.verdict {
+            Verdict::Vulnerable => FindingSeverity::High,
+            Verdict::Potential => FindingSeverity::Medium,
+            _ => continue,
+        };
+        let tf = ToolFinding::new(
+            AUDIT_TOOL,
+            format!("HTTP request smuggling ({})", r.kind),
+            severity,
+        )
+        .url(format!("https://{}", r.host))
+        .discriminator(format!("{}", r.kind))
+        .evidence(format!(
+            "first_status={:?} second_status={:?} baseline_ms={} second_ms={}",
+            r.first_status, r.second_status, r.baseline_ms, r.second_ms
+        ))
+        .recommendation("Reject ambiguous Content-Length / Transfer-Encoding combinations at the front-end proxy");
+        let _ = write_finding(&eng, &tf);
     }
     println!("Vulnerable: {vulnerable_count}  Potential: {potential_count}");
 
