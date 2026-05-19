@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn known_token_set_includes_auto_and_extras() {
         let auto = "abc123".to_string();
-        let extras = vec!["tok1".to_string(), "tok2".to_string()];
+        let extras = ["tok1".to_string(), "tok2".to_string()];
         let mut set: HashSet<String> = extras.iter().cloned().collect();
         set.insert(auto.clone());
         assert!(set.contains("abc123"));

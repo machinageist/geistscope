@@ -546,7 +546,7 @@ mod tests {
     fn build_get_request_contains_get_request_tag() {
         let pdu = build_get_request(b"public", OID_SYS_DESCR, 0x00, 1);
         assert!(
-            pdu.iter().any(|&b| b == SNMP_GET_REQUEST_TAG),
+            pdu.contains(&SNMP_GET_REQUEST_TAG),
             "PDU must contain GetRequest tag 0xa0"
         );
     }

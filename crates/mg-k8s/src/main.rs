@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn k8s_results_counts_match_findings() {
-        let findings = vec![
+        let findings = [
             K8sFinding {
                 host: "h".into(),
                 port: 6443,

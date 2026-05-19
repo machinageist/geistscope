@@ -465,12 +465,12 @@ mod tests {
         for line in raw.lines() {
             if let Some(r) = line.strip_prefix("User-agent:") {
                 in_wildcard = r.trim() == "*";
-            } else if in_wildcard {
-                if let Some(p) = line.strip_prefix("Disallow:") {
-                    let p = p.trim();
-                    if !p.is_empty() {
-                        dis.insert(p.to_string());
-                    }
+            } else if in_wildcard
+                && let Some(p) = line.strip_prefix("Disallow:")
+            {
+                let p = p.trim();
+                if !p.is_empty() {
+                    dis.insert(p.to_string());
                 }
             }
         }
