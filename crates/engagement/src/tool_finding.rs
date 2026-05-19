@@ -19,6 +19,8 @@ use crate::Engagement;
 
 // Maximum evidence payload kept on disk (bytes)
 const EVIDENCE_MAX_BYTES: usize = 2048;
+// Suffix appended after truncation so downstream consumers can detect it
+const EVIDENCE_TRUNCATION_SUFFIX: &str = "... [truncated]";
 
 // ---- severity enum
 
@@ -59,6 +61,10 @@ pub struct ToolFinding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<String>,
     pub timestamp: String,
+    // Optional opt-in distinguisher for tools that emit multiple findings sharing
+    // the same (tool, url, parameter, title) tuple — e.g. payload variants
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discriminator: Option<String>,
 }
 
 impl ToolFinding {
@@ -66,7 +72,7 @@ impl ToolFinding {
     pub fn new(tool: impl Into<String>, title: impl Into<String>, severity: FindingSeverity) -> Self {
         let tool = tool.into();
         let title = title.into();
-        let id = derive_id(&tool, "", "", &title);
+        let id = derive_id(&tool, "", "", &title, "");
         let timestamp = OffsetDateTime::now_utc()
             .format(&Rfc3339)
             .unwrap_or_else(|_| String::from("1970-01-01T00:00:00Z"));
@@ -80,48 +86,57 @@ impl ToolFinding {
             evidence: None,
             recommendation: None,
             timestamp,
+            discriminator: None,
         }
     }
 
     // Builder — set the target url
     pub fn url(mut self, url: impl Into<String>) -> Self {
         let u = url.into();
-        self.id = derive_id(
-            &self.tool,
-            &u,
-            self.parameter.as_deref().unwrap_or(""),
-            &self.title,
-        );
         self.url = Some(u);
+        self.recompute_id();
         self
     }
 
     // Builder — set the vulnerable parameter name
     pub fn parameter(mut self, p: impl Into<String>) -> Self {
-        let param = p.into();
-        self.id = derive_id(
-            &self.tool,
-            self.url.as_deref().unwrap_or(""),
-            &param,
-            &self.title,
-        );
-        self.parameter = Some(param);
+        self.parameter = Some(p.into());
+        self.recompute_id();
         self
     }
 
-    // Builder — set evidence, truncated to EVIDENCE_MAX_BYTES
+    // Builder — opt-in distinguisher when emitting multiple findings sharing the
+    // same (tool, url, parameter, title) — e.g. payload, dbms, or technique
+    pub fn discriminator(mut self, d: impl Into<String>) -> Self {
+        self.discriminator = Some(d.into());
+        self.recompute_id();
+        self
+    }
+
+    // Builder — set evidence, truncated to EVIDENCE_MAX_BYTES with a marker suffix
     pub fn evidence(mut self, e: impl Into<String>) -> Self {
         let mut s = e.into();
         if s.len() > EVIDENCE_MAX_BYTES {
-            // Truncate at a char boundary
-            let mut boundary = EVIDENCE_MAX_BYTES;
-            while !s.is_char_boundary(boundary) {
+            let mut boundary = EVIDENCE_MAX_BYTES.saturating_sub(EVIDENCE_TRUNCATION_SUFFIX.len());
+            while boundary > 0 && !s.is_char_boundary(boundary) {
                 boundary -= 1;
             }
             s.truncate(boundary);
+            s.push_str(EVIDENCE_TRUNCATION_SUFFIX);
         }
         self.evidence = Some(s);
         self
+    }
+
+    // Recompute deterministic id from current tool/url/parameter/title/discriminator
+    fn recompute_id(&mut self) {
+        self.id = derive_id(
+            &self.tool,
+            self.url.as_deref().unwrap_or(""),
+            self.parameter.as_deref().unwrap_or(""),
+            &self.title,
+            self.discriminator.as_deref().unwrap_or(""),
+        );
     }
 
     // Builder — set remediation recommendation
@@ -157,13 +172,19 @@ pub fn write_finding(eng: &Engagement, finding: &ToolFinding) -> anyhow::Result<
 
 // ---- internal helpers
 
-// Derive a 16-hex-char id from sha256(tool + url + parameter + title)
-fn derive_id(tool: &str, url: &str, parameter: &str, title: &str) -> String {
+// Derive a 16-hex-char id from sha256(tool|url|parameter|title|discriminator)
+fn derive_id(tool: &str, url: &str, parameter: &str, title: &str, discriminator: &str) -> String {
     let mut hasher = Sha256::new();
+    // Pipe separators prevent ambiguity if fields contain each other's content
     hasher.update(tool.as_bytes());
+    hasher.update(b"|");
     hasher.update(url.as_bytes());
+    hasher.update(b"|");
     hasher.update(parameter.as_bytes());
+    hasher.update(b"|");
     hasher.update(title.as_bytes());
+    hasher.update(b"|");
+    hasher.update(discriminator.as_bytes());
     let digest = hasher.finalize();
     hex::encode(&digest[..8])
 }
@@ -217,11 +238,25 @@ mod tests {
     }
 
     #[test]
-    fn evidence_truncated_at_2048() {
+    fn evidence_truncated_with_marker() {
         let long = "x".repeat(4096);
         let f = ToolFinding::new("mg-sqli", "SQLi", FindingSeverity::Medium)
             .evidence(long);
-        assert_eq!(f.evidence.unwrap().len(), EVIDENCE_MAX_BYTES);
+        let ev = f.evidence.unwrap();
+        assert!(ev.ends_with(EVIDENCE_TRUNCATION_SUFFIX));
+        assert!(ev.len() <= EVIDENCE_MAX_BYTES);
+    }
+
+    #[test]
+    fn discriminator_changes_id() {
+        let base = ToolFinding::new("mg-sqli", "SQLi", FindingSeverity::High)
+            .url("https://example.com/api");
+        let f1 = base.clone().discriminator("payload-a");
+        let f2 = base.clone().discriminator("payload-b");
+        assert_ne!(f1.id, f2.id);
+        // Same discriminator yields same id (idempotency preserved)
+        let f1b = base.discriminator("payload-a");
+        assert_eq!(f1.id, f1b.id);
     }
 
     #[test]
