@@ -226,74 +226,8 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "exploit.scaffold" => handle_exploit_scaffold(cfg, &invocation).await,
         "finding.read" => handle_finding_read(cfg, &invocation).await,
         "finding.create" => handle_finding_create(cfg, &invocation).await,
-        // ---- Subprocess-dispatched tool endpoints
-        "oob.start"
-        | "takeover.scan"
-        | "tls.scan"
-        | "jwt.analyze"
-        | "ssrf.scan"
-        | "authz.scan"
-        | "screenshot.run"
-        | "graphql.scan"
-        | "xss.scan"
-        | "sqli.scan"
-        | "ssti.scan"
-        | "vhost.scan"
-        | "openapi.scan"
-        | "secret.validate"
-        | "github.search"
-        | "cloud.enum"
-        | "dns.enum"
-        | "cmdinject.scan"
-        | "xxe.scan"
-        | "traversal.scan"
-        | "redirect.scan"
-        | "csrf.scan"
-        | "smuggle.scan"
-        | "whois.lookup"
-        | "shodan.lookup"
-        | "aws.chain"
-        | "oauth.analyze"
-        | "brute.run"
-        | "js.analyze"
-        | "cors.scan"
-        | "udp.scan"
-        | "ssh.audit"
-        | "smtp.enum"
-        | "snmp.brute"
-        | "gcp.chain"
-        | "azure.chain"
-        | "k8s.scan"
-        | "docker.scan"
-        | "cache.poison"
-        | "proto.pollute"
-        | "apikey.extract"
-        | "session.audit"
-        | "grpc.scan"
-        | "websocket.scan"
-        | "sourcemap.fetch"
-        | "csp.analyze"
-        | "dns.rebind"
-        | "cname.chain"
-        | "smb.scan"
-        | "http2.scan"
-        | "privesc.linux"
-        | "privesc.windows"
-        | "loot.run"
-        | "leak.monitor"
-        | "diff.run"
-        | "notify.start"
-        | "timeline.generate"
-        | "nuclei.run"
-        | "dns.history"
-        | "breach.lookup"
-        | "social.enum"
-        | "metadata.extract"
-        | "dork.run"
-        | "deser.scan"
-        | "serverless.chain"
-        | "apk.analyze"
-        | "ipa.analyze" => {
+        // ---- Subprocess-dispatched tool endpoints — table-driven, see SUBPROCESS_TOOLS
+        ep if subprocess_tool_for(ep).is_some() => {
             handle_tool_binary(cfg, &invocation, spec.risk).await
         }
         _ => Ok(result_blocked(
@@ -505,414 +439,15 @@ pub fn registry() -> Vec<EndpointSpec> {
             implemented: false,
             description: "Rank targets and hypotheses from local evidence.",
         },
-        // ---- Passive recon tools
-        EndpointSpec {
-            name: "whois.lookup",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Look up WHOIS registration data for a domain.",
-        },
-        EndpointSpec {
-            name: "shodan.lookup",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Query Shodan for host intelligence.",
-        },
-        EndpointSpec {
-            name: "dns.history",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Retrieve passive DNS history for a domain.",
-        },
-        EndpointSpec {
-            name: "breach.lookup",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Look up breach data for a target domain.",
-        },
-        EndpointSpec {
-            name: "social.enum",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Enumerate social-media profiles linked to a target.",
-        },
-        EndpointSpec {
-            name: "dork.run",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Run Google-dork queries for target exposure.",
-        },
-        EndpointSpec {
-            name: "github.search",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Search GitHub for secrets and target references.",
-        },
-        EndpointSpec {
-            name: "cloud.enum",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Enumerate cloud-storage buckets and resources.",
-        },
-        EndpointSpec {
-            name: "dns.enum",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Enumerate DNS records and subdomains.",
-        },
-        EndpointSpec {
-            name: "screenshot.run",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Capture screenshots of scoped web targets.",
-        },
-        EndpointSpec {
-            name: "diff.run",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Diff two engagement snapshots for change detection.",
-        },
-        EndpointSpec {
-            name: "timeline.generate",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Generate a timeline of engagement events.",
-        },
-        EndpointSpec {
-            name: "apikey.extract",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Extract API keys from crawled or imported content.",
-        },
-        EndpointSpec {
-            name: "js.analyze",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Analyze JavaScript files for secrets and endpoints.",
-        },
-        EndpointSpec {
-            name: "sourcemap.fetch",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Fetch and reconstruct source maps from a target.",
-        },
-        EndpointSpec {
-            name: "apk.analyze",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Static-analyze an Android APK for secrets and endpoints.",
-        },
-        EndpointSpec {
-            name: "ipa.analyze",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Static-analyze an iOS IPA for secrets and endpoints.",
-        },
-        EndpointSpec {
-            name: "metadata.extract",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Extract metadata from documents and images.",
-        },
-        // ---- Semi-active probe tools
-        EndpointSpec {
-            name: "tls.scan",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Scan TLS configuration and certificate chain.",
-        },
-        EndpointSpec {
-            name: "ssh.audit",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Audit SSH ciphers, KEX, and host-key algorithms.",
-        },
-        EndpointSpec {
-            name: "udp.scan",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Probe common UDP services on a scoped host.",
-        },
-        EndpointSpec {
-            name: "vhost.scan",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Discover virtual hosts on a scoped IP.",
-        },
-        EndpointSpec {
-            name: "graphql.scan",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Introspect a GraphQL endpoint for schema and misconfigs.",
-        },
-        EndpointSpec {
-            name: "csp.analyze",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Analyze Content-Security-Policy headers for weaknesses.",
-        },
-        EndpointSpec {
-            name: "cname.chain",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Trace CNAME chains for dangling-record exposure.",
-        },
-        EndpointSpec {
-            name: "dns.rebind",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Generate DNS-rebinding payloads for a target.",
-        },
-        EndpointSpec {
-            name: "http2.scan",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Probe HTTP/2 and HTTP/3 support and misconfigs.",
-        },
-        EndpointSpec {
-            name: "grpc.scan",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Enumerate gRPC services and methods.",
-        },
-        EndpointSpec {
-            name: "websocket.scan",
-            risk: RiskClass::LowActive,
-            implemented: true,
-            description: "Passively check WebSocket upgrade and origin policy.",
-        },
-        // ---- Active vuln-scanner tools
-        EndpointSpec {
-            name: "xss.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for reflected and stored XSS vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "sqli.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for SQL injection vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "ssrf.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for server-side request forgery vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "ssti.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for server-side template injection vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "xxe.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for XML external entity injection vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "traversal.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for path-traversal vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "redirect.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for open-redirect vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "csrf.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for CSRF vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "smuggle.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for HTTP request-smuggling vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "cmdinject.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for OS command-injection vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "cache.poison",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Probe for web-cache poisoning vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "proto.pollute",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Probe for prototype-pollution vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "deser.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for insecure-deserialization vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "brute.run",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Run credential brute-force against a scoped endpoint.",
-        },
-        EndpointSpec {
-            name: "authz.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for broken access-control and IDOR vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "aws.chain",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Run AWS privilege-escalation chain checks.",
-        },
-        EndpointSpec {
-            name: "gcp.chain",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Run GCP privilege-escalation chain checks.",
-        },
-        EndpointSpec {
-            name: "azure.chain",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Run Azure privilege-escalation chain checks.",
-        },
-        EndpointSpec {
-            name: "k8s.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan Kubernetes cluster for misconfigurations.",
-        },
-        EndpointSpec {
-            name: "docker.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan Docker daemon and images for misconfigurations.",
-        },
-        EndpointSpec {
-            name: "serverless.chain",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Probe serverless functions for privilege-escalation chains.",
-        },
-        EndpointSpec {
-            name: "secret.validate",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Validate discovered secrets against live APIs.",
-        },
-        EndpointSpec {
-            name: "openapi.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan an OpenAPI spec and its endpoints for vulnerabilities.",
-        },
-        EndpointSpec {
-            name: "oauth.analyze",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Analyze OAuth flows for misconfigurations and attacks.",
-        },
-        EndpointSpec {
-            name: "session.audit",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Audit session management for fixation and weak tokens.",
-        },
-        EndpointSpec {
-            name: "smb.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan SMB shares for access and misconfigurations.",
-        },
-        EndpointSpec {
-            name: "smtp.enum",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Enumerate SMTP users and relay configuration.",
-        },
-        EndpointSpec {
-            name: "snmp.brute",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Brute-force SNMP community strings.",
-        },
-        EndpointSpec {
-            name: "cors.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Exploit CORS misconfigurations.",
-        },
-        EndpointSpec {
-            name: "jwt.analyze",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Analyze JWT tokens for weak algorithms and key confusion.",
-        },
-        EndpointSpec {
-            name: "nuclei.run",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Run Nuclei templates against a scoped target.",
-        },
-        // ---- OOB and notification tools
-        EndpointSpec {
-            name: "oob.start",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Start an OOB callback listener for SSRF and injection detection.",
-        },
-        EndpointSpec {
-            name: "takeover.scan",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Scan for subdomain-takeover opportunities.",
-        },
-        EndpointSpec {
-            name: "notify.start",
-            risk: RiskClass::HighActive,
-            implemented: true,
-            description: "Start a notification listener for async tool callbacks.",
-        },
-        // ---- Destructive / post-exploitation tools
-        EndpointSpec {
-            name: "privesc.linux",
-            risk: RiskClass::Destructive,
-            implemented: true,
-            description: "Run Linux privilege-escalation checks and automation.",
-        },
-        EndpointSpec {
-            name: "privesc.windows",
-            risk: RiskClass::Destructive,
-            implemented: true,
-            description: "Run Windows privilege-escalation checks and automation.",
-        },
-        EndpointSpec {
-            name: "loot.run",
-            risk: RiskClass::Destructive,
-            implemented: true,
-            description: "Collect and export post-exploitation loot.",
-        },
-        EndpointSpec {
-            name: "leak.monitor",
-            risk: RiskClass::PassiveRemote,
-            implemented: true,
-            description: "Continuously monitor leak sources for target exposure.",
-        },
     ]
+    .into_iter()
+    .chain(SUBPROCESS_TOOLS.iter().map(|t| EndpointSpec {
+        name: t.endpoint,
+        risk: t.risk,
+        implemented: true,
+        description: t.description,
+    }))
+    .collect()
 }
 
 // Return the spec for one endpoint name
@@ -2231,79 +1766,103 @@ async fn run_tool_binary(
     }))
 }
 
-// Map endpoint name to tool binary name
+// Subprocess-dispatched tool spec: one row per (endpoint, binary, risk, description)
+struct SubprocessTool {
+    endpoint: &'static str,
+    binary: &'static str,
+    risk: RiskClass,
+    description: &'static str,
+}
+
+// Single source of truth for the 67 subprocess-dispatched tool endpoints.
+// Dispatch, registry entries, and the binary lookup all derive from this table —
+// adding or renaming a tool only touches one row here.
+const SUBPROCESS_TOOLS: &[SubprocessTool] = &[
+    // ---- Passive recon
+    SubprocessTool { endpoint: "whois.lookup",     binary: "mg-whois",          risk: RiskClass::PassiveRemote, description: "Look up WHOIS registration data for a domain." },
+    SubprocessTool { endpoint: "shodan.lookup",    binary: "mg-shodan",         risk: RiskClass::PassiveRemote, description: "Query Shodan for host intelligence." },
+    SubprocessTool { endpoint: "dns.history",      binary: "mg-dns-history",    risk: RiskClass::PassiveRemote, description: "Retrieve passive DNS history for a domain." },
+    SubprocessTool { endpoint: "breach.lookup",    binary: "mg-breach",         risk: RiskClass::PassiveRemote, description: "Look up breach data for a target domain." },
+    SubprocessTool { endpoint: "social.enum",      binary: "mg-social",         risk: RiskClass::PassiveRemote, description: "Enumerate social-media profiles linked to a target." },
+    SubprocessTool { endpoint: "dork.run",         binary: "mg-google-dork",    risk: RiskClass::PassiveRemote, description: "Run Google-dork queries for target exposure." },
+    SubprocessTool { endpoint: "github.search",    binary: "mg-github",         risk: RiskClass::PassiveRemote, description: "Search GitHub for secrets and target references." },
+    SubprocessTool { endpoint: "cloud.enum",       binary: "mg-cloud-enum",     risk: RiskClass::PassiveRemote, description: "Enumerate cloud-storage buckets and resources." },
+    SubprocessTool { endpoint: "dns.enum",         binary: "mg-dns-enum",       risk: RiskClass::PassiveRemote, description: "Enumerate DNS records and subdomains." },
+    SubprocessTool { endpoint: "screenshot.run",   binary: "mg-screenshot",     risk: RiskClass::PassiveRemote, description: "Capture screenshots of scoped web targets." },
+    SubprocessTool { endpoint: "diff.run",         binary: "mg-diff",           risk: RiskClass::PassiveRemote, description: "Diff two engagement snapshots for change detection." },
+    SubprocessTool { endpoint: "timeline.generate",binary: "mg-timeline",       risk: RiskClass::PassiveRemote, description: "Generate a timeline of engagement events." },
+    SubprocessTool { endpoint: "apikey.extract",   binary: "mg-apikey",         risk: RiskClass::PassiveRemote, description: "Extract API keys from crawled or imported content." },
+    SubprocessTool { endpoint: "js.analyze",       binary: "mg-js-analyze",     risk: RiskClass::PassiveRemote, description: "Analyze JavaScript files for secrets and endpoints." },
+    SubprocessTool { endpoint: "sourcemap.fetch",  binary: "mg-sourcemap",      risk: RiskClass::PassiveRemote, description: "Fetch and reconstruct source maps from a target." },
+    SubprocessTool { endpoint: "apk.analyze",      binary: "mg-apk",            risk: RiskClass::PassiveRemote, description: "Static-analyze an Android APK for secrets and endpoints." },
+    SubprocessTool { endpoint: "ipa.analyze",      binary: "mg-ipa",            risk: RiskClass::PassiveRemote, description: "Static-analyze an iOS IPA for secrets and endpoints." },
+    SubprocessTool { endpoint: "metadata.extract", binary: "mg-metadata",       risk: RiskClass::PassiveRemote, description: "Extract metadata from documents and images." },
+    SubprocessTool { endpoint: "leak.monitor",     binary: "mg-leak-monitor",   risk: RiskClass::PassiveRemote, description: "Continuously monitor leak sources for target exposure." },
+    // ---- Semi-active probes
+    SubprocessTool { endpoint: "tls.scan",         binary: "mg-tls-scan",       risk: RiskClass::LowActive,     description: "Scan TLS configuration and certificate chain." },
+    SubprocessTool { endpoint: "ssh.audit",        binary: "mg-ssh-audit",      risk: RiskClass::LowActive,     description: "Audit SSH ciphers, KEX, and host-key algorithms." },
+    SubprocessTool { endpoint: "udp.scan",         binary: "mg-udp-scan",       risk: RiskClass::LowActive,     description: "Probe common UDP services on a scoped host." },
+    SubprocessTool { endpoint: "vhost.scan",       binary: "mg-vhost",          risk: RiskClass::LowActive,     description: "Discover virtual hosts on a scoped IP." },
+    SubprocessTool { endpoint: "graphql.scan",     binary: "mg-graphql",        risk: RiskClass::LowActive,     description: "Introspect a GraphQL endpoint for schema and misconfigs." },
+    SubprocessTool { endpoint: "csp.analyze",      binary: "mg-csp",            risk: RiskClass::LowActive,     description: "Analyze Content-Security-Policy headers for weaknesses." },
+    SubprocessTool { endpoint: "cname.chain",      binary: "mg-cname-chain",    risk: RiskClass::LowActive,     description: "Trace CNAME chains for dangling-record exposure." },
+    SubprocessTool { endpoint: "dns.rebind",       binary: "mg-dns-rebind",     risk: RiskClass::LowActive,     description: "Generate DNS-rebinding payloads for a target." },
+    SubprocessTool { endpoint: "http2.scan",       binary: "mg-http2",          risk: RiskClass::LowActive,     description: "Probe HTTP/2 and HTTP/3 support and misconfigs." },
+    SubprocessTool { endpoint: "grpc.scan",        binary: "mg-grpc",           risk: RiskClass::LowActive,     description: "Enumerate gRPC services and methods." },
+    SubprocessTool { endpoint: "websocket.scan",   binary: "mg-websocket",      risk: RiskClass::LowActive,     description: "Passively check WebSocket upgrade and origin policy." },
+    // ---- Active vuln scanners
+    SubprocessTool { endpoint: "xss.scan",         binary: "mg-xss",            risk: RiskClass::HighActive,    description: "Scan for reflected and stored XSS vulnerabilities." },
+    SubprocessTool { endpoint: "sqli.scan",        binary: "mg-sqli",           risk: RiskClass::HighActive,    description: "Scan for SQL injection vulnerabilities." },
+    SubprocessTool { endpoint: "ssrf.scan",        binary: "mg-ssrf",           risk: RiskClass::HighActive,    description: "Scan for server-side request forgery vulnerabilities." },
+    SubprocessTool { endpoint: "ssti.scan",        binary: "mg-ssti",           risk: RiskClass::HighActive,    description: "Scan for server-side template injection vulnerabilities." },
+    SubprocessTool { endpoint: "xxe.scan",         binary: "mg-xxe",            risk: RiskClass::HighActive,    description: "Scan for XML external entity injection vulnerabilities." },
+    SubprocessTool { endpoint: "traversal.scan",   binary: "mg-traversal",      risk: RiskClass::HighActive,    description: "Scan for path-traversal vulnerabilities." },
+    SubprocessTool { endpoint: "redirect.scan",    binary: "mg-redirect",       risk: RiskClass::HighActive,    description: "Scan for open-redirect vulnerabilities." },
+    SubprocessTool { endpoint: "csrf.scan",        binary: "mg-csrf",           risk: RiskClass::HighActive,    description: "Scan for CSRF vulnerabilities." },
+    SubprocessTool { endpoint: "smuggle.scan",     binary: "mg-smuggle",        risk: RiskClass::HighActive,    description: "Scan for HTTP request-smuggling vulnerabilities." },
+    SubprocessTool { endpoint: "cmdinject.scan",   binary: "mg-cmdinject",      risk: RiskClass::HighActive,    description: "Scan for OS command-injection vulnerabilities." },
+    SubprocessTool { endpoint: "cache.poison",     binary: "mg-cache-poison",   risk: RiskClass::HighActive,    description: "Probe for web-cache poisoning vulnerabilities." },
+    SubprocessTool { endpoint: "proto.pollute",    binary: "mg-proto-pollute",  risk: RiskClass::HighActive,    description: "Probe for prototype-pollution vulnerabilities." },
+    SubprocessTool { endpoint: "deser.scan",       binary: "mg-deser",          risk: RiskClass::HighActive,    description: "Scan for insecure-deserialization vulnerabilities." },
+    SubprocessTool { endpoint: "brute.run",        binary: "mg-brute",          risk: RiskClass::HighActive,    description: "Run credential brute-force against a scoped endpoint." },
+    SubprocessTool { endpoint: "authz.scan",       binary: "mg-authz",          risk: RiskClass::HighActive,    description: "Scan for broken access-control and IDOR vulnerabilities." },
+    SubprocessTool { endpoint: "aws.chain",        binary: "mg-aws",            risk: RiskClass::HighActive,    description: "Run AWS privilege-escalation chain checks." },
+    SubprocessTool { endpoint: "gcp.chain",        binary: "mg-gcp",            risk: RiskClass::HighActive,    description: "Run GCP privilege-escalation chain checks." },
+    SubprocessTool { endpoint: "azure.chain",      binary: "mg-azure",          risk: RiskClass::HighActive,    description: "Run Azure privilege-escalation chain checks." },
+    SubprocessTool { endpoint: "k8s.scan",         binary: "mg-k8s",            risk: RiskClass::HighActive,    description: "Scan Kubernetes cluster for misconfigurations." },
+    SubprocessTool { endpoint: "docker.scan",      binary: "mg-docker",         risk: RiskClass::HighActive,    description: "Scan Docker daemon and images for misconfigurations." },
+    SubprocessTool { endpoint: "serverless.chain", binary: "mg-serverless",     risk: RiskClass::HighActive,    description: "Probe serverless functions for privilege-escalation chains." },
+    SubprocessTool { endpoint: "secret.validate",  binary: "mg-secret-validate",risk: RiskClass::HighActive,    description: "Validate discovered secrets against live APIs." },
+    SubprocessTool { endpoint: "openapi.scan",     binary: "mg-openapi",        risk: RiskClass::HighActive,    description: "Scan an OpenAPI spec and its endpoints for vulnerabilities." },
+    SubprocessTool { endpoint: "oauth.analyze",    binary: "mg-oauth",          risk: RiskClass::HighActive,    description: "Analyze OAuth flows for misconfigurations and attacks." },
+    SubprocessTool { endpoint: "session.audit",    binary: "mg-session-audit",  risk: RiskClass::HighActive,    description: "Audit session management for fixation and weak tokens." },
+    SubprocessTool { endpoint: "smb.scan",         binary: "mg-smb",            risk: RiskClass::HighActive,    description: "Scan SMB shares for access and misconfigurations." },
+    SubprocessTool { endpoint: "smtp.enum",        binary: "mg-smtp",           risk: RiskClass::HighActive,    description: "Enumerate SMTP users and relay configuration." },
+    SubprocessTool { endpoint: "snmp.brute",       binary: "mg-snmp",           risk: RiskClass::HighActive,    description: "Brute-force SNMP community strings." },
+    SubprocessTool { endpoint: "cors.scan",        binary: "mg-cors-exploit",   risk: RiskClass::HighActive,    description: "Exploit CORS misconfigurations." },
+    SubprocessTool { endpoint: "jwt.analyze",      binary: "mg-jwt",            risk: RiskClass::HighActive,    description: "Analyze JWT tokens for weak algorithms and key confusion." },
+    SubprocessTool { endpoint: "nuclei.run",       binary: "mg-nuclei-bridge",  risk: RiskClass::HighActive,    description: "Run Nuclei templates against a scoped target." },
+    // ---- OOB and notification
+    SubprocessTool { endpoint: "oob.start",        binary: "mg-oob",            risk: RiskClass::HighActive,    description: "Start an OOB callback listener for SSRF and injection detection." },
+    SubprocessTool { endpoint: "takeover.scan",    binary: "mg-takeover",       risk: RiskClass::HighActive,    description: "Scan for subdomain-takeover opportunities." },
+    SubprocessTool { endpoint: "notify.start",     binary: "mg-notify",         risk: RiskClass::HighActive,    description: "Start a notification listener for async tool callbacks." },
+    // ---- Destructive / post-exploitation
+    SubprocessTool { endpoint: "privesc.linux",    binary: "mg-privesc-linux",  risk: RiskClass::Destructive,   description: "Run Linux privilege-escalation checks and automation." },
+    SubprocessTool { endpoint: "privesc.windows",  binary: "mg-privesc-windows",risk: RiskClass::Destructive,   description: "Run Windows privilege-escalation checks and automation." },
+    SubprocessTool { endpoint: "loot.run",         binary: "mg-loot",           risk: RiskClass::Destructive,   description: "Collect and export post-exploitation loot." },
+];
+
+// Look up the subprocess tool entry for an endpoint name
+fn subprocess_tool_for(endpoint: &str) -> Option<&'static SubprocessTool> {
+    SUBPROCESS_TOOLS.iter().find(|t| t.endpoint == endpoint)
+}
+
+// Map endpoint name to tool binary name; panics for unmapped endpoints since
+// the dispatcher guards against them.
 fn tool_binary_for_endpoint(endpoint: &str) -> &'static str {
-    match endpoint {
-        "oob.start" => "mg-oob",
-        "takeover.scan" => "mg-takeover",
-        "tls.scan" => "mg-tls-scan",
-        "jwt.analyze" => "mg-jwt",
-        "ssrf.scan" => "mg-ssrf",
-        "authz.scan" => "mg-authz",
-        "screenshot.run" => "mg-screenshot",
-        "graphql.scan" => "mg-graphql",
-        "xss.scan" => "mg-xss",
-        "sqli.scan" => "mg-sqli",
-        "ssti.scan" => "mg-ssti",
-        "vhost.scan" => "mg-vhost",
-        "openapi.scan" => "mg-openapi",
-        "secret.validate" => "mg-secret-validate",
-        "github.search" => "mg-github",
-        "cloud.enum" => "mg-cloud-enum",
-        "dns.enum" => "mg-dns-enum",
-        "cmdinject.scan" => "mg-cmdinject",
-        "xxe.scan" => "mg-xxe",
-        "traversal.scan" => "mg-traversal",
-        "redirect.scan" => "mg-redirect",
-        "csrf.scan" => "mg-csrf",
-        "smuggle.scan" => "mg-smuggle",
-        "whois.lookup" => "mg-whois",
-        "shodan.lookup" => "mg-shodan",
-        "aws.chain" => "mg-aws",
-        "oauth.analyze" => "mg-oauth",
-        "brute.run" => "mg-brute",
-        "js.analyze" => "mg-js-analyze",
-        "cors.scan" => "mg-cors-exploit",
-        "udp.scan" => "mg-udp-scan",
-        "ssh.audit" => "mg-ssh-audit",
-        "smtp.enum" => "mg-smtp",
-        "snmp.brute" => "mg-snmp",
-        "gcp.chain" => "mg-gcp",
-        "azure.chain" => "mg-azure",
-        "k8s.scan" => "mg-k8s",
-        "docker.scan" => "mg-docker",
-        "cache.poison" => "mg-cache-poison",
-        "proto.pollute" => "mg-proto-pollute",
-        "apikey.extract" => "mg-apikey",
-        "session.audit" => "mg-session-audit",
-        "grpc.scan" => "mg-grpc",
-        "websocket.scan" => "mg-websocket",
-        "sourcemap.fetch" => "mg-sourcemap",
-        "csp.analyze" => "mg-csp",
-        "dns.rebind" => "mg-dns-rebind",
-        "cname.chain" => "mg-cname-chain",
-        "smb.scan" => "mg-smb",
-        "http2.scan" => "mg-http2",
-        "privesc.linux" => "mg-privesc-linux",
-        "privesc.windows" => "mg-privesc-windows",
-        "loot.run" => "mg-loot",
-        "leak.monitor" => "mg-leak-monitor",
-        "diff.run" => "mg-diff",
-        "notify.start" => "mg-notify",
-        "timeline.generate" => "mg-timeline",
-        "nuclei.run" => "mg-nuclei-bridge",
-        "dns.history" => "mg-dns-history",
-        "breach.lookup" => "mg-breach",
-        "social.enum" => "mg-social",
-        "metadata.extract" => "mg-metadata",
-        "dork.run" => "mg-google-dork",
-        "deser.scan" => "mg-deser",
-        "serverless.chain" => "mg-serverless",
-        "apk.analyze" => "mg-apk",
-        "ipa.analyze" => "mg-ipa",
-        // Unreachable: only called from matched dispatch arms above
-        _ => unreachable!("unmapped tool endpoint: {endpoint}"),
-    }
+    subprocess_tool_for(endpoint)
+        .unwrap_or_else(|| panic!("unmapped tool endpoint: {endpoint}"))
+        .binary
 }
 
 // Dispatch an invocation to a tool binary subprocess
@@ -3479,35 +3038,33 @@ mod tests {
     }
 
     #[test]
-    fn tool_binary_mapping_covers_all_dispatch_arms() {
-        // Verify every tool endpoint has a binary mapping and vice-versa
-        let tool_endpoints = [
-            "oob.start", "takeover.scan", "tls.scan", "jwt.analyze", "ssrf.scan",
-            "authz.scan", "screenshot.run", "graphql.scan", "xss.scan", "sqli.scan",
-            "ssti.scan", "vhost.scan", "openapi.scan", "secret.validate", "github.search",
-            "cloud.enum", "dns.enum", "cmdinject.scan", "xxe.scan", "traversal.scan",
-            "redirect.scan", "csrf.scan", "smuggle.scan", "whois.lookup", "shodan.lookup",
-            "aws.chain", "oauth.analyze", "brute.run", "js.analyze", "cors.scan",
-            "udp.scan", "ssh.audit", "smtp.enum", "snmp.brute", "gcp.chain",
-            "azure.chain", "k8s.scan", "docker.scan", "cache.poison", "proto.pollute",
-            "apikey.extract", "session.audit", "grpc.scan", "websocket.scan",
-            "sourcemap.fetch", "csp.analyze", "dns.rebind", "cname.chain", "smb.scan",
-            "http2.scan", "privesc.linux", "privesc.windows", "loot.run", "leak.monitor",
-            "diff.run", "notify.start", "timeline.generate", "nuclei.run", "dns.history",
-            "breach.lookup", "social.enum", "metadata.extract", "dork.run", "deser.scan",
-            "serverless.chain", "apk.analyze", "ipa.analyze",
-        ];
-        // Every tool endpoint must be in the registry
+    fn subprocess_tools_table_is_consistent() {
+        assert_eq!(SUBPROCESS_TOOLS.len(), 67);
+
+        // Endpoint names unique
+        let mut names: Vec<&str> = SUBPROCESS_TOOLS.iter().map(|t| t.endpoint).collect();
+        names.sort_unstable();
+        let n = names.len();
+        names.dedup();
+        assert_eq!(names.len(), n, "duplicate endpoint name in SUBPROCESS_TOOLS");
+
+        // Binary names unique
+        let mut bins: Vec<&str> = SUBPROCESS_TOOLS.iter().map(|t| t.binary).collect();
+        bins.sort_unstable();
+        let b = bins.len();
+        bins.dedup();
+        assert_eq!(bins.len(), b, "duplicate binary name in SUBPROCESS_TOOLS");
+
+        // Every entry surfaces in the registry and round-trips through the binary lookup
         let reg_names: Vec<&str> = registry().iter().map(|s| s.name).collect();
-        for ep in tool_endpoints {
+        for tool in SUBPROCESS_TOOLS {
             assert!(
-                reg_names.contains(&ep),
-                "endpoint {ep} missing from registry"
+                reg_names.contains(&tool.endpoint),
+                "registry missing {}",
+                tool.endpoint
             );
-            // Mapping must not panic
-            let _ = tool_binary_for_endpoint(ep);
+            assert_eq!(tool_binary_for_endpoint(tool.endpoint), tool.binary);
+            assert!(subprocess_tool_for(tool.endpoint).is_some());
         }
-        // All 67 tool endpoints must be covered
-        assert_eq!(tool_endpoints.len(), 67);
     }
 }
