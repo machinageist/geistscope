@@ -1,0 +1,31 @@
+name: Audit
+
+on:
+  push:
+    paths:
+      - 'crates/**/Cargo.toml'
+      - 'crates/Cargo.lock'
+      - '.github/workflows/audit.yml'
+  schedule:
+    # Weekly on Monday at 14:00 UTC
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Audit dependencies
+        working-directory: crates
+        run: cargo audit --deny warnings
