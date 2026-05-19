@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -324,20 +324,45 @@ async fn main() -> Result<()> {
         all_results.push(r);
     }
 
-    // Print summary for detected endpoints
+    // Print summary for detected endpoints and emit standardized ToolFinding records
     for r in &all_results {
-        if r.grpc_detected {
-            eprintln!("  [grpc] {}", r.endpoint);
-            for svc in &r.services {
-                let tag = if svc.unauth_accessible {
-                    "[UNAUTH]"
-                } else if svc.grpc_status.as_deref() == Some(GRPC_STATUS_UNAUTHENTICATED) {
-                    "[auth-required]"
-                } else {
-                    "[unknown]"
-                };
-                eprintln!("    {tag} {}", svc.name);
+        if !r.grpc_detected {
+            continue;
+        }
+        eprintln!("  [grpc] {}", r.endpoint);
+        for svc in &r.services {
+            let tag = if svc.unauth_accessible {
+                "[UNAUTH]"
+            } else if svc.grpc_status.as_deref() == Some(GRPC_STATUS_UNAUTHENTICATED) {
+                "[auth-required]"
+            } else {
+                "[unknown]"
+            };
+            eprintln!("    {tag} {}", svc.name);
+            if svc.unauth_accessible {
+                let tf = ToolFinding::new(
+                    AUDIT_TOOL,
+                    format!("Unauthenticated gRPC service: {}", svc.name),
+                    FindingSeverity::High,
+                )
+                .url(r.endpoint.clone())
+                .discriminator(svc.name.clone())
+                .evidence(format!("Service {} accepts calls without authentication", svc.name))
+                .recommendation("Require client credentials or auth interceptor on the gRPC server");
+                let _ = write_finding(&eng, &tf);
             }
+        }
+        // Reflection-exposed services are themselves Info, not necessarily vulnerable
+        if !r.services.is_empty() {
+            let tf = ToolFinding::new(
+                AUDIT_TOOL,
+                "gRPC reflection enabled",
+                FindingSeverity::Info,
+            )
+            .url(r.endpoint.clone())
+            .evidence(format!("{} services enumerated via reflection", r.services.len()))
+            .recommendation("Disable reflection in production gRPC servers");
+            let _ = write_finding(&eng, &tf);
         }
     }
 

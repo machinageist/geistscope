@@ -21,7 +21,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -260,6 +260,21 @@ fn main() -> Result<()> {
     }
 
     eprintln!("  {} total findings", findings.len());
+
+    // Emit standardized ToolFinding records (Info-severity scan metadata skipped)
+    for f in &findings {
+        let severity = match f.severity {
+            Severity::High => FindingSeverity::High,
+            Severity::Medium => FindingSeverity::Medium,
+            Severity::Low => FindingSeverity::Low,
+            Severity::Info => continue,
+        };
+        let tf = ToolFinding::new(AUDIT_TOOL, f.category.clone(), severity)
+            .discriminator(f.location.clone())
+            .evidence(format!("{} (at {})", f.detail, f.location))
+            .recommendation("Review iOS app config (ATS, entitlements, embedded keys) and rotate any exposed credentials");
+        let _ = write_finding(&eng, &tf);
+    }
 
     // Write output
     let out_dir = eng.root.join(OUTPUT_SUBDIR);
