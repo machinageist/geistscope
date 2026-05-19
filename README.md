@@ -73,7 +73,30 @@ mg-report generate target-bounty YYYYMMDD-001
 | `mg-replay`      | Burp Repeater-style finding verification            |
 | `mg-report`      | HackerOne-ready report drafts with local CVSS 3.1 scoring |
 | `mg-tui`         | Ratatui dashboard/browser: engagements, hosts, findings, fuzz, logs, harness status, host pivoting, page rendering, inspector, search, and session headers |
-| `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls |
+| `mg-harness`     | Scoped JSON endpoint dispatcher + chat REPL (Ollama / OpenAI-compatible / Anthropic) |
+
+### Chat REPL
+
+`mg-harness chat <engagement>` opens an interactive coding-agent loop pinned to
+one engagement. The model gets tool-use access to every implemented harness
+endpoint — recon, scans, graph queries, report generation — and findings emitted
+by the tools land in the engagement workspace automatically.
+
+```bash
+# Local Ollama, no API key required
+mg-harness chat my-engagement --backend ollama --model qwen2.5-coder
+
+# OpenAI-compatible server (LM Studio, vLLM, OpenRouter, etc.)
+mg-harness chat my-engagement --backend openai --base-url http://localhost:1234/v1 \
+                                                --model llama-3-70b-instruct
+
+# Anthropic (reads ANTHROPIC_API_KEY)
+mg-harness chat my-engagement --backend anthropic --model claude-opus-4-7
+```
+
+Active-class endpoints prompt before running. Destructive endpoints (privesc,
+loot) are hidden from the catalog unless `--unsafe-mode` is passed.
+Slash commands: `/help`, `/tools`, `/reset`, `/quit`.
 
 Credential profiles are stored as environment-variable references, not raw
 secrets:
