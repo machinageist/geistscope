@@ -27,10 +27,20 @@ tool endpoints.
 | `mg-replay`      | bin      | `mg-replay`      | Replay curl evidence from findings; verdict: still_vulnerable / appears_fixed |
 | `mg-report`      | lib+bin  | `mg-report`      | Generate bounty-ready reports from findings with local CVSS 3.1 scoring |
 | `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with host pivoting, harness status, inspector, search, and session headers |
-| `mg-harness`     | lib+bin  | `mg-harness`     | Scoped JSON endpoint dispatcher for TUI and AI tool calls                     |
+| `mg-harness`     | lib+bin  | `mg-harness`     | JSON endpoint dispatcher + chat REPL (Ollama / OpenAI / Anthropic) over 90+ scoped tool endpoints |
 | `mg-recopilot`   | bin      | `mg-recopilot`   | Decompiled-pseudocode analysis: reads RE output, writes structured findings   |
 | `mg-aifuzz`      | bin      | `mg-aifuzz`      | Adversarial LLM-endpoint fuzzer; requires operator consent before sending     |
 | `mg-exploitgen`  | bin      | `mg-exploitgen`  | CVE-driven exploit scaffolding from CVE description + target-env JSON         |
+
+### Extended tool suite
+
+69 additional binaries cover active vulnerability detection, auth/session
+testing, OSINT, modern protocols, JS/client-side, infrastructure, cloud &
+container, post-exploitation, mobile, and engagement workflow — every one
+reachable as a `mg-harness` subprocess endpoint, every one emitting
+`ToolFinding` records to `engagements/<name>/findings/` that flow into
+`ai-prioritize` and `security-graph` automatically. See the top-level
+[README](../README.md) for the full table.
 
 `mg-engagement credentials-set` writes `session.json` using env-var references
 only. `mg-harness session.get_headers` resolves headers for tools but returns
@@ -75,22 +85,15 @@ mg-tui     -> mg-harness endpoints for replay, fuzz, OOB, reporting, ranking
 
 Add typed endpoint wrappers — no arbitrary command execution.
 
-Implemented harness endpoints:
+90+ harness endpoints are registered. The core control surface lives in
+`mg-harness/src/lib.rs::registry()`; the 67 subprocess-dispatched tool
+endpoints derive from one `SUBPROCESS_TOOLS` const slice paired with their
+binary, risk class, and description — adding a tool is a one-row edit.
+Invoke `endpoint.registry` to enumerate the full list at runtime, e.g.
 
-- `endpoint.registry`
-- `engagement.open`
-- `engagement.status`
-- `scope.check`
-- `recon.run` (requires `confirmed: true`)
-- `session.set` (requires `confirmed: true`)
-- `session.get_headers`
-- `graph.ingest`
-- `graph.summary`
-- `graph.neighbors`
-- `chain.read`
-- `finding.create`
-- `finding.read`
-- `report.generate`
+```bash
+echo '{"endpoint":"endpoint.registry","engagement":"any"}' | mg-harness dispatch --pretty
+```
 
 ## Engagement directory layout
 
@@ -172,29 +175,39 @@ Attack modes mirror Burp Intruder: `sniper`, `battering-ram`, `pitchfork`, `clus
 ## Build / test / install
 
 ```bash
-cargo build --workspace
+cargo build --workspace --locked
 cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --tests -- -D warnings
 
-# Install all binaries system-wide
-for crate in engagement subdomain-enum mg-scan fingerprint mg-recon ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-report mg-tui mg-harness; do
-    cargo install --path $crate
+# Install every workspace binary in one pass (83 binaries)
+cargo install --path . --bins --locked  # from inside each crate, or:
+for d in */; do
+    [ -f "$d/Cargo.toml" ] && grep -q '^\[\[bin\]\]' "$d/Cargo.toml" && cargo install --path "$d"
 done
 ```
 
-## AI harness direction
+## AI harness rules
 
-Future AI-facing code should not add arbitrary command execution. Add typed
-endpoint wrappers around existing libraries and CLIs:
+The harness is what enables an AI agent (or the chat REPL) to drive this
+toolchain without shell access. Rules in force:
 
-- Validate model-provided JSON before dispatch.
-- Check engagement scope before active network traffic.
-- Redact tokens, cookies, and sensitive response bodies before model ingestion.
-- Write audit events for recommendations, dispatches, blocks, and results.
-- Keep high-active actions behind explicit user confirmation.
+- Every endpoint is dispatched through a typed JSON `Invocation` and returns a
+  bounded `EndpointResult` — no arbitrary command execution.
+- Model-provided args are validated before dispatch.
+- Active endpoints check engagement scope before touching any target.
+- Subprocess tool calls run with a 5-minute wall-clock cap and 64 KiB stdout/
+  stderr cap each — runaway tools cannot starve the harness.
+- High-active and state-change endpoints require `confirmed: true` in the JSON
+  path; the chat REPL prompts the operator with the proposed args and sets it
+  after approval. Destructive endpoints are hidden from the chat catalog
+  unless `--unsafe-mode` is set.
+- Tokens, cookies, and sensitive response bodies are redacted before model
+  ingestion.
+- Every dispatch — allow, block, error — appends to `audit.log`.
 
-Provider-specific clients belong behind `llm-client` or a harness adapter; tool
-policy belongs in the harness.
+Provider-specific LLM clients live behind the `chat::ChatBackend` trait in
+`mg-harness/src/chat/` (Anthropic, OpenAI-compatible, Ollama). Tool policy
+lives in the harness itself.
 
 ## Code conventions
 
