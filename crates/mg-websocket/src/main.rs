@@ -27,7 +27,7 @@ use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -367,9 +367,28 @@ async fn main() -> Result<()> {
         let r = test_endpoint(endpoint.clone(), args.timeout, args.fuzz).await;
         if r.cswsh_vulnerable {
             eprintln!("    [HIGH] CSWSH confirmed");
+            let tf = ToolFinding::new(
+                AUDIT_TOOL,
+                "Cross-site WebSocket hijacking (CSWSH)",
+                FindingSeverity::High,
+            )
+            .url(r.endpoint.clone())
+            .evidence("Handshake accepted with attacker-controlled Origin header")
+            .recommendation("Validate the Origin header on WebSocket upgrade and reject untrusted origins");
+            let _ = write_finding(&eng, &tf);
         }
         if r.unauth_accessible {
             eprintln!("    [HIGH] unauthenticated access confirmed");
+            let tf = ToolFinding::new(
+                AUDIT_TOOL,
+                "Unauthenticated WebSocket endpoint",
+                FindingSeverity::High,
+            )
+            .url(r.endpoint.clone())
+            .discriminator("unauth")
+            .evidence("WebSocket upgrade succeeded without auth cookies or tokens")
+            .recommendation("Require authenticated session on WebSocket upgrade");
+            let _ = write_finding(&eng, &tf);
         }
         all_results.push(r);
     }

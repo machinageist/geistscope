@@ -22,7 +22,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -631,6 +631,18 @@ async fn main() -> Result<()> {
 
     for f in &all_findings {
         eprintln!("  [{:?}] {} — {}", f.severity, f.check, f.detail);
+        let severity = match f.severity {
+            Severity::High => FindingSeverity::High,
+            Severity::Medium => FindingSeverity::Medium,
+            Severity::Low => FindingSeverity::Low,
+            Severity::Info => FindingSeverity::Info,
+        };
+        let tf = ToolFinding::new(AUDIT_TOOL, f.check.clone(), severity)
+            .url(args.login_url.clone())
+            .discriminator(f.check.clone())
+            .evidence(f.detail.clone())
+            .recommendation("Review session lifecycle: token entropy, cookie flags, fixation defense, post-logout invalidation");
+        let _ = write_finding(&eng, &tf);
     }
 
     let ts = now_rfc3339();

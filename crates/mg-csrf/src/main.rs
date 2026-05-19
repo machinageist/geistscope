@@ -26,7 +26,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::task::JoinSet;
 
-use engagement::Engagement;
+use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -327,19 +327,30 @@ async fn main() -> Result<()> {
         all_results.push(r);
     }
 
-    // Print high/medium findings
+    // Print high/medium findings and emit standardized ToolFinding records
     for r in &all_results {
-        match r.severity {
-            CsrfSeverity::High => eprintln!(
-                "  [csrf-HIGH] {} method={} token={} samesite={}",
-                r.url, r.method, r.has_csrf_token, r.has_samesite
-            ),
-            CsrfSeverity::Medium => eprintln!(
-                "  [csrf-MEDIUM] {} method={} token={} samesite={}",
-                r.url, r.method, r.has_csrf_token, r.has_samesite
-            ),
-            CsrfSeverity::None => {}
-        }
+        let severity = match r.severity {
+            CsrfSeverity::High => FindingSeverity::High,
+            CsrfSeverity::Medium => FindingSeverity::Medium,
+            CsrfSeverity::None => continue,
+        };
+        eprintln!(
+            "  [csrf-{:?}] {} method={} token={} samesite={}",
+            r.severity, r.url, r.method, r.has_csrf_token, r.has_samesite
+        );
+        let tf = ToolFinding::new(
+            AUDIT_TOOL,
+            format!("Missing CSRF protection on {} endpoint", r.method),
+            severity,
+        )
+        .url(r.url.clone())
+        .discriminator(r.method.clone())
+        .evidence(format!(
+            "method={} csrf_token={} samesite_cookie={}",
+            r.method, r.has_csrf_token, r.has_samesite
+        ))
+        .recommendation("Issue a per-session CSRF token and set cookies with SameSite=Lax or Strict");
+        let _ = write_finding(&eng, &tf);
     }
 
     let high_count = all_results
