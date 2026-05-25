@@ -1,13 +1,12 @@
 /*******************************************************************
- * Filename:        main.rs
+ * Filename:        ipa.rs
  * Author:          Jeff
- * Date:            2026-05-18
- * Description:     mg-ipa — iOS IPA static analysis for security misconfigurations.
- * Notes:           IPAs are ZIP containers with a Payload/AppName.app/ directory.
- *                  Info.plist is a binary/XML plist — we scan as raw bytes.
- *                  The Mach-O binary is the entry named Payload/AppName.app/AppName
- *                  (matching bundle name, no extension). Bytes are scanned as strings.
- *                  No tokio — fully synchronous file I/O.
+ * Date:            2026-05-22
+ * Description:     iOS IPA static analysis for security misconfigurations
+ * Notes:           Ported from mg-ipa; logic unchanged.
+ *                  IPAs are ZIP containers with Payload/AppName.app/.
+ *                  Info.plist scanned as raw bytes; Mach-O scanned as strings.
+ *                  Synchronous file I/O — no tokio.
  *******************************************************************/
 
 use std::fs;
@@ -29,13 +28,11 @@ const OUTPUT_SUBDIR: &str = "ipa";
 const OUTPUT_FILE_PREFIX: &str = "results-";
 const AUDIT_TOOL: &str = "mg-ipa";
 
-// Info.plist scan patterns
 const PLIST_ARBITRARY_LOADS: &str = "NSAllowsArbitraryLoads";
 const PLIST_GET_TASK_ALLOW: &str = "get-task-allow";
 const PLIST_URL_SCHEMES: &str = "CFBundleURLSchemes";
 const PLIST_TRUE: &str = "<true/>";
 
-// Secret patterns in Mach-O binary
 const AWS_KEY_PATTERN: &str = r"AKIA[0-9A-Z]{16}";
 const GOOGLE_KEY_PATTERN: &str = r"AIza[0-9A-Za-z\-_]{35}";
 const HTTP_URL_PATTERN: &str = r"http://[a-zA-Z0-9./_-]+";
@@ -43,26 +40,16 @@ const HTTP_URL_PATTERN: &str = r"http://[a-zA-Z0-9./_-]+";
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "mg-ipa",
-    about = "iOS IPA static security analysis"
-)]
-struct Args {
-    /// Engagement name
-    engagement: String,
-
-    /// Engagements root directory
+pub struct Args {
+    pub engagement: String,
     #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
-    engagements_dir: String,
-
-    /// Path to the IPA file to analyze
+    pub engagements_dir: String,
     #[arg(long)]
-    ipa: String,
+    pub ipa: String,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
-// Severity of a finding
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 enum Severity {
@@ -72,7 +59,6 @@ enum Severity {
     Info,
 }
 
-// One security finding
 #[derive(Debug, Serialize)]
 struct IpaFinding {
     severity: Severity,
@@ -81,7 +67,6 @@ struct IpaFinding {
     location: String,
 }
 
-// Top-level output
 #[derive(Serialize)]
 struct IpaResults {
     engagement: String,
@@ -92,17 +77,14 @@ struct IpaResults {
     findings: Vec<IpaFinding>,
 }
 
-// ── IPA analysis ──────────────────────────────────────────────────────────────
+// ── IPA analysis ─────────────────────────────────────────────────────────────
 
-// Find the Info.plist path and app name from IPA ZIP entries
 fn find_plist_and_app_name(names: &[String]) -> (Option<String>, Option<String>) {
-    // Look for Payload/<AppName>.app/Info.plist
     for name in names {
         if name.starts_with("Payload/") && name.ends_with("/Info.plist") {
-            // Extract <AppName> from Payload/<AppName>.app/Info.plist
             let parts: Vec<&str> = name.splitn(4, '/').collect();
             if parts.len() >= 3 {
-                let app_dir = parts[1]; // e.g. "MyApp.app"
+                let app_dir = parts[1];
                 let app_name = app_dir.trim_end_matches(".app").to_string();
                 return (Some(name.clone()), Some(app_name));
             }
@@ -111,24 +93,20 @@ fn find_plist_and_app_name(names: &[String]) -> (Option<String>, Option<String>)
     (None, None)
 }
 
-// Find the Mach-O binary entry name for a given app name
 fn find_macho_entry(names: &[String], app_name: &str) -> Option<String> {
     let expected = format!("Payload/{app_name}.app/{app_name}");
     names.iter().find(|n| *n == &expected).cloned()
 }
 
-// Check if a byte position near a key pattern is close to a <true/> tag
 fn near_true(text: &str, key_pos: usize) -> bool {
     let end = (key_pos + 200).min(text.len());
     text[key_pos..end].contains(PLIST_TRUE)
 }
 
-// Scan Info.plist bytes for security-relevant flags
 fn scan_plist(bytes: &[u8]) -> Vec<IpaFinding> {
     let text = String::from_utf8_lossy(bytes);
     let mut findings = Vec::new();
 
-    // NSAllowsArbitraryLoads near <true/>
     if let Some(pos) = text.find(PLIST_ARBITRARY_LOADS)
         && near_true(&text, pos)
     {
@@ -140,7 +118,6 @@ fn scan_plist(bytes: &[u8]) -> Vec<IpaFinding> {
         });
     }
 
-    // get-task-allow near <true/> — allows debugger attachment (dev builds only)
     if let Some(pos) = text.find(PLIST_GET_TASK_ALLOW)
         && near_true(&text, pos)
     {
@@ -152,7 +129,6 @@ fn scan_plist(bytes: &[u8]) -> Vec<IpaFinding> {
         });
     }
 
-    // CFBundleURLSchemes — custom URL scheme registered
     if text.contains(PLIST_URL_SCHEMES) {
         findings.push(IpaFinding {
             severity: Severity::Info,
@@ -165,12 +141,9 @@ fn scan_plist(bytes: &[u8]) -> Vec<IpaFinding> {
     findings
 }
 
-// Scan Mach-O binary bytes as strings for secrets and cleartext URLs
 fn scan_macho(bytes: &[u8], location: &str, aws_re: &Regex, gcp_re: &Regex, http_re: &Regex) -> Vec<IpaFinding> {
     let text = String::from_utf8_lossy(bytes);
     let mut findings = Vec::new();
-
-    // AWS access keys
     for m in aws_re.find_iter(&text) {
         findings.push(IpaFinding {
             severity: Severity::High,
@@ -179,8 +152,6 @@ fn scan_macho(bytes: &[u8], location: &str, aws_re: &Regex, gcp_re: &Regex, http
             location: location.to_string(),
         });
     }
-
-    // Google API keys
     for m in gcp_re.find_iter(&text) {
         findings.push(IpaFinding {
             severity: Severity::High,
@@ -189,8 +160,6 @@ fn scan_macho(bytes: &[u8], location: &str, aws_re: &Regex, gcp_re: &Regex, http
             location: location.to_string(),
         });
     }
-
-    // Cleartext HTTP URLs
     for m in http_re.find_iter(&text) {
         findings.push(IpaFinding {
             severity: Severity::Low,
@@ -199,29 +168,21 @@ fn scan_macho(bytes: &[u8], location: &str, aws_re: &Regex, gcp_re: &Regex, http
             location: location.to_string(),
         });
     }
-
     findings
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
+// ── Entry point ──────────────────────────────────────────────────────────────
 
-fn main() -> Result<()> {
-    let args = Args::parse();
-
+pub fn run(args: Args) -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
     eprintln!("mg-ipa: analyzing {}", args.ipa);
-
-    let ipa_bytes = fs::read(&args.ipa)
-        .with_context(|| format!("read IPA file {}", args.ipa))?;
-
+    let ipa_bytes = fs::read(&args.ipa).with_context(|| format!("read IPA file {}", args.ipa))?;
     let cursor = std::io::Cursor::new(ipa_bytes);
     let mut archive = zip::ZipArchive::new(cursor).context("open IPA as ZIP")?;
-
     eprintln!("  {} entries in IPA", archive.len());
 
-    // Collect all entry names
     let entry_names: Vec<String> = (0..archive.len())
         .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
         .collect();
@@ -229,14 +190,12 @@ fn main() -> Result<()> {
     let (plist_name, app_name) = find_plist_and_app_name(&entry_names);
     eprintln!("  app_name={:?}", app_name);
 
-    // Compile regexes once
     let aws_re = Regex::new(AWS_KEY_PATTERN).expect("AWS regex");
     let gcp_re = Regex::new(GOOGLE_KEY_PATTERN).expect("GCP regex");
     let http_re = Regex::new(HTTP_URL_PATTERN).expect("HTTP URL regex");
 
     let mut findings: Vec<IpaFinding> = Vec::new();
 
-    // Scan Info.plist
     if let Some(ref plist_path) = plist_name
         && let Ok(mut entry) = archive.by_name(plist_path)
     {
@@ -247,7 +206,6 @@ fn main() -> Result<()> {
         findings.extend(scan_plist(&buf));
     }
 
-    // Scan Mach-O binary
     if let Some(ref name) = app_name
         && let Some(macho_entry) = find_macho_entry(&entry_names, name)
         && let Ok(mut entry) = archive.by_name(&macho_entry)
@@ -261,7 +219,6 @@ fn main() -> Result<()> {
 
     eprintln!("  {} total findings", findings.len());
 
-    // Emit standardized ToolFinding records (Info-severity scan metadata skipped)
     for f in &findings {
         let severity = match f.severity {
             Severity::High => FindingSeverity::High,
@@ -276,7 +233,6 @@ fn main() -> Result<()> {
         let _ = write_finding(&eng, &tf);
     }
 
-    // Write output
     let out_dir = eng.root.join(OUTPUT_SUBDIR);
     fs::create_dir_all(&out_dir).context("create ipa output dir")?;
     let ts = OffsetDateTime::now_utc().format(&Rfc3339)?;
@@ -296,11 +252,8 @@ fn main() -> Result<()> {
     println!("[*] Results written to {}", out_path.display());
 
     let _ = eng.audit(AUDIT_TOOL, &args.ipa, None);
-
     Ok(())
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -371,7 +324,6 @@ mod tests {
         let aws_re = Regex::new(AWS_KEY_PATTERN).unwrap();
         let gcp_re = Regex::new(GOOGLE_KEY_PATTERN).unwrap();
         let http_re = Regex::new(HTTP_URL_PATTERN).unwrap();
-        // 35 chars after AIza
         let content = b"key=AIzaSyD-9tSrke72I6e0a8lLkjBn3m6EXAMPLEabcdef trailing";
         let findings = scan_macho(content, "Payload/App.app/App", &aws_re, &gcp_re, &http_re);
         assert!(findings.iter().any(|f| f.category == "hardcoded_google_key"));

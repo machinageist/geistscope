@@ -1,13 +1,12 @@
 /*******************************************************************
- * Filename:        main.rs
+ * Filename:        js.rs
  * Author:          Jeff
- * Date:            2026-05-17
- * Description:     mg-js-analyze — static JavaScript analysis; extracts
- *                  endpoints, secrets, credentials, and source map refs.
- * Notes:           Fetches JS files referenced in the crawl corpus.
- *                  Secrets are masked to first 8 chars before writing.
- *                  Deduplication key is (source_url, finding_type, value).
- *                  Concurrency bounded with tokio::JoinSet; drained at ceiling.
+ * Date:            2026-05-22
+ * Description:     Static JS analysis — endpoints, secrets, source maps
+ * Notes:           Ported from mg-js-analyze; logic unchanged.
+ *                  Fetches JS files referenced in the crawl corpus.
+ *                  Secrets masked to first 8 chars before writing.
+ *                  Dedup key is (source_url, finding_type, value).
  *******************************************************************/
 
 use std::collections::HashSet;
@@ -31,13 +30,10 @@ use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 const OUTPUT_SUBDIR: &str = "js-analyze";
 const OUTPUT_FILE_PREFIX: &str = "results-";
 const AUDIT_TOOL: &str = "mg-js-analyze";
-
-// Mask secrets to this many characters before writing to disk
 const SECRET_MASK_LEN: usize = 8;
 
 // ── Regex patterns (compiled once) ───────────────────────────────────────────
 
-// Compile and return the API endpoint extraction pattern
 fn re_api_endpoint() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -45,13 +41,11 @@ fn re_api_endpoint() -> &'static Regex {
     })
 }
 
-// Compile and return the AWS access key pattern
 fn re_aws_key() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"AKIA[0-9A-Z]{16}").unwrap())
 }
 
-// Compile and return the generic API key pattern
 fn re_api_key() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -59,15 +53,11 @@ fn re_api_key() -> &'static Regex {
     })
 }
 
-// Compile and return the hardcoded password pattern
 fn re_password() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"[Pp]assword['":\s=]+['"]([^'"]{6,})['"]"#).unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r#"[Pp]assword['":\s=]+['"]([^'"]{6,})['"]"#).unwrap())
 }
 
-// Compile and return the JWT token pattern
 fn re_jwt() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -75,52 +65,37 @@ fn re_jwt() -> &'static Regex {
     })
 }
 
-// Compile and return the internal IP address pattern
 fn re_internal_ip() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(
-            r"(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d+\.\d+\.\d+",
-        )
-        .unwrap()
+        Regex::new(r"(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d+\.\d+\.\d+").unwrap()
     })
 }
 
-// Compile and return the source map reference pattern
 fn re_source_map() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"sourceMappingURL=([^\s*]+\.map)").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"sourceMappingURL=([^\s*]+\.map)").unwrap())
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "mg-js-analyze",
-    about = "Static JS analysis — endpoints, secrets, source maps from crawl corpus"
-)]
-struct Args {
+pub struct Args {
     /// Engagement name
-    engagement: String,
-
+    pub engagement: String,
     /// Engagements root directory
     #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
-    engagements_dir: String,
-
+    pub engagements_dir: String,
     /// Maximum concurrent JS file fetches
     #[arg(long, default_value_t = 5)]
-    concurrency: usize,
-
+    pub concurrency: usize,
     /// HTTP timeout in seconds
     #[arg(long, default_value_t = 15)]
-    timeout: u64,
+    pub timeout: u64,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
-// One extracted finding from a JS file
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 struct JsFinding {
     source_url: String,
@@ -128,7 +103,6 @@ struct JsFinding {
     value: String,
 }
 
-// Top-level output written to disk
 #[derive(Serialize)]
 struct JsAnalysisResults {
     engagement: String,
@@ -138,7 +112,6 @@ struct JsAnalysisResults {
     summary: std::collections::BTreeMap<String, usize>,
 }
 
-// Minimal crawl page entry for scraping JS URLs
 #[derive(Deserialize)]
 struct CrawlEntry {
     #[serde(default)]
@@ -147,7 +120,7 @@ struct CrawlEntry {
     js_files: Vec<String>,
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 // Collect JS file URLs from crawl output directories
 fn collect_js_urls(crawl_dir: &Path) -> Vec<String> {
@@ -168,11 +141,9 @@ fn collect_js_urls(crawl_dir: &Path) -> Vec<String> {
                 continue;
             };
             for ce in entries {
-                // Direct URL ending in .js
                 if ce.url.ends_with(".js") {
                     urls.push(ce.url);
                 }
-                // Explicit js_files array from crawl output
                 for js_url in ce.js_files {
                     if js_url.ends_with(".js") {
                         urls.push(js_url);
@@ -181,13 +152,12 @@ fn collect_js_urls(crawl_dir: &Path) -> Vec<String> {
             }
         }
     }
-    // Deduplicate preserving first-seen order
     let mut seen = HashSet::new();
     urls.retain(|u| seen.insert(u.clone()));
     urls
 }
 
-// Mask a secret value to the first N characters followed by asterisks
+// Mask a secret value to first N chars + "..."
 fn mask_secret(value: &str) -> String {
     if value.len() <= SECRET_MASK_LEN {
         return "*".repeat(value.len());
@@ -196,11 +166,9 @@ fn mask_secret(value: &str) -> String {
     format!("{prefix}...")
 }
 
-// Extract all findings from a JS source string
+// Extract findings from a single JS source string
 fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
     let mut findings: Vec<JsFinding> = Vec::new();
-
-    // API endpoints
     for m in re_api_endpoint().find_iter(js) {
         findings.push(JsFinding {
             source_url: source_url.to_string(),
@@ -208,8 +176,6 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
             value: m.as_str().trim_matches(|c| c == '\'' || c == '"').to_string(),
         });
     }
-
-    // AWS access keys (mask before storing)
     for m in re_aws_key().find_iter(js) {
         findings.push(JsFinding {
             source_url: source_url.to_string(),
@@ -217,8 +183,6 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
             value: mask_secret(m.as_str()),
         });
     }
-
-    // Generic API keys (capture group 1 = key value)
     for cap in re_api_key().captures_iter(js) {
         if let Some(val) = cap.get(1) {
             findings.push(JsFinding {
@@ -228,8 +192,6 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
             });
         }
     }
-
-    // Hardcoded passwords (capture group 1 = password value)
     for cap in re_password().captures_iter(js) {
         if let Some(val) = cap.get(1) {
             findings.push(JsFinding {
@@ -239,8 +201,6 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
             });
         }
     }
-
-    // JWT tokens (mask after first 8 chars)
     for m in re_jwt().find_iter(js) {
         findings.push(JsFinding {
             source_url: source_url.to_string(),
@@ -248,8 +208,6 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
             value: mask_secret(m.as_str()),
         });
     }
-
-    // Internal IP addresses
     for m in re_internal_ip().find_iter(js) {
         findings.push(JsFinding {
             source_url: source_url.to_string(),
@@ -257,8 +215,6 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
             value: m.as_str().to_string(),
         });
     }
-
-    // Source map references (capture group 1 = .map filename)
     for cap in re_source_map().captures_iter(js) {
         if let Some(val) = cap.get(1) {
             findings.push(JsFinding {
@@ -268,15 +224,11 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
             });
         }
     }
-
     findings
 }
 
 // Fetch one JS URL and return its findings
-async fn analyze_js_url(
-    client: reqwest::Client,
-    js_url: String,
-) -> Vec<JsFinding> {
+async fn analyze_js_url(client: reqwest::Client, js_url: String) -> Vec<JsFinding> {
     let Ok(resp) = client.get(&js_url).send().await else {
         return Vec::new();
     };
@@ -286,21 +238,16 @@ async fn analyze_js_url(
     extract_findings(&js_url, &body)
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
+// ── Entry point ──────────────────────────────────────────────────────────────
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
+pub async fn run(args: Args) -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
-    // Load auth headers from session config
     let auth_headers = session::get_auth_headers(&eng)
         .await
         .context("load session auth headers")?;
 
-    // Build HTTP client with auth headers
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(args.timeout))
         .default_headers(auth_headers)
@@ -308,11 +255,9 @@ async fn main() -> Result<()> {
         .build()
         .context("build HTTP client")?;
 
-    // Collect JS URLs from crawl output
     let js_urls = collect_js_urls(&eng.crawl_dir());
     eprintln!("mg-js-analyze: {} JS file(s) to analyze", js_urls.len());
 
-    // Fetch and analyze all JS files with bounded concurrency
     let mut join_set: JoinSet<Vec<JsFinding>> = JoinSet::new();
     let mut raw_findings: Vec<JsFinding> = Vec::new();
     let js_count = js_urls.len();
@@ -330,7 +275,6 @@ async fn main() -> Result<()> {
         raw_findings.extend(batch);
     }
 
-    // Deduplicate by (source_url, finding_type, value)
     let mut seen: HashSet<JsFinding> = HashSet::new();
     let mut findings: Vec<JsFinding> = Vec::new();
     for f in raw_findings {
@@ -339,7 +283,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Build per-type summary counts
     let mut summary: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for f in &findings {
         *summary.entry(f.finding_type.clone()).or_insert(0) += 1;
@@ -351,7 +294,6 @@ async fn main() -> Result<()> {
     }
     println!("  total findings: {}", findings.len());
 
-    // Write results JSON
     let out_dir = eng.root.join(OUTPUT_SUBDIR);
     fs::create_dir_all(&out_dir).context("create js-analyze output dir")?;
     let ts = OffsetDateTime::now_utc().format(&Rfc3339)?;
@@ -369,7 +311,6 @@ async fn main() -> Result<()> {
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
 
-    // Emit standardized findings for HIGH-value secret types
     const HIGH_TYPES: &[&str] = &["aws_key", "api_key", "jwt_token", "password"];
     for f in results.findings.iter().filter(|f| HIGH_TYPES.contains(&f.finding_type.as_str())) {
         let tf = ToolFinding::new(AUDIT_TOOL, format!("JS Secret: {}", f.finding_type), FindingSeverity::High)
@@ -379,7 +320,6 @@ async fn main() -> Result<()> {
         let _ = write_finding(&eng, &tf);
     }
 
-    // Audit log
     let detail = format!(
         "js_files={} findings={}",
         results.js_files_analyzed,
@@ -389,8 +329,6 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -402,7 +340,6 @@ mod tests {
         let findings = extract_findings("https://example.com/app.js", js);
         let aws: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "aws_key").collect();
         assert!(!aws.is_empty());
-        // Value should be masked (first 8 chars + ...)
         assert!(aws[0].value.ends_with("..."));
         assert_eq!(aws[0].value.len(), SECRET_MASK_LEN + 3);
     }
@@ -411,10 +348,7 @@ mod tests {
     fn extract_api_endpoint_from_fetch_call() {
         let js = r#"fetch("/api/v1/users")"#;
         let findings = extract_findings("https://example.com/app.js", js);
-        let ep: Vec<&JsFinding> = findings
-            .iter()
-            .filter(|f| f.finding_type == "api_endpoint")
-            .collect();
+        let ep: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "api_endpoint").collect();
         assert!(!ep.is_empty());
         assert!(ep[0].value.contains("/api/"));
     }
@@ -423,10 +357,7 @@ mod tests {
     fn extract_source_map_reference() {
         let js = "//# sourceMappingURL=app.js.map";
         let findings = extract_findings("https://example.com/app.js", js);
-        let maps: Vec<&JsFinding> = findings
-            .iter()
-            .filter(|f| f.finding_type == "source_map")
-            .collect();
+        let maps: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "source_map").collect();
         assert!(!maps.is_empty());
         assert_eq!(maps[0].value, "app.js.map");
     }
@@ -435,10 +366,7 @@ mod tests {
     fn extract_internal_ip() {
         let js = r#"var endpoint = "http://10.0.0.5/api";"#;
         let findings = extract_findings("https://example.com/app.js", js);
-        let ips: Vec<&JsFinding> = findings
-            .iter()
-            .filter(|f| f.finding_type == "internal_ip")
-            .collect();
+        let ips: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "internal_ip").collect();
         assert!(!ips.is_empty());
         assert_eq!(ips[0].value, "10.0.0.5");
     }
@@ -472,11 +400,7 @@ mod tests {
                 "js_files": ["https://example.com/vendor.js"]
             }
         ]);
-        fs::write(
-            host_dir.join("pages.json"),
-            serde_json::to_string(&entries).unwrap(),
-        )
-        .unwrap();
+        fs::write(host_dir.join("pages.json"), serde_json::to_string(&entries).unwrap()).unwrap();
         let urls = collect_js_urls(tmp.path());
         assert!(urls.contains(&"https://example.com/app.js".to_string()));
         assert!(urls.contains(&"https://example.com/vendor.js".to_string()));

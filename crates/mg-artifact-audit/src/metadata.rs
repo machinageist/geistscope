@@ -1,13 +1,13 @@
 /*******************************************************************
- * Filename:        main.rs
+ * Filename:        metadata.rs
  * Author:          Jeff
- * Date:            2026-05-18
- * Description:     mg-metadata — document metadata extractor from crawl corpus.
- * Notes:           Downloads docs linked in crawl corpus (PDF, Office, JPEG).
- *                  Extracts author names, internal paths, and software versions
- *                  via raw byte scanning — no external metadata libraries.
- *                  DOCX/XLSX/PPTX are ZIP containers; we read docProps/core.xml.
- *                  JPEG EXIF is located by magic bytes `Exif\x00\x00`.
+ * Date:            2026-05-22
+ * Description:     Document metadata extractor from crawl corpus
+ * Notes:           Ported from mg-metadata; logic unchanged.
+ *                  Downloads docs linked in crawl corpus (PDF/Office/JPEG).
+ *                  Extracts authors, internal paths, software versions via
+ *                  raw byte scanning; DOCX/XLSX/PPTX docProps/core.xml,
+ *                  JPEG EXIF magic.
  *******************************************************************/
 
 use std::fs;
@@ -32,41 +32,27 @@ const AUDIT_TOOL: &str = "mg-metadata";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_CONCURRENCY: usize = 3;
 
-// Document extensions we care about
 const DOC_EXTENSIONS: &[&str] = &[
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".jpg", ".jpeg", ".png",
 ];
 
-// Internal path patterns that suggest exposed filesystem layout
 const INTERNAL_PATH_PATTERNS: &[&str] = &["C:\\", "/home/", "/Users/"];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "mg-metadata",
-    about = "Extract metadata from documents found in the crawl corpus"
-)]
-struct Args {
-    /// Engagement name
-    engagement: String,
-
-    /// Engagements root directory
+pub struct Args {
+    pub engagement: String,
     #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
-    engagements_dir: String,
-
-    /// Maximum concurrent downloads
+    pub engagements_dir: String,
     #[arg(long, default_value_t = DEFAULT_CONCURRENCY)]
-    concurrency: usize,
-
-    /// HTTP timeout in seconds
+    pub concurrency: usize,
     #[arg(long, default_value_t = DEFAULT_TIMEOUT_SECS)]
-    timeout: u64,
+    pub timeout: u64,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
-// Flags extracted from a single document
 #[derive(Debug, Serialize)]
 struct DocFlags {
     authors: Vec<String>,
@@ -74,7 +60,6 @@ struct DocFlags {
     software_versions: Vec<String>,
 }
 
-// Result for one processed document
 #[derive(Debug, Serialize)]
 struct DocMetadata {
     url: String,
@@ -82,13 +67,11 @@ struct DocMetadata {
     flags: DocFlags,
 }
 
-// Crawl index endpoint entry — minimal fields
 #[derive(Debug, Deserialize)]
 struct CrawlEndpoint {
     url: String,
 }
 
-// Crawl index file shape — url list may be under "endpoints" or "urls"
 #[derive(Debug, Deserialize)]
 struct CrawlIndex {
     #[serde(default)]
@@ -97,7 +80,6 @@ struct CrawlIndex {
     urls: Vec<String>,
 }
 
-// Top-level output written to disk
 #[derive(Serialize)]
 struct MetadataResults {
     engagement: String,
@@ -107,20 +89,16 @@ struct MetadataResults {
     results: Vec<DocMetadata>,
 }
 
-// ── Crawl corpus helpers ──────────────────────────────────────────────────────
+// ── Crawl corpus helpers ─────────────────────────────────────────────────────
 
-// Collect all document URLs from crawl directory JSON files
 fn collect_doc_urls(crawl_dir: &Path) -> Vec<String> {
     let mut urls = Vec::new();
     if !crawl_dir.exists() {
         return urls;
     }
-
-    // Walk host subdirs and read index.json files
     let Ok(entries) = fs::read_dir(crawl_dir) else {
         return urls;
     };
-
     for entry in entries.flatten() {
         let index_path = entry.path().join("index.json");
         if !index_path.exists() {
@@ -132,35 +110,29 @@ fn collect_doc_urls(crawl_dir: &Path) -> Vec<String> {
         let Ok(index) = serde_json::from_str::<CrawlIndex>(&raw) else {
             continue;
         };
-
-        // Collect from endpoints array
         for ep in &index.endpoints {
             if is_doc_url(&ep.url) {
                 urls.push(ep.url.clone());
             }
         }
-        // Collect from urls array (alternate schema)
         for u in &index.urls {
             if is_doc_url(u) {
                 urls.push(u.clone());
             }
         }
     }
-
     urls.sort();
     urls.dedup();
     urls
 }
 
-// Return true if the URL path ends with a tracked extension
 fn is_doc_url(url: &str) -> bool {
     let lower = url.to_lowercase();
     DOC_EXTENSIONS.iter().any(|ext| lower.contains(ext))
 }
 
-// ── Metadata extraction ───────────────────────────────────────────────────────
+// ── Metadata extraction ──────────────────────────────────────────────────────
 
-// Extract metadata flags from raw document bytes
 fn extract_flags(bytes: &[u8], doc_type: &str) -> DocFlags {
     match doc_type {
         "pdf" => extract_pdf_flags(bytes),
@@ -174,14 +146,11 @@ fn extract_flags(bytes: &[u8], doc_type: &str) -> DocFlags {
     }
 }
 
-// Scan PDF bytes for metadata fields using simple pattern matching
 fn extract_pdf_flags(bytes: &[u8]) -> DocFlags {
     let text = String::from_utf8_lossy(bytes);
     let mut authors = Vec::new();
     let mut internal_paths = Vec::new();
     let mut software_versions = Vec::new();
-
-    // Extract value between '(' and ')' after each PDF metadata key
     for key in &["/Author (", "/Creator (", "/Producer (", "/Title ("] {
         if let Some(val) = extract_pdf_value(&text, key) {
             let trimmed = val.trim().to_string();
@@ -191,7 +160,6 @@ fn extract_pdf_flags(bytes: &[u8]) -> DocFlags {
                     "/Creator (" | "/Producer (" => software_versions.push(trimmed.clone()),
                     _ => {}
                 }
-                // Check if value contains an internal path
                 for pat in INTERNAL_PATH_PATTERNS {
                     if trimmed.contains(pat) {
                         internal_paths.push(trimmed.clone());
@@ -201,15 +169,9 @@ fn extract_pdf_flags(bytes: &[u8]) -> DocFlags {
             }
         }
     }
-
-    DocFlags {
-        authors,
-        internal_paths,
-        software_versions,
-    }
+    DocFlags { authors, internal_paths, software_versions }
 }
 
-// Extract string between '(' and ')' after a PDF metadata key
 fn extract_pdf_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     let start = text.find(key)? + key.len();
     let rest = &text[start..];
@@ -217,7 +179,6 @@ fn extract_pdf_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     Some(&rest[..end])
 }
 
-// Open ZIP container and scan docProps/core.xml for Office metadata
 fn extract_office_flags(bytes: &[u8]) -> DocFlags {
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = match zip::ZipArchive::new(cursor) {
@@ -269,7 +230,6 @@ fn extract_office_flags(bytes: &[u8]) -> DocFlags {
     }
 }
 
-// Extract text content between XML open and close tags
 fn extract_xml_value<'a>(xml: &'a str, open: &str, close: &str) -> Option<&'a str> {
     let start = xml.find(open)? + open.len();
     let rest = &xml[start..];
@@ -277,15 +237,11 @@ fn extract_xml_value<'a>(xml: &'a str, open: &str, close: &str) -> Option<&'a st
     Some(&rest[..end])
 }
 
-// Scan JPEG bytes for EXIF magic and extract Make/Model strings
 fn extract_jpeg_flags(bytes: &[u8]) -> DocFlags {
     const EXIF_MAGIC: &[u8] = b"Exif\x00\x00";
     let mut software_versions = Vec::new();
-
-    // Find EXIF block
     if let Some(exif_start) = find_subsequence(bytes, EXIF_MAGIC) {
         let exif_block = &bytes[exif_start..];
-        // Scan for printable ASCII strings of at least 4 chars (crude Make/Model heuristic)
         let mut current = Vec::new();
         for &b in exif_block.iter().take(4096) {
             if b.is_ascii_graphic() || b == b' ' {
@@ -301,26 +257,15 @@ fn extract_jpeg_flags(bytes: &[u8]) -> DocFlags {
             }
         }
     }
-
-    // Deduplicate
     software_versions.sort();
     software_versions.dedup();
-
-    DocFlags {
-        authors: Vec::new(),
-        internal_paths: Vec::new(),
-        software_versions,
-    }
+    DocFlags { authors: Vec::new(), internal_paths: Vec::new(), software_versions }
 }
 
-// Find byte subsequence within a slice; return starting index or None
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
-// Detect doc type from URL extension
 fn doc_type_from_url(url: &str) -> &'static str {
     let lower = url.to_lowercase();
     if lower.contains(".pdf") {
@@ -344,17 +289,13 @@ fn doc_type_from_url(url: &str) -> &'static str {
     }
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
+// ── Entry point ──────────────────────────────────────────────────────────────
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
+pub async fn run(args: Args) -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
     eprintln!("mg-metadata: collecting document URLs from crawl corpus");
-
     let doc_urls = collect_doc_urls(&eng.crawl_dir());
     eprintln!("  {} document URLs found", doc_urls.len());
 
@@ -369,52 +310,39 @@ async fn main() -> Result<()> {
         .build()
         .context("build HTTP client")?;
 
-    // Download and extract metadata with bounded concurrency
     let mut join_set: JoinSet<Option<DocMetadata>> = JoinSet::new();
     let mut results: Vec<DocMetadata> = Vec::new();
 
     for url in doc_urls {
-        // Drain when at concurrency ceiling
         while join_set.len() >= args.concurrency {
             if let Some(Ok(Some(meta))) = join_set.join_next().await {
                 results.push(meta);
             }
         }
-
         let client = client.clone();
         let url_clone = url.clone();
         join_set.spawn(async move {
             let doc_type = doc_type_from_url(&url_clone);
             eprintln!("  downloading {} ({})", url_clone, doc_type);
-
             let bytes = match client.get(&url_clone).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    match resp.bytes().await {
-                        Ok(b) => b.to_vec(),
-                        Err(_) => return None,
-                    }
-                }
+                Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                    Ok(b) => b.to_vec(),
+                    Err(_) => return None,
+                },
                 _ => return None,
             };
-
             let flags = extract_flags(&bytes, doc_type);
             let has_flags = !flags.authors.is_empty()
                 || !flags.internal_paths.is_empty()
                 || !flags.software_versions.is_empty();
-
             if has_flags {
-                Some(DocMetadata {
-                    url: url_clone,
-                    doc_type: doc_type.to_string(),
-                    flags,
-                })
+                Some(DocMetadata { url: url_clone, doc_type: doc_type.to_string(), flags })
             } else {
                 None
             }
         });
     }
 
-    // Drain remaining tasks
     while let Some(Ok(Some(meta))) = join_set.join_next().await {
         results.push(meta);
     }
@@ -425,10 +353,8 @@ async fn main() -> Result<()> {
             || !r.flags.internal_paths.is_empty()
             || !r.flags.software_versions.is_empty()
     }).count();
-
     eprintln!("  {} documents with flags", with_flags);
 
-    // Write output
     let out_dir = eng.root.join(OUTPUT_SUBDIR);
     fs::create_dir_all(&out_dir).context("create metadata output dir")?;
     let ts = OffsetDateTime::now_utc().format(&Rfc3339)?;
@@ -446,35 +372,23 @@ async fn main() -> Result<()> {
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
 
-    // Emit findings for documents with secrets or internal path exposure
     for doc in &output.results {
-        // HIGH if software_versions contains credential-like strings (AWS key pattern)
-        // In practice the extractor puts software names in software_versions; still flag as HIGH
-        // since any secret embedded in document content is a HIGH finding
         if !doc.flags.software_versions.is_empty()
             && doc.flags.software_versions.iter().any(|s| s.contains("AKIA") || s.contains("secret"))
         {
             let tf = ToolFinding::new("mg-metadata", "Secret Found in Document Metadata", FindingSeverity::High)
                 .url(doc.url.clone())
-                .evidence(format!(
-                    "doc_type={} secrets={:?}",
-                    doc.doc_type, doc.flags.software_versions
-                ))
+                .evidence(format!("doc_type={} secrets={:?}", doc.doc_type, doc.flags.software_versions))
                 .recommendation(
                     "Remove sensitive data from document metadata before publishing; \
                      rotate any exposed credentials; audit document publishing pipeline"
                 );
             let _ = write_finding(&eng, &tf);
         }
-
-        // MEDIUM if internal filesystem paths are exposed
         if !doc.flags.internal_paths.is_empty() {
             let tf = ToolFinding::new("mg-metadata", "Internal Filesystem Path in Document Metadata", FindingSeverity::Medium)
                 .url(doc.url.clone())
-                .evidence(format!(
-                    "doc_type={} internal_paths={:?}",
-                    doc.doc_type, doc.flags.internal_paths
-                ))
+                .evidence(format!("doc_type={} internal_paths={:?}", doc.doc_type, doc.flags.internal_paths))
                 .recommendation(
                     "Strip document metadata before publishing; use PDF/Office metadata scrubbers; \
                      check document conversion pipeline for path leakage"
@@ -484,11 +398,8 @@ async fn main() -> Result<()> {
     }
 
     let _ = eng.audit(AUDIT_TOOL, &eng.meta.target, None);
-
     Ok(())
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -522,10 +433,7 @@ mod tests {
     #[test]
     fn extract_xml_value_finds_tag_content() {
         let xml = "<dc:creator>John</dc:creator><dc:title>Doc</dc:title>";
-        assert_eq!(
-            extract_xml_value(xml, "<dc:creator>", "</dc:creator>"),
-            Some("John")
-        );
+        assert_eq!(extract_xml_value(xml, "<dc:creator>", "</dc:creator>"), Some("John"));
     }
 
     #[test]
@@ -539,8 +447,6 @@ mod tests {
     fn extract_pdf_flags_finds_internal_path() {
         let text = "/Creator (C:\\Users\\alice\\doc.docx)\n";
         let flags = extract_pdf_flags(text.as_bytes());
-        assert!(
-            flags.internal_paths.iter().any(|p| p.contains("C:\\"))
-        );
+        assert!(flags.internal_paths.iter().any(|p| p.contains("C:\\")));
     }
 }

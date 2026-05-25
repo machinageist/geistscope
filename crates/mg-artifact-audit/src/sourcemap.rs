@@ -1,15 +1,11 @@
 /*******************************************************************
- * Filename:        main.rs
+ * Filename:        sourcemap.rs
  * Author:          Jeff
- * Date:            2026-05-18
- * Description:     mg-sourcemap — source map downloader and analyzer
- *                  Finds .js.map URLs from js-analyze findings, crawl HTML,
- *                  and .map suffix probes; downloads, extracts source paths
- *                  and embedded source content; scans for secrets and
- *                  internal paths.
- * Notes:           sourcesContent[] may be absent in maps — handled gracefully.
- *                  Source files are written to sourcemap/sources/<sanitized>.
- *                  Secret values are masked to first 8 chars before writing.
+ * Date:            2026-05-22
+ * Description:     Source map downloader and analyzer
+ * Notes:           Ported from mg-sourcemap; logic unchanged.
+ *                  Source files written to sourcemap/sources/<sanitized>.
+ *                  Secrets masked to first 8 chars before writing.
  *******************************************************************/
 
 use std::collections::HashSet;
@@ -35,20 +31,17 @@ const SOURCES_SUBDIR: &str = "sources";
 const AUDIT_TOOL: &str = "mg-sourcemap";
 const SECRET_MASK_LEN: usize = 8;
 
-// Path substrings that flag an internal-looking source path
 const INTERNAL_PATH_KEYWORDS: &[&str] = &[
     "internal", "private", "secret", "config", "admin", "auth", "password",
 ];
 
 // ── Regex patterns (compiled once) ───────────────────────────────────────────
 
-// Compile and return the AWS access key pattern
 fn re_aws_key() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"AKIA[0-9A-Z]{16}").unwrap())
 }
 
-// Compile and return the generic API key pattern
 fn re_api_key() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -56,15 +49,11 @@ fn re_api_key() -> &'static Regex {
     })
 }
 
-// Compile and return the hardcoded password pattern
 fn re_password() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"[Pp]assword['":\s=]+['"]([^'"]{6,})['"]"#).unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r#"[Pp]assword['":\s=]+['"]([^'"]{6,})['"]"#).unwrap())
 }
 
-// Compile and return the JWT token pattern
 fn re_jwt() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -72,41 +61,26 @@ fn re_jwt() -> &'static Regex {
     })
 }
 
-// Compile and return the sourceMappingURL comment pattern
 fn re_source_map_comment() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"//[#@]\s*sourceMappingURL=(\S+)").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"//[#@]\s*sourceMappingURL=(\S+)").unwrap())
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "mg-sourcemap",
-    about = "Source map analyzer — extracts source files and scans for secrets"
-)]
-struct Args {
-    /// Engagement name (must have engagement.json)
-    engagement: String,
-
-    /// Engagements root directory
+pub struct Args {
+    pub engagement: String,
     #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
-    engagements_dir: String,
-
-    /// Maximum concurrent downloads
+    pub engagements_dir: String,
     #[arg(long, default_value_t = 5)]
-    concurrency: usize,
-
-    /// HTTP timeout in seconds
+    pub concurrency: usize,
     #[arg(long, default_value_t = 15)]
-    timeout: u64,
+    pub timeout: u64,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
-// A finding from js-analyze that references a source map
 #[derive(Deserialize)]
 struct JsAnalyzeFinding {
     #[serde(rename = "type")]
@@ -114,14 +88,12 @@ struct JsAnalyzeFinding {
     value: String,
 }
 
-// js-analyze results file shape
 #[derive(Deserialize)]
 struct JsAnalyzeResults {
     #[serde(default)]
     findings: Vec<JsAnalyzeFinding>,
 }
 
-// A parsed source map JSON file
 #[derive(Deserialize)]
 struct SourceMap {
     #[serde(default)]
@@ -130,7 +102,6 @@ struct SourceMap {
     sources_content: Vec<Option<String>>,
 }
 
-// One secret found in source content
 #[derive(Debug, Serialize)]
 struct SecretFinding {
     source_path: String,
@@ -138,14 +109,12 @@ struct SecretFinding {
     value_preview: String,
 }
 
-// One internal path flagged
 #[derive(Debug, Serialize)]
 struct InternalPathFinding {
     source_path: String,
     matched_keyword: String,
 }
 
-// Result for one downloaded source map
 #[derive(Debug, Serialize)]
 struct MapResult {
     map_url: String,
@@ -156,7 +125,6 @@ struct MapResult {
     sources_written: Vec<String>,
 }
 
-// Top-level output written to disk
 #[derive(Serialize)]
 struct SourcemapResults {
     engagement: String,
@@ -169,22 +137,17 @@ struct SourcemapResults {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// Return current UTC timestamp as RFC 3339
 fn now_rfc3339() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "unknown".into())
 }
 
-// Sanitize timestamp for filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Sanitize a source path for use as a filesystem component
-// Replaces path separators and special characters that are unsafe on disk
 fn sanitize_source_path(path: &str) -> String {
     path.chars()
         .map(|c| match c {
@@ -195,7 +158,6 @@ fn sanitize_source_path(path: &str) -> String {
         .collect()
 }
 
-// Mask a secret value to first SECRET_MASK_LEN chars + "..."
 fn mask_secret(value: &str) -> String {
     if value.len() <= SECRET_MASK_LEN {
         return "*".repeat(value.len());
@@ -203,7 +165,6 @@ fn mask_secret(value: &str) -> String {
     format!("{}...", &value[..SECRET_MASK_LEN])
 }
 
-// Check a source path string for internal-looking keywords
 fn flag_internal_paths(source_path: &str) -> Vec<InternalPathFinding> {
     let lower = source_path.to_lowercase();
     INTERNAL_PATH_KEYWORDS
@@ -216,10 +177,8 @@ fn flag_internal_paths(source_path: &str) -> Vec<InternalPathFinding> {
         .collect()
 }
 
-// Scan source content for secrets using compiled regexes
 fn scan_for_secrets(source_path: &str, content: &str) -> Vec<SecretFinding> {
     let mut findings = Vec::new();
-
     for m in re_aws_key().find_iter(content) {
         findings.push(SecretFinding {
             source_path: source_path.to_string(),
@@ -227,7 +186,6 @@ fn scan_for_secrets(source_path: &str, content: &str) -> Vec<SecretFinding> {
             value_preview: mask_secret(m.as_str()),
         });
     }
-
     for cap in re_api_key().captures_iter(content) {
         if let Some(val) = cap.get(1) {
             findings.push(SecretFinding {
@@ -237,7 +195,6 @@ fn scan_for_secrets(source_path: &str, content: &str) -> Vec<SecretFinding> {
             });
         }
     }
-
     for cap in re_password().captures_iter(content) {
         if let Some(val) = cap.get(1) {
             findings.push(SecretFinding {
@@ -247,7 +204,6 @@ fn scan_for_secrets(source_path: &str, content: &str) -> Vec<SecretFinding> {
             });
         }
     }
-
     for m in re_jwt().find_iter(content) {
         findings.push(SecretFinding {
             source_path: source_path.to_string(),
@@ -255,11 +211,9 @@ fn scan_for_secrets(source_path: &str, content: &str) -> Vec<SecretFinding> {
             value_preview: mask_secret(m.as_str()),
         });
     }
-
     findings
 }
 
-// Collect source map URLs from js-analyze results files
 fn collect_from_js_analyze(js_analyze_dir: &Path) -> Vec<String> {
     let mut urls = Vec::new();
     let Ok(entries) = fs::read_dir(js_analyze_dir) else {
@@ -286,7 +240,6 @@ fn collect_from_js_analyze(js_analyze_dir: &Path) -> Vec<String> {
     urls
 }
 
-// Collect source map URLs referenced in crawl HTML/JS via sourceMappingURL comments
 fn collect_from_crawl(crawl_dir: &Path) -> Vec<String> {
     let mut urls = Vec::new();
     let Ok(hosts) = fs::read_dir(crawl_dir) else {
@@ -320,7 +273,6 @@ fn collect_from_crawl(crawl_dir: &Path) -> Vec<String> {
     urls
 }
 
-// Collect source map URL candidates by appending .map to JS URLs from crawl corpus
 fn collect_map_probes(crawl_dir: &Path) -> Vec<String> {
     let mut candidates = Vec::new();
     let Ok(hosts) = fs::read_dir(crawl_dir) else {
@@ -348,7 +300,6 @@ fn collect_map_probes(crawl_dir: &Path) -> Vec<String> {
     candidates
 }
 
-// Download and analyze one source map URL
 async fn process_map(
     client: reqwest::Client,
     map_url: String,
@@ -366,15 +317,12 @@ async fn process_map(
     let Ok(resp) = client.get(&map_url).send().await else {
         return result;
     };
-
     if !resp.status().is_success() {
         return result;
     }
-
     let Ok(body) = resp.text().await else {
         return result;
     };
-
     let Ok(map): Result<SourceMap, _> = serde_json::from_str(&body) else {
         return result;
     };
@@ -382,23 +330,17 @@ async fn process_map(
     result.sources_count = map.sources.len();
     result.sources_content_count = map.sources_content.iter().filter(|c| c.is_some()).count();
 
-    // Flag internal-looking source paths
     for src_path in &map.sources {
         result.internal_paths.extend(flag_internal_paths(src_path));
     }
 
-    // Scan sourcesContent for secrets and write to disk
     for (i, content_opt) in map.sources_content.iter().enumerate() {
         let Some(content) = content_opt else { continue };
         let src_path = map.sources.get(i).map(|s| s.as_str()).unwrap_or("unknown");
-
-        // Scan for secrets
         result.secrets.extend(scan_for_secrets(src_path, content));
-
-        // Write source file to disk
         let safe_name = sanitize_source_path(src_path);
         let dest = sources_dir.join(&safe_name);
-        if let Ok(()) = fs::write(&dest, content) {
+        if fs::write(&dest, content).is_ok() {
             result.sources_written.push(safe_name);
         }
     }
@@ -408,10 +350,7 @@ async fn process_map(
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
+pub async fn run(args: Args) -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
@@ -426,18 +365,16 @@ async fn main() -> Result<()> {
         .build()
         .context("build HTTP client")?;
 
-    // Collect map URLs from all three sources
     let mut map_urls: Vec<String> = Vec::new();
     map_urls.extend(collect_from_js_analyze(&eng.root.join("js-analyze")));
     map_urls.extend(collect_from_crawl(&eng.crawl_dir()));
     map_urls.extend(collect_map_probes(&eng.crawl_dir()));
 
-    // Deduplicate
     let mut seen: HashSet<String> = HashSet::new();
     map_urls.retain(|u| seen.insert(u.clone()));
 
     if map_urls.is_empty() {
-        eprintln!("mg-sourcemap: no source map URLs found — run mg-crawl / mg-js-analyze first");
+        eprintln!("mg-sourcemap: no source map URLs found — run mg-crawl / mg-artifact-audit js first");
         return Ok(());
     }
 
@@ -447,7 +384,6 @@ async fn main() -> Result<()> {
         args.concurrency
     );
 
-    // Prepare output directories
     let output_dir = eng.root.join(OUTPUT_SUBDIR);
     let sources_dir = output_dir.join(SOURCES_SUBDIR);
     fs::create_dir_all(&sources_dir).context("create sourcemap/sources dir")?;
@@ -456,7 +392,6 @@ async fn main() -> Result<()> {
     let mut all_results: Vec<MapResult> = Vec::new();
 
     for url in map_urls {
-        // Drain when at concurrency ceiling
         if join_set.len() >= args.concurrency
             && let Some(Ok(r)) = join_set.join_next().await
         {
@@ -467,7 +402,6 @@ async fn main() -> Result<()> {
         join_set.spawn(process_map(c, url, sd));
     }
 
-    // Drain remaining
     while let Some(Ok(r)) = join_set.join_next().await {
         all_results.push(r);
     }
@@ -494,11 +428,8 @@ async fn main() -> Result<()> {
     };
 
     let out_path = output_dir.join(format!("results-{ts_file}.json"));
-    fs::write(
-        &out_path,
-        serde_json::to_string_pretty(&output).unwrap_or_default(),
-    )
-    .context("write results JSON")?;
+    fs::write(&out_path, serde_json::to_string_pretty(&output).unwrap_or_default())
+        .context("write results JSON")?;
 
     eprintln!(
         "mg-sourcemap: {} maps, {} secrets, {} internal paths — {}",
@@ -531,14 +462,8 @@ mod tests {
 
     #[test]
     fn sanitize_source_path_replaces_separators() {
-        assert_eq!(
-            sanitize_source_path("src/internal/config.ts"),
-            "src_internal_config.ts"
-        );
-        assert_eq!(
-            sanitize_source_path("C:\\Users\\secret\\file.ts"),
-            "C__Users_secret_file.ts"
-        );
+        assert_eq!(sanitize_source_path("src/internal/config.ts"), "src_internal_config.ts");
+        assert_eq!(sanitize_source_path("C:\\Users\\secret\\file.ts"), "C__Users_secret_file.ts");
     }
 
     #[test]

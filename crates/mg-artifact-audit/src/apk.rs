@@ -1,12 +1,12 @@
 /*******************************************************************
- * Filename:        main.rs
+ * Filename:        apk.rs
  * Author:          Jeff
- * Date:            2026-05-18
- * Description:     mg-apk — Android APK static analysis for security misconfigurations.
- * Notes:           APKs are ZIP containers. Scans AndroidManifest.xml for dangerous
- *                  flags, DEX + assets for hardcoded secrets and cleartext URLs.
- *                  network_security_config.xml checked for cleartext traffic permission.
- *                  No tokio — fully synchronous file I/O.
+ * Date:            2026-05-22
+ * Description:     Android APK static analysis for security misconfigurations
+ * Notes:           Ported from mg-apk; logic unchanged.
+ *                  APKs are ZIP containers — scans AndroidManifest.xml for
+ *                  dangerous flags, DEX/assets for secrets and cleartext URLs.
+ *                  Synchronous file I/O — no tokio.
  *******************************************************************/
 
 use std::fs;
@@ -28,40 +28,27 @@ const OUTPUT_SUBDIR: &str = "apk";
 const OUTPUT_FILE_PREFIX: &str = "results-";
 const AUDIT_TOOL: &str = "mg-apk";
 
-// AndroidManifest.xml scan patterns
 const MANIFEST_DEBUGGABLE: &str = "android:debuggable=\"true\"";
 const MANIFEST_ALLOW_BACKUP: &str = "android:allowBackup=\"true\"";
 const MANIFEST_EXPORTED: &str = "android:exported=\"true\"";
 const NETWORK_CONFIG_CLEARTEXT: &str = "cleartextTrafficPermitted";
 
-// AWS access key pattern prefix — AKIA followed by 16 uppercase alphanumerics
 const AWS_KEY_PATTERN: &str = r"AKIA[0-9A-Z]{16}";
-// Cleartext HTTP URL pattern
 const HTTP_URL_PATTERN: &str = r"http://[a-zA-Z0-9./_-]+";
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "mg-apk",
-    about = "Android APK static security analysis"
-)]
-struct Args {
-    /// Engagement name
-    engagement: String,
-
-    /// Engagements root directory
+pub struct Args {
+    pub engagement: String,
     #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements")]
-    engagements_dir: String,
-
-    /// Path to the APK file to analyze
+    pub engagements_dir: String,
     #[arg(long)]
-    apk: String,
+    pub apk: String,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
-// Severity of a finding
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 enum Severity {
@@ -70,7 +57,6 @@ enum Severity {
     Low,
 }
 
-// One security finding
 #[derive(Debug, Serialize)]
 struct ApkFinding {
     severity: Severity,
@@ -79,7 +65,6 @@ struct ApkFinding {
     location: String,
 }
 
-// Top-level output
 #[derive(Serialize)]
 struct ApkResults {
     engagement: String,
@@ -89,9 +74,8 @@ struct ApkResults {
     findings: Vec<ApkFinding>,
 }
 
-// ── APK analysis ──────────────────────────────────────────────────────────────
+// ── APK analysis ─────────────────────────────────────────────────────────────
 
-// Read a named file from a ZIP archive as raw bytes
 fn read_zip_entry(archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>, name: &str) -> Option<Vec<u8>> {
     let mut entry = archive.by_name(name).ok()?;
     let mut buf = Vec::new();
@@ -99,7 +83,6 @@ fn read_zip_entry(archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>, name:
     Some(buf)
 }
 
-// Scan AndroidManifest.xml bytes for dangerous attribute flags
 fn scan_manifest(bytes: &[u8]) -> Vec<ApkFinding> {
     let text = String::from_utf8_lossy(bytes);
     let mut findings = Vec::new();
@@ -122,15 +105,12 @@ fn scan_manifest(bytes: &[u8]) -> Vec<ApkFinding> {
         });
     }
 
-    // Flag exported components — look for android:exported="true" with no permission attribute nearby
     let mut search_start = 0;
     while let Some(pos) = text[search_start..].find(MANIFEST_EXPORTED) {
         let abs_pos = search_start + pos;
-        // Check a window of 300 chars before the exported flag for permission attribute
         let window_start = abs_pos.saturating_sub(300);
         let window = &text[window_start..abs_pos];
         if !window.contains("android:permission") {
-            // Find the component name in a window before the flag
             let component_name = extract_component_name(window);
             findings.push(ApkFinding {
                 severity: Severity::High,
@@ -148,7 +128,6 @@ fn scan_manifest(bytes: &[u8]) -> Vec<ApkFinding> {
     findings
 }
 
-// Extract a component name (activity/service/receiver) from a manifest text window
 fn extract_component_name(window: &str) -> String {
     for tag in &["<activity", "<service", "<receiver"] {
         if let Some(tag_pos) = window.rfind(tag) {
@@ -165,12 +144,9 @@ fn extract_component_name(window: &str) -> String {
     "(unknown)".to_string()
 }
 
-// Scan binary content (DEX, assets) for hardcoded secrets and cleartext URLs
 fn scan_binary_content(bytes: &[u8], location: &str, aws_re: &Regex, http_re: &Regex) -> Vec<ApkFinding> {
     let text = String::from_utf8_lossy(bytes);
     let mut findings = Vec::new();
-
-    // AWS access keys
     for m in aws_re.find_iter(&text) {
         findings.push(ApkFinding {
             severity: Severity::High,
@@ -179,8 +155,6 @@ fn scan_binary_content(bytes: &[u8], location: &str, aws_re: &Regex, http_re: &R
             location: location.to_string(),
         });
     }
-
-    // Cleartext HTTP URLs (not https)
     for m in http_re.find_iter(&text) {
         findings.push(ApkFinding {
             severity: Severity::Low,
@@ -189,11 +163,9 @@ fn scan_binary_content(bytes: &[u8], location: &str, aws_re: &Regex, http_re: &R
             location: location.to_string(),
         });
     }
-
     findings
 }
 
-// Scan network_security_config.xml for cleartext traffic permission
 fn scan_network_config(bytes: &[u8]) -> Vec<ApkFinding> {
     let text = String::from_utf8_lossy(bytes);
     let mut findings = Vec::new();
@@ -208,31 +180,23 @@ fn scan_network_config(bytes: &[u8]) -> Vec<ApkFinding> {
     findings
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
+// ── Entry point ──────────────────────────────────────────────────────────────
 
-fn main() -> Result<()> {
-    let args = Args::parse();
-
+pub fn run(args: Args) -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
     eprintln!("mg-apk: analyzing {}", args.apk);
-
-    let apk_bytes = fs::read(&args.apk)
-        .with_context(|| format!("read APK file {}", args.apk))?;
-
+    let apk_bytes = fs::read(&args.apk).with_context(|| format!("read APK file {}", args.apk))?;
     let cursor = std::io::Cursor::new(apk_bytes);
     let mut archive = zip::ZipArchive::new(cursor).context("open APK as ZIP")?;
-
     eprintln!("  {} entries in APK", archive.len());
 
-    // Compile regexes once
     let aws_re = Regex::new(AWS_KEY_PATTERN).expect("AWS regex");
     let http_re = Regex::new(HTTP_URL_PATTERN).expect("HTTP URL regex");
 
     let mut findings: Vec<ApkFinding> = Vec::new();
 
-    // Scan AndroidManifest.xml
     if let Some(manifest_bytes) = read_zip_entry(&mut archive, "AndroidManifest.xml") {
         eprintln!("  scanning AndroidManifest.xml");
         findings.extend(scan_manifest(&manifest_bytes));
@@ -240,13 +204,11 @@ fn main() -> Result<()> {
         eprintln!("  AndroidManifest.xml not found in APK");
     }
 
-    // Scan network_security_config.xml
     if let Some(nsc_bytes) = read_zip_entry(&mut archive, "res/xml/network_security_config.xml") {
         eprintln!("  scanning network_security_config.xml");
         findings.extend(scan_network_config(&nsc_bytes));
     }
 
-    // Collect names of DEX files and asset text files to scan
     let entry_names: Vec<String> = (0..archive.len())
         .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
         .collect();
@@ -257,7 +219,6 @@ fn main() -> Result<()> {
             && !name.ends_with(".png")
             && !name.ends_with(".jpg")
             && !name.ends_with(".so");
-
         if (is_dex || is_asset_text)
             && let Some(bytes) = read_zip_entry(&mut archive, name)
         {
@@ -271,7 +232,6 @@ fn main() -> Result<()> {
 
     eprintln!("  {} total findings", findings.len());
 
-    // Write output
     let out_dir = eng.root.join(OUTPUT_SUBDIR);
     fs::create_dir_all(&out_dir).context("create apk output dir")?;
     let ts = OffsetDateTime::now_utc().format(&Rfc3339)?;
@@ -289,7 +249,6 @@ fn main() -> Result<()> {
     fs::write(&out_path, &json).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
 
-    // Emit standardized findings for HIGH/MEDIUM results
     for f in &output.findings {
         let sev = match f.severity {
             Severity::High => FindingSeverity::High,
@@ -303,11 +262,8 @@ fn main() -> Result<()> {
     }
 
     let _ = eng.audit(AUDIT_TOOL, &args.apk, None);
-
     Ok(())
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
