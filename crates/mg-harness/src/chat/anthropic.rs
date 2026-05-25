@@ -83,7 +83,10 @@ impl ChatBackend for AnthropicChat {
                 (
                     ChatRole::User,
                     ChatContent::ToolResult {
-                        call_id, content, is_error, ..
+                        call_id,
+                        content,
+                        is_error,
+                        ..
                     },
                 ) => {
                     api_messages.push(json!({
@@ -157,10 +160,22 @@ fn parse_anthropic_response(value: &Value) -> Result<ChatStep, ChatError> {
                 }
             }
             Some("tool_use") => {
-                let id = block.get("id").and_then(Value::as_str).unwrap_or("").to_string();
-                let name = block.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let id = block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let name = block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 let input = block.get("input").cloned().unwrap_or(Value::Null);
-                tool_calls.push(ToolCall { id, name, args: input });
+                tool_calls.push(ToolCall {
+                    id,
+                    name,
+                    args: input,
+                });
             }
             _ => {}
         }

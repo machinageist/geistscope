@@ -20,11 +20,10 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use crate::{
-    EndpointStatus, HarnessConfig, Invocation, RiskClass, dispatch, registry,
+    EndpointSpec, EndpointStatus, HarnessConfig, Invocation, RiskClass, ToolExposure, dispatch,
+    registry,
 };
-use types::{
-    ChatBackend, ChatMessage, ChatStep, ToolCall, ToolDef,
-};
+use types::{ChatBackend, ChatMessage, ChatStep, ToolCall, ToolDef};
 
 pub use types::ChatError;
 
@@ -39,11 +38,40 @@ pub enum BackendKind {
     Ollama,
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ToolProfile {
+    Default,
+    Advanced,
+    Lab,
+}
+
+impl ToolProfile {
+    fn allows(self, exposure: ToolExposure) -> bool {
+        match self {
+            ToolProfile::Default => matches!(exposure, ToolExposure::DefaultProfile),
+            ToolProfile::Advanced => matches!(
+                exposure,
+                ToolExposure::DefaultProfile | ToolExposure::AdvancedProfile
+            ),
+            ToolProfile::Lab => !matches!(exposure, ToolExposure::ServiceInternal),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            ToolProfile::Default => "default",
+            ToolProfile::Advanced => "advanced",
+            ToolProfile::Lab => "lab",
+        }
+    }
+}
+
 pub struct ChatOptions {
     pub backend: BackendKind,
     pub model: String,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
+    pub tool_profile: ToolProfile,
     pub allow_destructive: bool,
     pub auto_confirm: bool,
 }
@@ -88,16 +116,26 @@ fn endpoint_from_safe_name(safe: &str) -> String {
     safe.replacen('_', ".", 1)
 }
 
-// Build the tool catalog presented to the model — every implemented endpoint
-// except the ones blocked by allow_destructive
-fn build_tool_defs(allow_destructive: bool) -> Vec<ToolDef> {
+// Build the tool catalog presented to the model. Profiles hide sharp/noisy
+// endpoints before the model can select them; dispatch still enforces risk.
+fn build_tool_defs(profile: ToolProfile, allow_destructive: bool) -> Vec<ToolDef> {
     registry()
         .into_iter()
         .filter(|s| s.implemented)
+        .filter(|s| profile.allows(s.exposure))
         .filter(|s| allow_destructive || !matches!(s.risk, RiskClass::Destructive))
         .map(|s| ToolDef {
             name: safe_tool_name(s.name),
-            description: format!("[{:?}] {}", s.risk, s.description),
+            description: format!(
+                "[{:?} pack={:?} exposure={:?}] {}{}",
+                s.risk,
+                s.pack,
+                s.exposure,
+                s.description,
+                s.repurpose
+                    .map(|note| format!(" Repurpose: {note}"))
+                    .unwrap_or_default()
+            ),
             parameters: json!({
                 "type": "object",
                 "properties": {},
@@ -108,20 +146,25 @@ fn build_tool_defs(allow_destructive: bool) -> Vec<ToolDef> {
         .collect()
 }
 
-// Risk class for an endpoint name (None if unknown)
-fn risk_for_endpoint(endpoint: &str) -> Option<RiskClass> {
-    registry().into_iter().find(|s| s.name == endpoint).map(|s| s.risk)
+// Spec for an endpoint name (None if unknown)
+fn spec_for_endpoint(endpoint: &str) -> Option<EndpointSpec> {
+    registry().into_iter().find(|s| s.name == endpoint)
 }
 
 // ---- system prompt
 
-fn build_system_prompt(engagement_name: &str, model_label: &str, tool_count: usize) -> String {
+fn build_system_prompt(
+    engagement_name: &str,
+    model_label: &str,
+    profile_label: &str,
+    tool_count: usize,
+) -> String {
     format!(
         "You are an offensive-security assistant embedded in GeistScope.\n\
          You are working inside engagement \"{engagement_name}\" — every action must \
          stay within this engagement's scope. The user has authorized testing of any \
          target on the scope list.\n\n\
-         Backend: {model_label}. {tool_count} tools are exposed.\n\n\
+         Backend: {model_label}. Tool profile: {profile_label}. {tool_count} tools are exposed.\n\n\
          Tool-call rules:\n\
          - Prefer calling tools over guessing. Findings from tools land in \
          engagements/{engagement_name}/findings/ automatically.\n\
@@ -139,12 +182,13 @@ fn build_system_prompt(engagement_name: &str, model_label: &str, tool_count: usi
 // Run the chat REPL — blocks until the user types /quit or hits EOF
 pub async fn run_repl(cfg: HarnessConfig, engagement: String, opts: ChatOptions) -> Result<()> {
     let backend = build_backend(&opts)?;
-    let tools = build_tool_defs(opts.allow_destructive);
+    let tools = build_tool_defs(opts.tool_profile, opts.allow_destructive);
 
     println!(
-        "mg-harness chat — engagement={} backend={} tools={}",
+        "mg-harness chat — engagement={} backend={} profile={} tools={}",
         engagement,
         backend.model_label(),
+        opts.tool_profile.label(),
         tools.len()
     );
     println!("commands: /help /tools /reset /quit\n");
@@ -152,6 +196,7 @@ pub async fn run_repl(cfg: HarnessConfig, engagement: String, opts: ChatOptions)
     let mut messages: Vec<ChatMessage> = vec![ChatMessage::system(build_system_prompt(
         &engagement,
         &backend.model_label(),
+        opts.tool_profile.label(),
         tools.len(),
     ))];
 
@@ -230,14 +275,14 @@ pub async fn run_repl(cfg: HarnessConfig, engagement: String, opts: ChatOptions)
                             call,
                             opts.auto_confirm,
                             opts.allow_destructive,
+                            opts.tool_profile,
                         )
                         .await;
                         let (content, is_error) = match result {
                             Ok(v) => (v, false),
                             Err(e) => (json!({"error": e.to_string()}), true),
                         };
-                        let body = serde_json::to_string(&content)
-                            .unwrap_or_else(|_| "{}".into());
+                        let body = serde_json::to_string(&content).unwrap_or_else(|_| "{}".into());
                         messages.push(ChatMessage::tool_result(call, body, is_error));
                     }
                     if step_n == MAX_AGENT_STEPS - 1 {
@@ -262,11 +307,19 @@ async fn execute_tool_call(
     call: &ToolCall,
     auto_confirm: bool,
     allow_destructive: bool,
+    tool_profile: ToolProfile,
 ) -> Result<Value> {
     let endpoint = endpoint_from_safe_name(&call.name);
-    let risk = risk_for_endpoint(&endpoint).ok_or_else(|| {
-        anyhow::anyhow!("unknown endpoint {endpoint}")
-    })?;
+    let spec = spec_for_endpoint(&endpoint)
+        .ok_or_else(|| anyhow::anyhow!("unknown endpoint {endpoint}"))?;
+    if !tool_profile.allows(spec.exposure) {
+        anyhow::bail!(
+            "endpoint {endpoint} is hidden from the {} tool profile ({:?})",
+            tool_profile.label(),
+            spec.exposure
+        );
+    }
+    let risk = spec.risk;
 
     // Risk gating ----
     let requires_confirm = matches!(
@@ -284,7 +337,10 @@ async fn execute_tool_call(
             "\n[confirm] model wants to call {endpoint} ({:?}) with args:",
             risk
         );
-        eprintln!("  {}", serde_json::to_string(&call.args).unwrap_or_default());
+        eprintln!(
+            "  {}",
+            serde_json::to_string(&call.args).unwrap_or_default()
+        );
         eprint!("approve? [y/N] ");
         std::io::stderr().flush().ok();
         let mut buf = String::new();
@@ -339,19 +395,52 @@ mod tests {
     }
 
     #[test]
-    fn tool_defs_exclude_destructive_by_default() {
-        let safe = build_tool_defs(false);
-        let unsafe_ = build_tool_defs(true);
-        assert!(unsafe_.len() > safe.len());
-        assert!(!safe.iter().any(|t| t.name.starts_with("privesc_")));
-        assert!(unsafe_.iter().any(|t| t.name.starts_with("privesc_")));
+    fn default_tool_profile_hides_retired_lab_and_internal_tools() {
+        let defs = build_tool_defs(ToolProfile::Default, false);
+        let names: Vec<&str> = defs.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(!names.contains(&"brute_run"));
+        assert!(!names.contains(&"snmp_brute"));
+        assert!(!names.contains(&"dns_rebind"));
+        assert!(!names.contains(&"exploit_scaffold"));
+        assert!(!names.contains(&"loot_run"));
+        assert!(!names.contains(&"notify_start"));
     }
 
     #[test]
-    fn tool_defs_cover_subprocess_table() {
-        let defs = build_tool_defs(true);
-        // Every implemented registry entry shows up in the catalog
-        let impl_count = registry().iter().filter(|s| s.implemented).count();
-        assert_eq!(defs.len(), impl_count);
+    fn advanced_tool_profile_includes_advanced_but_not_retired_or_lab_tools() {
+        let defs = build_tool_defs(ToolProfile::Advanced, false);
+        let names: Vec<&str> = defs.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(names.contains(&"oob_start"));
+        assert!(names.contains(&"xss_scan"));
+        assert!(!names.contains(&"brute_run"));
+        assert!(!names.contains(&"dns_rebind"));
+        assert!(!names.contains(&"exploit_scaffold"));
+        assert!(!names.contains(&"notify_start"));
+    }
+
+    #[test]
+    fn lab_tool_profile_requires_unsafe_for_destructive_tools() {
+        let lab_safe = build_tool_defs(ToolProfile::Lab, false);
+        let lab_unsafe = build_tool_defs(ToolProfile::Lab, true);
+        let safe_names: Vec<&str> = lab_safe.iter().map(|t| t.name.as_str()).collect();
+        let unsafe_names: Vec<&str> = lab_unsafe.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(safe_names.contains(&"exploit_scaffold"));
+        assert!(!safe_names.contains(&"privesc_linux"));
+        assert!(!safe_names.contains(&"loot_run"));
+        assert!(unsafe_names.contains(&"privesc_linux"));
+        assert!(unsafe_names.contains(&"loot_run"));
+    }
+
+    #[test]
+    fn tool_defs_cover_profile_visible_registry_entries() {
+        let defs = build_tool_defs(ToolProfile::Lab, true);
+        let visible_count = registry()
+            .iter()
+            .filter(|s| s.implemented && ToolProfile::Lab.allows(s.exposure))
+            .count();
+        assert_eq!(defs.len(), visible_count);
     }
 }

@@ -23,7 +23,12 @@ use mg_harness::{HarnessConfig, Invocation, chat, dispatch};
 )]
 struct Args {
     /// Engagements root directory (overrides MG_ENGAGEMENTS_DIR)
-    #[arg(long, env = "MG_ENGAGEMENTS_DIR", default_value = "engagements", global = true)]
+    #[arg(
+        long,
+        env = "MG_ENGAGEMENTS_DIR",
+        default_value = "engagements",
+        global = true
+    )]
     engagements_dir: PathBuf,
 
     #[command(subcommand)]
@@ -70,6 +75,10 @@ enum Command {
         #[arg(long)]
         api_key: Option<String>,
 
+        /// Tool exposure profile for chat catalog pruning
+        #[arg(long, value_enum, default_value = "default")]
+        tool_profile: chat::ToolProfile,
+
         /// Allow destructive endpoints (privesc, loot) in the tool catalog
         #[arg(long)]
         unsafe_mode: bool,
@@ -106,6 +115,7 @@ async fn main() -> Result<()> {
             model,
             base_url,
             api_key,
+            tool_profile,
             unsafe_mode,
             yes,
         }) => {
@@ -117,6 +127,7 @@ async fn main() -> Result<()> {
                     model,
                     base_url,
                     api_key,
+                    tool_profile,
                     allow_destructive: unsafe_mode,
                     auto_confirm: yes,
                 },

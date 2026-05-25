@@ -90,6 +90,34 @@ pub struct EndpointResult {
     pub policy: Option<String>,
 }
 
+// Collapsed tool-pack groups used to reduce model-visible tool sprawl while
+// preserving specialist binaries behind reviewed pack interfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPack {
+    CoreHarness,
+    Reconx,
+    ProtocolAudit,
+    VulnScan,
+    IdentityAudit,
+    CloudAudit,
+    ArtifactAudit,
+    Eventing,
+    RedteamLab,
+}
+
+// Exposure tier for endpoint registry consumers. Dispatch policy is unchanged;
+// this metadata lets clients hide/repack tools before they are physically pruned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExposure {
+    DefaultProfile,
+    AdvancedProfile,
+    LabOnly,
+    ServiceInternal,
+    RetiredPendingPack,
+}
+
 // Static description for an allowlisted endpoint
 #[derive(Debug, Clone, Serialize)]
 pub struct EndpointSpec {
@@ -97,6 +125,10 @@ pub struct EndpointSpec {
     pub risk: RiskClass,
     pub implemented: bool,
     pub description: &'static str,
+    pub pack: ToolPack,
+    pub exposure: ToolExposure,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repurpose: Option<&'static str>,
 }
 
 // Runtime configuration for dispatch
@@ -246,6 +278,100 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
     }
 }
 
+fn tool_pack_for_endpoint(endpoint: &str) -> ToolPack {
+    match endpoint {
+        "endpoint.registry"
+        | "engagement.open"
+        | "engagement.status"
+        | "scope.check"
+        | "session.set"
+        | "session.get_headers"
+        | "request.import"
+        | "request.search"
+        | "request.read"
+        | "request.replay"
+        | "graph.ingest"
+        | "graph.summary"
+        | "graph.neighbors"
+        | "chain.read"
+        | "finding.read"
+        | "finding.create"
+        | "report.generate"
+        | "report.disclose"
+        | "risk.rank" => ToolPack::CoreHarness,
+        "whois.lookup" | "shodan.lookup" | "dns.history" | "breach.lookup"
+        | "dork.run" | "github.search" | "cloud.enum" | "dns.enum"
+        | "diff.run" | "timeline.generate" | "leak.monitor" | "recon.run" => ToolPack::Reconx,
+        "tls.scan" | "ssh.audit" | "udp.scan" | "vhost.scan" | "graphql.scan" | "csp.analyze"
+        | "cname.chain" | "http2.scan" | "grpc.scan" | "websocket.scan" | "smb.scan"
+        | "smtp.enum" | "snmp.brute" | "crawl.run" | "probe.run" => ToolPack::ProtocolAudit,
+        "xss.scan" | "sqli.scan" | "ssrf.scan" | "ssti.scan" | "xxe.scan" | "traversal.scan"
+        | "redirect.scan" | "csrf.scan" | "smuggle.scan" | "cmdinject.scan" | "cache.poison"
+        | "proto.pollute" | "deser.scan" | "openapi.scan" | "cors.scan"
+        | "dns.rebind" | "oob.start" => ToolPack::VulnScan,
+        "brute.run" | "authz.scan" | "oauth.analyze" | "session.audit" | "jwt.analyze" => {
+            ToolPack::IdentityAudit
+        }
+        "aws.chain" | "gcp.chain" | "azure.chain" | "k8s.scan" | "docker.scan"
+        | "serverless.chain" => ToolPack::CloudAudit,
+        "apikey.extract" | "js.analyze" | "sourcemap.fetch" | "apk.analyze" | "ipa.analyze"
+        | "metadata.extract" | "secret.validate" | "re.analyze" | "re.read"
+        | "artifact.audit" => ToolPack::ArtifactAudit,
+        "notify.start" => ToolPack::Eventing,
+        "privesc.linux" | "privesc.windows" | "loot.run" | "exploit.scaffold" | "aifuzz.run"
+        | "aifuzz.consent" => ToolPack::RedteamLab,
+        _ => ToolPack::CoreHarness,
+    }
+}
+
+fn tool_exposure_for_endpoint(endpoint: &str, risk: RiskClass) -> ToolExposure {
+    match endpoint {
+        "notify.start" => ToolExposure::ServiceInternal,
+        "brute.run" | "snmp.brute" | "dns.rebind" => ToolExposure::RetiredPendingPack,
+        "privesc.linux" | "privesc.windows" | "loot.run" | "exploit.scaffold" => {
+            ToolExposure::LabOnly
+        }
+        "aifuzz.run" | "aifuzz.consent" | "oob.start" => ToolExposure::AdvancedProfile,
+        _ if matches!(risk, RiskClass::HighActive | RiskClass::Destructive) => {
+            ToolExposure::AdvancedProfile
+        }
+        _ => ToolExposure::DefaultProfile,
+    }
+}
+
+fn endpoint_repurpose_note(endpoint: &str) -> Option<&'static str> {
+    match endpoint {
+        "brute.run" => Some(
+            "Repurpose into mg-identity-audit as rate-limit, lockout, and credential-stuffing exposure analysis; remove standalone brute-force affordance from default profiles.",
+        ),
+        "snmp.brute" => Some(
+            "Repurpose into mg-protocol-audit as conservative SNMP community exposure checks without brute-force defaults.",
+        ),
+        "dns.rebind" => Some(
+            "Repurpose into mg-vuln-scan SSRF/OOB planning as a lab-gated payload strategy, not a default standalone generator.",
+        ),
+        "notify.start" => Some(
+            "Fold into eventing/OOB service infrastructure used by scanners; do not expose as a model-selected tool.",
+        ),
+        "oob.start" => Some(
+            "Fold into mg-vuln-scan as managed callback infrastructure for SSRF/injection confirmation.",
+        ),
+        "privesc.linux" => Some(
+            "Repurpose local checks into redteam-lab artifact inventory and defensive persistence triage; keep automation lab-only.",
+        ),
+        "privesc.windows" => Some(
+            "Repurpose local checks into redteam-lab artifact inventory and defensive persistence triage; keep automation lab-only.",
+        ),
+        "loot.run" => Some(
+            "Repurpose parsers into artifact-audit evidence inventory/redaction helpers; remove post-exploitation collection posture from default profiles.",
+        ),
+        "exploit.scaffold" => Some(
+            "Keep as redteam-lab/CVE reproduction scaffolding only; never expose as a default exploit-generation tool.",
+        ),
+        _ => None,
+    }
+}
+
 // Return the allowlisted endpoint registry
 pub fn registry() -> Vec<EndpointSpec> {
     vec![
@@ -254,192 +380,288 @@ pub fn registry() -> Vec<EndpointSpec> {
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "List harness endpoints, risk classes, and implementation status.",
+            pack: tool_pack_for_endpoint("endpoint.registry"),
+            exposure: tool_exposure_for_endpoint("endpoint.registry", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("endpoint.registry"),
         },
         EndpointSpec {
             name: "engagement.open",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Load engagement metadata, scope, and key workspace file paths.",
+            pack: tool_pack_for_endpoint("engagement.open"),
+            exposure: tool_exposure_for_endpoint("engagement.open", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("engagement.open"),
         },
         EndpointSpec {
             name: "engagement.status",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Summarize current engagement output files and counts.",
+            pack: tool_pack_for_endpoint("engagement.status"),
+            exposure: tool_exposure_for_endpoint("engagement.status", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("engagement.status"),
         },
         EndpointSpec {
             name: "scope.check",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Check whether a host or URL is in scope for an engagement.",
+            pack: tool_pack_for_endpoint("scope.check"),
+            exposure: tool_exposure_for_endpoint("scope.check", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("scope.check"),
         },
         EndpointSpec {
             name: "recon.run",
             risk: RiskClass::HighActive,
             implemented: true,
             description: "Run the scoped mg-recon pipeline after explicit confirmation.",
+            pack: tool_pack_for_endpoint("recon.run"),
+            exposure: tool_exposure_for_endpoint("recon.run", RiskClass::HighActive),
+            repurpose: endpoint_repurpose_note("recon.run"),
         },
         EndpointSpec {
             name: "session.set",
             risk: RiskClass::StateChange,
             implemented: true,
             description: "Store a redaction-safe session profile using environment-variable references.",
+            pack: tool_pack_for_endpoint("session.set"),
+            exposure: tool_exposure_for_endpoint("session.set", RiskClass::StateChange),
+            repurpose: endpoint_repurpose_note("session.set"),
         },
         EndpointSpec {
             name: "session.get_headers",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Resolve session auth headers and return only redacted header metadata.",
+            pack: tool_pack_for_endpoint("session.get_headers"),
+            exposure: tool_exposure_for_endpoint("session.get_headers", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("session.get_headers"),
         },
         EndpointSpec {
             name: "crawl.run",
             risk: RiskClass::LowActive,
             implemented: false,
             description: "Run crawler against scoped URLs.",
+            pack: tool_pack_for_endpoint("crawl.run"),
+            exposure: tool_exposure_for_endpoint("crawl.run", RiskClass::LowActive),
+            repurpose: endpoint_repurpose_note("crawl.run"),
         },
         EndpointSpec {
             name: "probe.run",
             risk: RiskClass::LowActive,
             implemented: false,
             description: "Run passive and semi-active posture checks.",
+            pack: tool_pack_for_endpoint("probe.run"),
+            exposure: tool_exposure_for_endpoint("probe.run", RiskClass::LowActive),
+            repurpose: endpoint_repurpose_note("probe.run"),
         },
         EndpointSpec {
             name: "request.import",
             risk: RiskClass::StateChange,
             implemented: true,
             description: "Import HAR, Burp XML, or Caido JSON traffic into the engagement corpus.",
+            pack: tool_pack_for_endpoint("request.import"),
+            exposure: tool_exposure_for_endpoint("request.import", RiskClass::StateChange),
+            repurpose: endpoint_repurpose_note("request.import"),
         },
         EndpointSpec {
             name: "request.search",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Search the normalized request corpus with bounded filters.",
+            pack: tool_pack_for_endpoint("request.search"),
+            exposure: tool_exposure_for_endpoint("request.search", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("request.search"),
         },
         EndpointSpec {
             name: "request.read",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Read one normalized request record by request ID or prefix.",
+            pack: tool_pack_for_endpoint("request.read"),
+            exposure: tool_exposure_for_endpoint("request.read", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("request.read"),
         },
         EndpointSpec {
             name: "request.replay",
             risk: RiskClass::LowActive,
             implemented: true,
             description: "Replay one captured request and compare the response.",
+            pack: tool_pack_for_endpoint("request.replay"),
+            exposure: tool_exposure_for_endpoint("request.replay", RiskClass::LowActive),
+            repurpose: endpoint_repurpose_note("request.replay"),
         },
         EndpointSpec {
             name: "fuzzer.plan",
             risk: RiskClass::ReadOnly,
             implemented: false,
             description: "Build a fuzz plan without sending traffic.",
+            pack: tool_pack_for_endpoint("fuzzer.plan"),
+            exposure: tool_exposure_for_endpoint("fuzzer.plan", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("fuzzer.plan"),
         },
         EndpointSpec {
             name: "fuzzer.run",
             risk: RiskClass::HighActive,
             implemented: false,
             description: "Run bounded fuzzing after explicit confirmation.",
+            pack: tool_pack_for_endpoint("fuzzer.run"),
+            exposure: tool_exposure_for_endpoint("fuzzer.run", RiskClass::HighActive),
+            repurpose: endpoint_repurpose_note("fuzzer.run"),
         },
         EndpointSpec {
             name: "oob.allocate",
             risk: RiskClass::ReadOnly,
             implemented: false,
             description: "Allocate an OOB callback token.",
+            pack: tool_pack_for_endpoint("oob.allocate"),
+            exposure: tool_exposure_for_endpoint("oob.allocate", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("oob.allocate"),
         },
         EndpointSpec {
             name: "oob.poll",
             risk: RiskClass::PassiveRemote,
             implemented: false,
             description: "Poll OOB callback logs.",
+            pack: tool_pack_for_endpoint("oob.poll"),
+            exposure: tool_exposure_for_endpoint("oob.poll", RiskClass::PassiveRemote),
+            repurpose: endpoint_repurpose_note("oob.poll"),
         },
         EndpointSpec {
             name: "graph.ingest",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Ingest current engagement artifacts into the local security graph.",
+            pack: tool_pack_for_endpoint("graph.ingest"),
+            exposure: tool_exposure_for_endpoint("graph.ingest", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("graph.ingest"),
         },
         EndpointSpec {
             name: "graph.summary",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Summarize the local security graph with bounded sample nodes.",
+            pack: tool_pack_for_endpoint("graph.summary"),
+            exposure: tool_exposure_for_endpoint("graph.summary", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("graph.summary"),
         },
         EndpointSpec {
             name: "graph.neighbors",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Read a bounded incoming/outgoing neighborhood for one graph node.",
+            pack: tool_pack_for_endpoint("graph.neighbors"),
+            exposure: tool_exposure_for_endpoint("graph.neighbors", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("graph.neighbors"),
         },
         EndpointSpec {
             name: "finding.create",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Create a finding skeleton from evidence references.",
+            pack: tool_pack_for_endpoint("finding.create"),
+            exposure: tool_exposure_for_endpoint("finding.create", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("finding.create"),
         },
         EndpointSpec {
             name: "finding.read",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Read one finding markdown file by finding ID.",
+            pack: tool_pack_for_endpoint("finding.read"),
+            exposure: tool_exposure_for_endpoint("finding.read", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("finding.read"),
         },
         EndpointSpec {
             name: "chain.read",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Read bounded exploit chain analysis artifacts.",
+            pack: tool_pack_for_endpoint("chain.read"),
+            exposure: tool_exposure_for_endpoint("chain.read", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("chain.read"),
         },
         EndpointSpec {
             name: "finding.replay",
             risk: RiskClass::LowActive,
             implemented: false,
             description: "Retest finding evidence.",
+            pack: tool_pack_for_endpoint("finding.replay"),
+            exposure: tool_exposure_for_endpoint("finding.replay", RiskClass::LowActive),
+            repurpose: endpoint_repurpose_note("finding.replay"),
         },
         EndpointSpec {
             name: "report.generate",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Generate a bounty report from one local finding.",
+            pack: tool_pack_for_endpoint("report.generate"),
+            exposure: tool_exposure_for_endpoint("report.generate", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("report.generate"),
         },
         EndpointSpec {
             name: "report.disclose",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Draft a CVE writeup and disclosure email for one finding.",
+            pack: tool_pack_for_endpoint("report.disclose"),
+            exposure: tool_exposure_for_endpoint("report.disclose", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("report.disclose"),
         },
         EndpointSpec {
             name: "re.analyze",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Analyze decompiled pseudocode and write a Markdown + JSON pair.",
+            pack: tool_pack_for_endpoint("re.analyze"),
+            exposure: tool_exposure_for_endpoint("re.analyze", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("re.analyze"),
         },
         EndpointSpec {
             name: "re.read",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Read a previously generated RE analysis for one function.",
+            pack: tool_pack_for_endpoint("re.read"),
+            exposure: tool_exposure_for_endpoint("re.read", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("re.read"),
         },
         EndpointSpec {
             name: "aifuzz.consent",
             risk: RiskClass::StateChange,
             implemented: true,
             description: "Record adversarial AI-fuzz consent for one engagement.",
+            pack: tool_pack_for_endpoint("aifuzz.consent"),
+            exposure: tool_exposure_for_endpoint("aifuzz.consent", RiskClass::StateChange),
+            repurpose: endpoint_repurpose_note("aifuzz.consent"),
         },
         EndpointSpec {
             name: "aifuzz.run",
             risk: RiskClass::HighActive,
             implemented: true,
             description: "Run a bounded prompt-injection fuzz pass against a scoped LLM endpoint.",
+            pack: tool_pack_for_endpoint("aifuzz.run"),
+            exposure: tool_exposure_for_endpoint("aifuzz.run", RiskClass::HighActive),
+            repurpose: endpoint_repurpose_note("aifuzz.run"),
         },
         EndpointSpec {
             name: "exploit.scaffold",
             risk: RiskClass::ReadOnly,
             implemented: true,
             description: "Generate a Rust exploit project skeleton for one CVE under the engagement.",
+            pack: tool_pack_for_endpoint("exploit.scaffold"),
+            exposure: tool_exposure_for_endpoint("exploit.scaffold", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("exploit.scaffold"),
         },
         EndpointSpec {
             name: "risk.rank",
             risk: RiskClass::ReadOnly,
             implemented: false,
             description: "Rank targets and hypotheses from local evidence.",
+            pack: tool_pack_for_endpoint("risk.rank"),
+            exposure: tool_exposure_for_endpoint("risk.rank", RiskClass::ReadOnly),
+            repurpose: endpoint_repurpose_note("risk.rank"),
         },
     ]
     .into_iter()
@@ -448,6 +670,9 @@ pub fn registry() -> Vec<EndpointSpec> {
         risk: t.risk,
         implemented: true,
         description: t.description,
+        pack: tool_pack_for_endpoint(t.endpoint),
+        exposure: tool_exposure_for_endpoint(t.endpoint, t.risk),
+        repurpose: endpoint_repurpose_note(t.endpoint),
     }))
     .collect()
 }
@@ -1566,7 +1791,10 @@ async fn handle_aifuzz_consent(
         endpoint: invocation.endpoint.clone(),
         status: EndpointStatus::Ok,
         risk: RiskClass::StateChange,
-        summary: Some(format!("aifuzz consent recorded for {}", invocation.engagement)),
+        summary: Some(format!(
+            "aifuzz consent recorded for {}",
+            invocation.engagement
+        )),
         output_files: vec![display_path(&path)],
         evidence_refs: Vec::new(),
         redactions: BTreeMap::new(),
@@ -1728,7 +1956,12 @@ async fn run_tool_binary(
     use tokio::process::Command;
 
     let mut cmd = Command::new(binary);
-    cmd.arg(&eng.meta.name).arg("--engagements-dir").arg(engagements_dir);
+    if let Some(subcommand) = tool_subcommand_for_endpoint(&req.endpoint) {
+        cmd.arg(subcommand);
+    }
+    cmd.arg(&eng.meta.name)
+        .arg("--engagements-dir")
+        .arg(engagements_dir);
     // Kill the child on parent drop so timeouts actually free the process
     cmd.kill_on_drop(true);
 
@@ -1781,77 +2014,400 @@ struct SubprocessTool {
 // adding or renaming a tool only touches one row here.
 const SUBPROCESS_TOOLS: &[SubprocessTool] = &[
     // ---- Passive recon
-    SubprocessTool { endpoint: "whois.lookup",     binary: "mg-whois",          risk: RiskClass::PassiveRemote, description: "Look up WHOIS registration data for a domain." },
-    SubprocessTool { endpoint: "shodan.lookup",    binary: "mg-shodan",         risk: RiskClass::PassiveRemote, description: "Query Shodan for host intelligence." },
-    SubprocessTool { endpoint: "dns.history",      binary: "mg-dns-history",    risk: RiskClass::PassiveRemote, description: "Retrieve passive DNS history for a domain." },
-    SubprocessTool { endpoint: "breach.lookup",    binary: "mg-breach",         risk: RiskClass::PassiveRemote, description: "Look up breach data for a target domain." },
-    SubprocessTool { endpoint: "social.enum",      binary: "mg-social",         risk: RiskClass::PassiveRemote, description: "Enumerate social-media profiles linked to a target." },
-    SubprocessTool { endpoint: "dork.run",         binary: "mg-google-dork",    risk: RiskClass::PassiveRemote, description: "Run Google-dork queries for target exposure." },
-    SubprocessTool { endpoint: "github.search",    binary: "mg-github",         risk: RiskClass::PassiveRemote, description: "Search GitHub for secrets and target references." },
-    SubprocessTool { endpoint: "cloud.enum",       binary: "mg-cloud-enum",     risk: RiskClass::PassiveRemote, description: "Enumerate cloud-storage buckets and resources." },
-    SubprocessTool { endpoint: "dns.enum",         binary: "mg-dns-enum",       risk: RiskClass::PassiveRemote, description: "Enumerate DNS records and subdomains." },
-    SubprocessTool { endpoint: "screenshot.run",   binary: "mg-screenshot",     risk: RiskClass::PassiveRemote, description: "Capture screenshots of scoped web targets." },
-    SubprocessTool { endpoint: "diff.run",         binary: "mg-diff",           risk: RiskClass::PassiveRemote, description: "Diff two engagement snapshots for change detection." },
-    SubprocessTool { endpoint: "timeline.generate",binary: "mg-timeline",       risk: RiskClass::PassiveRemote, description: "Generate a timeline of engagement events." },
-    SubprocessTool { endpoint: "apikey.extract",   binary: "mg-apikey",         risk: RiskClass::PassiveRemote, description: "Extract API keys from crawled or imported content." },
-    SubprocessTool { endpoint: "js.analyze",       binary: "mg-js-analyze",     risk: RiskClass::PassiveRemote, description: "Analyze JavaScript files for secrets and endpoints." },
-    SubprocessTool { endpoint: "sourcemap.fetch",  binary: "mg-sourcemap",      risk: RiskClass::PassiveRemote, description: "Fetch and reconstruct source maps from a target." },
-    SubprocessTool { endpoint: "apk.analyze",      binary: "mg-apk",            risk: RiskClass::PassiveRemote, description: "Static-analyze an Android APK for secrets and endpoints." },
-    SubprocessTool { endpoint: "ipa.analyze",      binary: "mg-ipa",            risk: RiskClass::PassiveRemote, description: "Static-analyze an iOS IPA for secrets and endpoints." },
-    SubprocessTool { endpoint: "metadata.extract", binary: "mg-metadata",       risk: RiskClass::PassiveRemote, description: "Extract metadata from documents and images." },
-    SubprocessTool { endpoint: "leak.monitor",     binary: "mg-leak-monitor",   risk: RiskClass::PassiveRemote, description: "Continuously monitor leak sources for target exposure." },
+    SubprocessTool {
+        endpoint: "whois.lookup",
+        binary: "mg-whois",
+        risk: RiskClass::PassiveRemote,
+        description: "Look up WHOIS registration data for a domain.",
+    },
+    SubprocessTool {
+        endpoint: "shodan.lookup",
+        binary: "mg-shodan",
+        risk: RiskClass::PassiveRemote,
+        description: "Query Shodan for host intelligence.",
+    },
+    SubprocessTool {
+        endpoint: "dns.history",
+        binary: "mg-dns-history",
+        risk: RiskClass::PassiveRemote,
+        description: "Retrieve passive DNS history for a domain.",
+    },
+    SubprocessTool {
+        endpoint: "breach.lookup",
+        binary: "mg-breach",
+        risk: RiskClass::PassiveRemote,
+        description: "Look up breach data for a target domain.",
+    },
+    SubprocessTool {
+        endpoint: "dork.run",
+        binary: "mg-google-dork",
+        risk: RiskClass::PassiveRemote,
+        description: "Run Google-dork queries for target exposure.",
+    },
+    SubprocessTool {
+        endpoint: "github.search",
+        binary: "mg-github",
+        risk: RiskClass::PassiveRemote,
+        description: "Search GitHub for secrets and target references.",
+    },
+    SubprocessTool {
+        endpoint: "cloud.enum",
+        binary: "mg-cloud-enum",
+        risk: RiskClass::PassiveRemote,
+        description: "Enumerate cloud-storage buckets and resources.",
+    },
+    SubprocessTool {
+        endpoint: "dns.enum",
+        binary: "mg-dns-enum",
+        risk: RiskClass::PassiveRemote,
+        description: "Enumerate DNS records and subdomains.",
+    },
+    SubprocessTool {
+        endpoint: "diff.run",
+        binary: "mg-diff",
+        risk: RiskClass::PassiveRemote,
+        description: "Diff two engagement snapshots for change detection.",
+    },
+    SubprocessTool {
+        endpoint: "timeline.generate",
+        binary: "mg-timeline",
+        risk: RiskClass::PassiveRemote,
+        description: "Generate a timeline of engagement events.",
+    },
+    SubprocessTool {
+        endpoint: "apikey.extract",
+        binary: "mg-artifact-audit",
+        risk: RiskClass::PassiveRemote,
+        description: "Extract API keys from crawled or imported content.",
+    },
+    SubprocessTool {
+        endpoint: "js.analyze",
+        binary: "mg-artifact-audit",
+        risk: RiskClass::PassiveRemote,
+        description: "Analyze JavaScript files for secrets and endpoints.",
+    },
+    SubprocessTool {
+        endpoint: "sourcemap.fetch",
+        binary: "mg-artifact-audit",
+        risk: RiskClass::PassiveRemote,
+        description: "Fetch and reconstruct source maps from a target.",
+    },
+    SubprocessTool {
+        endpoint: "apk.analyze",
+        binary: "mg-artifact-audit",
+        risk: RiskClass::PassiveRemote,
+        description: "Static-analyze an Android APK for secrets and endpoints.",
+    },
+    SubprocessTool {
+        endpoint: "ipa.analyze",
+        binary: "mg-artifact-audit",
+        risk: RiskClass::PassiveRemote,
+        description: "Static-analyze an iOS IPA for secrets and endpoints.",
+    },
+    SubprocessTool {
+        endpoint: "metadata.extract",
+        binary: "mg-artifact-audit",
+        risk: RiskClass::PassiveRemote,
+        description: "Extract metadata from documents and images.",
+    },
+    SubprocessTool {
+        endpoint: "artifact.audit",
+        binary: "mg-artifact-audit",
+        risk: RiskClass::PassiveRemote,
+        description: "Run multiple artifact analyzers in one pass (types: js, sourcemap, apikey, metadata, apk, ipa).",
+    },
+    SubprocessTool {
+        endpoint: "leak.monitor",
+        binary: "mg-leak-monitor",
+        risk: RiskClass::PassiveRemote,
+        description: "Continuously monitor leak sources for target exposure.",
+    },
     // ---- Semi-active probes
-    SubprocessTool { endpoint: "tls.scan",         binary: "mg-tls-scan",       risk: RiskClass::LowActive,     description: "Scan TLS configuration and certificate chain." },
-    SubprocessTool { endpoint: "ssh.audit",        binary: "mg-ssh-audit",      risk: RiskClass::LowActive,     description: "Audit SSH ciphers, KEX, and host-key algorithms." },
-    SubprocessTool { endpoint: "udp.scan",         binary: "mg-udp-scan",       risk: RiskClass::LowActive,     description: "Probe common UDP services on a scoped host." },
-    SubprocessTool { endpoint: "vhost.scan",       binary: "mg-vhost",          risk: RiskClass::LowActive,     description: "Discover virtual hosts on a scoped IP." },
-    SubprocessTool { endpoint: "graphql.scan",     binary: "mg-graphql",        risk: RiskClass::LowActive,     description: "Introspect a GraphQL endpoint for schema and misconfigs." },
-    SubprocessTool { endpoint: "csp.analyze",      binary: "mg-csp",            risk: RiskClass::LowActive,     description: "Analyze Content-Security-Policy headers for weaknesses." },
-    SubprocessTool { endpoint: "cname.chain",      binary: "mg-cname-chain",    risk: RiskClass::LowActive,     description: "Trace CNAME chains for dangling-record exposure." },
-    SubprocessTool { endpoint: "dns.rebind",       binary: "mg-dns-rebind",     risk: RiskClass::LowActive,     description: "Generate DNS-rebinding payloads for a target." },
-    SubprocessTool { endpoint: "http2.scan",       binary: "mg-http2",          risk: RiskClass::LowActive,     description: "Probe HTTP/2 and HTTP/3 support and misconfigs." },
-    SubprocessTool { endpoint: "grpc.scan",        binary: "mg-grpc",           risk: RiskClass::LowActive,     description: "Enumerate gRPC services and methods." },
-    SubprocessTool { endpoint: "websocket.scan",   binary: "mg-websocket",      risk: RiskClass::LowActive,     description: "Passively check WebSocket upgrade and origin policy." },
+    SubprocessTool {
+        endpoint: "tls.scan",
+        binary: "mg-tls-scan",
+        risk: RiskClass::LowActive,
+        description: "Scan TLS configuration and certificate chain.",
+    },
+    SubprocessTool {
+        endpoint: "ssh.audit",
+        binary: "mg-ssh-audit",
+        risk: RiskClass::LowActive,
+        description: "Audit SSH ciphers, KEX, and host-key algorithms.",
+    },
+    SubprocessTool {
+        endpoint: "udp.scan",
+        binary: "mg-udp-scan",
+        risk: RiskClass::LowActive,
+        description: "Probe common UDP services on a scoped host.",
+    },
+    SubprocessTool {
+        endpoint: "vhost.scan",
+        binary: "mg-vhost",
+        risk: RiskClass::LowActive,
+        description: "Discover virtual hosts on a scoped IP.",
+    },
+    SubprocessTool {
+        endpoint: "graphql.scan",
+        binary: "mg-graphql",
+        risk: RiskClass::LowActive,
+        description: "Introspect a GraphQL endpoint for schema and misconfigs.",
+    },
+    SubprocessTool {
+        endpoint: "csp.analyze",
+        binary: "mg-csp",
+        risk: RiskClass::LowActive,
+        description: "Analyze Content-Security-Policy headers for weaknesses.",
+    },
+    SubprocessTool {
+        endpoint: "cname.chain",
+        binary: "mg-cname-chain",
+        risk: RiskClass::LowActive,
+        description: "Trace CNAME chains for dangling-record exposure.",
+    },
+    SubprocessTool {
+        endpoint: "dns.rebind",
+        binary: "mg-dns-rebind",
+        risk: RiskClass::LowActive,
+        description: "Generate DNS-rebinding payloads for a target.",
+    },
+    SubprocessTool {
+        endpoint: "http2.scan",
+        binary: "mg-http2",
+        risk: RiskClass::LowActive,
+        description: "Probe HTTP/2 and HTTP/3 support and misconfigs.",
+    },
+    SubprocessTool {
+        endpoint: "grpc.scan",
+        binary: "mg-grpc",
+        risk: RiskClass::LowActive,
+        description: "Enumerate gRPC services and methods.",
+    },
+    SubprocessTool {
+        endpoint: "websocket.scan",
+        binary: "mg-websocket",
+        risk: RiskClass::LowActive,
+        description: "Passively check WebSocket upgrade and origin policy.",
+    },
     // ---- Active vuln scanners
-    SubprocessTool { endpoint: "xss.scan",         binary: "mg-xss",            risk: RiskClass::HighActive,    description: "Scan for reflected and stored XSS vulnerabilities." },
-    SubprocessTool { endpoint: "sqli.scan",        binary: "mg-sqli",           risk: RiskClass::HighActive,    description: "Scan for SQL injection vulnerabilities." },
-    SubprocessTool { endpoint: "ssrf.scan",        binary: "mg-ssrf",           risk: RiskClass::HighActive,    description: "Scan for server-side request forgery vulnerabilities." },
-    SubprocessTool { endpoint: "ssti.scan",        binary: "mg-ssti",           risk: RiskClass::HighActive,    description: "Scan for server-side template injection vulnerabilities." },
-    SubprocessTool { endpoint: "xxe.scan",         binary: "mg-xxe",            risk: RiskClass::HighActive,    description: "Scan for XML external entity injection vulnerabilities." },
-    SubprocessTool { endpoint: "traversal.scan",   binary: "mg-traversal",      risk: RiskClass::HighActive,    description: "Scan for path-traversal vulnerabilities." },
-    SubprocessTool { endpoint: "redirect.scan",    binary: "mg-redirect",       risk: RiskClass::HighActive,    description: "Scan for open-redirect vulnerabilities." },
-    SubprocessTool { endpoint: "csrf.scan",        binary: "mg-csrf",           risk: RiskClass::HighActive,    description: "Scan for CSRF vulnerabilities." },
-    SubprocessTool { endpoint: "smuggle.scan",     binary: "mg-smuggle",        risk: RiskClass::HighActive,    description: "Scan for HTTP request-smuggling vulnerabilities." },
-    SubprocessTool { endpoint: "cmdinject.scan",   binary: "mg-cmdinject",      risk: RiskClass::HighActive,    description: "Scan for OS command-injection vulnerabilities." },
-    SubprocessTool { endpoint: "cache.poison",     binary: "mg-cache-poison",   risk: RiskClass::HighActive,    description: "Probe for web-cache poisoning vulnerabilities." },
-    SubprocessTool { endpoint: "proto.pollute",    binary: "mg-proto-pollute",  risk: RiskClass::HighActive,    description: "Probe for prototype-pollution vulnerabilities." },
-    SubprocessTool { endpoint: "deser.scan",       binary: "mg-deser",          risk: RiskClass::HighActive,    description: "Scan for insecure-deserialization vulnerabilities." },
-    SubprocessTool { endpoint: "brute.run",        binary: "mg-brute",          risk: RiskClass::HighActive,    description: "Run credential brute-force against a scoped endpoint." },
-    SubprocessTool { endpoint: "authz.scan",       binary: "mg-authz",          risk: RiskClass::HighActive,    description: "Scan for broken access-control and IDOR vulnerabilities." },
-    SubprocessTool { endpoint: "aws.chain",        binary: "mg-aws",            risk: RiskClass::HighActive,    description: "Run AWS privilege-escalation chain checks." },
-    SubprocessTool { endpoint: "gcp.chain",        binary: "mg-gcp",            risk: RiskClass::HighActive,    description: "Run GCP privilege-escalation chain checks." },
-    SubprocessTool { endpoint: "azure.chain",      binary: "mg-azure",          risk: RiskClass::HighActive,    description: "Run Azure privilege-escalation chain checks." },
-    SubprocessTool { endpoint: "k8s.scan",         binary: "mg-k8s",            risk: RiskClass::HighActive,    description: "Scan Kubernetes cluster for misconfigurations." },
-    SubprocessTool { endpoint: "docker.scan",      binary: "mg-docker",         risk: RiskClass::HighActive,    description: "Scan Docker daemon and images for misconfigurations." },
-    SubprocessTool { endpoint: "serverless.chain", binary: "mg-serverless",     risk: RiskClass::HighActive,    description: "Probe serverless functions for privilege-escalation chains." },
-    SubprocessTool { endpoint: "secret.validate",  binary: "mg-secret-validate",risk: RiskClass::HighActive,    description: "Validate discovered secrets against live APIs." },
-    SubprocessTool { endpoint: "openapi.scan",     binary: "mg-openapi",        risk: RiskClass::HighActive,    description: "Scan an OpenAPI spec and its endpoints for vulnerabilities." },
-    SubprocessTool { endpoint: "oauth.analyze",    binary: "mg-oauth",          risk: RiskClass::HighActive,    description: "Analyze OAuth flows for misconfigurations and attacks." },
-    SubprocessTool { endpoint: "session.audit",    binary: "mg-session-audit",  risk: RiskClass::HighActive,    description: "Audit session management for fixation and weak tokens." },
-    SubprocessTool { endpoint: "smb.scan",         binary: "mg-smb",            risk: RiskClass::HighActive,    description: "Scan SMB shares for access and misconfigurations." },
-    SubprocessTool { endpoint: "smtp.enum",        binary: "mg-smtp",           risk: RiskClass::HighActive,    description: "Enumerate SMTP users and relay configuration." },
-    SubprocessTool { endpoint: "snmp.brute",       binary: "mg-snmp",           risk: RiskClass::HighActive,    description: "Brute-force SNMP community strings." },
-    SubprocessTool { endpoint: "cors.scan",        binary: "mg-cors-exploit",   risk: RiskClass::HighActive,    description: "Exploit CORS misconfigurations." },
-    SubprocessTool { endpoint: "jwt.analyze",      binary: "mg-jwt",            risk: RiskClass::HighActive,    description: "Analyze JWT tokens for weak algorithms and key confusion." },
-    SubprocessTool { endpoint: "nuclei.run",       binary: "mg-nuclei-bridge",  risk: RiskClass::HighActive,    description: "Run Nuclei templates against a scoped target." },
+    SubprocessTool {
+        endpoint: "xss.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for reflected and stored XSS vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "sqli.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for SQL injection vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "ssrf.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for server-side request forgery vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "ssti.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for server-side template injection vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "xxe.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for XML external entity injection vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "traversal.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for path-traversal vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "redirect.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for open-redirect vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "csrf.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for CSRF vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "smuggle.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for HTTP request-smuggling vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "cmdinject.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for OS command-injection vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "cache.poison",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Probe for web-cache poisoning vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "proto.pollute",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Probe for prototype-pollution vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "deser.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Scan for insecure-deserialization vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "brute.run",
+        binary: "mg-brute",
+        risk: RiskClass::HighActive,
+        description: "Run credential brute-force against a scoped endpoint.",
+    },
+    SubprocessTool {
+        endpoint: "authz.scan",
+        binary: "mg-authz",
+        risk: RiskClass::HighActive,
+        description: "Scan for broken access-control and IDOR vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "aws.chain",
+        binary: "mg-aws",
+        risk: RiskClass::HighActive,
+        description: "Run AWS privilege-escalation chain checks.",
+    },
+    SubprocessTool {
+        endpoint: "gcp.chain",
+        binary: "mg-gcp",
+        risk: RiskClass::HighActive,
+        description: "Run GCP privilege-escalation chain checks.",
+    },
+    SubprocessTool {
+        endpoint: "azure.chain",
+        binary: "mg-azure",
+        risk: RiskClass::HighActive,
+        description: "Run Azure privilege-escalation chain checks.",
+    },
+    SubprocessTool {
+        endpoint: "k8s.scan",
+        binary: "mg-k8s",
+        risk: RiskClass::HighActive,
+        description: "Scan Kubernetes cluster for misconfigurations.",
+    },
+    SubprocessTool {
+        endpoint: "docker.scan",
+        binary: "mg-docker",
+        risk: RiskClass::HighActive,
+        description: "Scan Docker daemon and images for misconfigurations.",
+    },
+    SubprocessTool {
+        endpoint: "serverless.chain",
+        binary: "mg-serverless",
+        risk: RiskClass::HighActive,
+        description: "Probe serverless functions for privilege-escalation chains.",
+    },
+    SubprocessTool {
+        endpoint: "secret.validate",
+        binary: "mg-secret-validate",
+        risk: RiskClass::HighActive,
+        description: "Validate discovered secrets against live APIs.",
+    },
+    SubprocessTool {
+        endpoint: "openapi.scan",
+        binary: "mg-openapi",
+        risk: RiskClass::HighActive,
+        description: "Scan an OpenAPI spec and its endpoints for vulnerabilities.",
+    },
+    SubprocessTool {
+        endpoint: "oauth.analyze",
+        binary: "mg-oauth",
+        risk: RiskClass::HighActive,
+        description: "Analyze OAuth flows for misconfigurations and attacks.",
+    },
+    SubprocessTool {
+        endpoint: "session.audit",
+        binary: "mg-session-audit",
+        risk: RiskClass::HighActive,
+        description: "Audit session management for fixation and weak tokens.",
+    },
+    SubprocessTool {
+        endpoint: "smb.scan",
+        binary: "mg-smb",
+        risk: RiskClass::HighActive,
+        description: "Scan SMB shares for access and misconfigurations.",
+    },
+    SubprocessTool {
+        endpoint: "smtp.enum",
+        binary: "mg-smtp",
+        risk: RiskClass::HighActive,
+        description: "Enumerate SMTP users and relay configuration.",
+    },
+    SubprocessTool {
+        endpoint: "snmp.brute",
+        binary: "mg-snmp",
+        risk: RiskClass::HighActive,
+        description: "Brute-force SNMP community strings.",
+    },
+    SubprocessTool {
+        endpoint: "cors.scan",
+        binary: "mg-webscan",
+        risk: RiskClass::HighActive,
+        description: "Exploit CORS misconfigurations.",
+    },
+    SubprocessTool {
+        endpoint: "jwt.analyze",
+        binary: "mg-jwt",
+        risk: RiskClass::HighActive,
+        description: "Analyze JWT tokens for weak algorithms and key confusion.",
+    },
     // ---- OOB and notification
-    SubprocessTool { endpoint: "oob.start",        binary: "mg-oob",            risk: RiskClass::HighActive,    description: "Start an OOB callback listener for SSRF and injection detection." },
-    SubprocessTool { endpoint: "takeover.scan",    binary: "mg-takeover",       risk: RiskClass::HighActive,    description: "Scan for subdomain-takeover opportunities." },
-    SubprocessTool { endpoint: "notify.start",     binary: "mg-notify",         risk: RiskClass::HighActive,    description: "Start a notification listener for async tool callbacks." },
+    SubprocessTool {
+        endpoint: "oob.start",
+        binary: "mg-oob",
+        risk: RiskClass::HighActive,
+        description: "Start an OOB callback listener for SSRF and injection detection.",
+    },
+    SubprocessTool {
+        endpoint: "takeover.scan",
+        binary: "mg-takeover",
+        risk: RiskClass::HighActive,
+        description: "Scan for subdomain-takeover opportunities.",
+    },
+    SubprocessTool {
+        endpoint: "notify.start",
+        binary: "mg-notify",
+        risk: RiskClass::HighActive,
+        description: "Start a notification listener for async tool callbacks.",
+    },
     // ---- Destructive / post-exploitation
-    SubprocessTool { endpoint: "privesc.linux",    binary: "mg-privesc-linux",  risk: RiskClass::Destructive,   description: "Run Linux privilege-escalation checks and automation." },
-    SubprocessTool { endpoint: "privesc.windows",  binary: "mg-privesc-windows",risk: RiskClass::Destructive,   description: "Run Windows privilege-escalation checks and automation." },
-    SubprocessTool { endpoint: "loot.run",         binary: "mg-loot",           risk: RiskClass::Destructive,   description: "Collect and export post-exploitation loot." },
+    SubprocessTool {
+        endpoint: "privesc.linux",
+        binary: "mg-privesc-linux",
+        risk: RiskClass::Destructive,
+        description: "Run Linux privilege-escalation checks and automation.",
+    },
+    SubprocessTool {
+        endpoint: "privesc.windows",
+        binary: "mg-privesc-windows",
+        risk: RiskClass::Destructive,
+        description: "Run Windows privilege-escalation checks and automation.",
+    },
+    SubprocessTool {
+        endpoint: "loot.run",
+        binary: "mg-loot",
+        risk: RiskClass::Destructive,
+        description: "Collect and export post-exploitation loot.",
+    },
 ];
 
 // Look up the subprocess tool entry for an endpoint name
@@ -1865,6 +2421,37 @@ fn tool_binary_for_endpoint(endpoint: &str) -> &'static str {
     subprocess_tool_for(endpoint)
         .unwrap_or_else(|| panic!("unmapped tool endpoint: {endpoint}"))
         .binary
+}
+
+// Return the subcommand to invoke under a merged binary, if any.
+// Used by run_tool_binary to call `mg-artifact-audit <sub> ...` instead of
+// the legacy single-purpose binaries.
+fn tool_subcommand_for_endpoint(endpoint: &str) -> Option<&'static str> {
+    match endpoint {
+        "js.analyze" => Some("js"),
+        "sourcemap.fetch" => Some("sourcemap"),
+        "apikey.extract" => Some("apikey"),
+        "metadata.extract" => Some("metadata"),
+        "apk.analyze" => Some("apk"),
+        "ipa.analyze" => Some("ipa"),
+        "artifact.audit" => Some("audit"),
+        // mg-webscan — merged active web-vuln scanners
+        "xss.scan" => Some("xss"),
+        "sqli.scan" => Some("sqli"),
+        "ssrf.scan" => Some("ssrf"),
+        "ssti.scan" => Some("ssti"),
+        "xxe.scan" => Some("xxe"),
+        "traversal.scan" => Some("traversal"),
+        "redirect.scan" => Some("redirect"),
+        "csrf.scan" => Some("csrf"),
+        "cmdinject.scan" => Some("cmdinject"),
+        "cors.scan" => Some("cors"),
+        "cache.poison" => Some("cache-poison"),
+        "proto.pollute" => Some("proto-pollute"),
+        "deser.scan" => Some("deser"),
+        "smuggle.scan" => Some("smuggle"),
+        _ => None,
+    }
 }
 
 // Dispatch an invocation to a tool binary subprocess
@@ -2013,8 +2600,7 @@ fn optional_usize(args: &Value, key: &str, default: usize) -> Result<usize, Harn
 // Extract an optional u32 argument
 fn optional_u32(args: &Value, key: &str, default: u32) -> Result<u32, HarnessError> {
     let value = optional_u64(args, key, default as u64)?;
-    u32::try_from(value)
-        .map_err(|_| HarnessError::InvalidArgs(format!("arg `{key}` is too large")))
+    u32::try_from(value).map_err(|_| HarnessError::InvalidArgs(format!("arg `{key}` is too large")))
 }
 
 // Extract an optional u16 argument
@@ -2934,7 +3520,11 @@ mod tests {
         let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
         let raw_dir = eng.re_dir().join("libfoo").join("raw");
         fs::create_dir_all(&raw_dir).unwrap();
-        fs::write(raw_dir.join("parse_header.c"), "int parse_header(buf *p) { return p->len; }").unwrap();
+        fs::write(
+            raw_dir.join("parse_header.c"),
+            "int parse_header(buf *p) { return p->len; }",
+        )
+        .unwrap();
 
         let mut analyze = invocation("re.analyze");
         analyze.args = json!({
@@ -2954,7 +3544,12 @@ mod tests {
         let read_result = dispatch(&cfg, read).await;
         assert_eq!(read_result.status, EndpointStatus::Ok);
         let read_data = read_result.data.unwrap();
-        assert!(read_data["markdown"].as_str().unwrap().contains("RE Analysis"));
+        assert!(
+            read_data["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("RE Analysis")
+        );
         assert_eq!(read_data["json"]["function"], "parse_header");
         assert_eq!(read_data["markdown_truncated"], false);
     }
@@ -3018,7 +3613,12 @@ mod tests {
         let data = result.data.unwrap();
         let exploit_dir = data["exploit_dir"].as_str().unwrap();
         let runbook = data["runbook_path"].as_str().unwrap();
-        assert!(Path::new(exploit_dir).join("src").join("scanner.rs").exists());
+        assert!(
+            Path::new(exploit_dir)
+                .join("src")
+                .join("scanner.rs")
+                .exists()
+        );
         assert!(Path::new(runbook).exists());
         assert_eq!(data["crate_name"], "exploit_cve_2026_9999");
     }
@@ -3041,21 +3641,33 @@ mod tests {
 
     #[test]
     fn subprocess_tools_table_is_consistent() {
-        assert_eq!(SUBPROCESS_TOOLS.len(), 67);
+        assert_eq!(SUBPROCESS_TOOLS.len(), 65);
 
         // Endpoint names unique
         let mut names: Vec<&str> = SUBPROCESS_TOOLS.iter().map(|t| t.endpoint).collect();
         names.sort_unstable();
         let n = names.len();
         names.dedup();
-        assert_eq!(names.len(), n, "duplicate endpoint name in SUBPROCESS_TOOLS");
+        assert_eq!(
+            names.len(),
+            n,
+            "duplicate endpoint name in SUBPROCESS_TOOLS"
+        );
 
-        // Binary names unique
-        let mut bins: Vec<&str> = SUBPROCESS_TOOLS.iter().map(|t| t.binary).collect();
-        bins.sort_unstable();
-        let b = bins.len();
-        bins.dedup();
-        assert_eq!(bins.len(), b, "duplicate binary name in SUBPROCESS_TOOLS");
+        // (binary, subcommand) pairs unique — merged binaries like mg-artifact-audit
+        // host multiple endpoints distinguished by subcommand
+        let mut pairs: Vec<(&str, Option<&str>)> = SUBPROCESS_TOOLS
+            .iter()
+            .map(|t| (t.binary, tool_subcommand_for_endpoint(t.endpoint)))
+            .collect();
+        pairs.sort();
+        let p = pairs.len();
+        pairs.dedup();
+        assert_eq!(
+            pairs.len(),
+            p,
+            "duplicate (binary, subcommand) pair in SUBPROCESS_TOOLS"
+        );
 
         // Every entry surfaces in the registry and round-trips through the binary lookup
         let reg_names: Vec<&str> = registry().iter().map(|s| s.name).collect();
@@ -3067,6 +3679,77 @@ mod tests {
             );
             assert_eq!(tool_binary_for_endpoint(tool.endpoint), tool.binary);
             assert!(subprocess_tool_for(tool.endpoint).is_some());
+        }
+    }
+
+    #[test]
+    fn prune_candidates_are_not_default_exposure() {
+        let specs = registry();
+        for endpoint in [
+            "brute.run",
+            "snmp.brute",
+            "dns.rebind",
+            "exploit.scaffold",
+            "privesc.linux",
+            "privesc.windows",
+            "loot.run",
+        ] {
+            let spec = specs.iter().find(|s| s.name == endpoint).unwrap();
+            assert_ne!(
+                spec.exposure,
+                ToolExposure::DefaultProfile,
+                "{endpoint} should not be default-visible"
+            );
+            assert!(
+                spec.repurpose.is_some(),
+                "{endpoint} needs a repurpose note before pruning"
+            );
+        }
+    }
+
+    #[test]
+    fn collapsed_pack_metadata_groups_related_tools() {
+        let specs = registry();
+        let ssrf = specs.iter().find(|s| s.name == "ssrf.scan").unwrap();
+        let brute = specs.iter().find(|s| s.name == "brute.run").unwrap();
+        let loot = specs.iter().find(|s| s.name == "loot.run").unwrap();
+
+        assert_eq!(ssrf.pack, ToolPack::VulnScan);
+        assert_eq!(brute.pack, ToolPack::IdentityAudit);
+        assert_eq!(loot.pack, ToolPack::RedteamLab);
+    }
+
+    #[test]
+    fn artifact_audit_endpoint_is_wired() {
+        let tool = subprocess_tool_for("artifact.audit").expect("artifact.audit registered");
+        assert_eq!(tool.binary, "mg-artifact-audit");
+        assert_eq!(tool_subcommand_for_endpoint("artifact.audit"), Some("audit"));
+
+        let specs = registry();
+        let spec = specs
+            .iter()
+            .find(|s| s.name == "artifact.audit")
+            .expect("artifact.audit in registry");
+        assert_eq!(spec.pack, ToolPack::ArtifactAudit);
+        assert_eq!(spec.exposure, ToolExposure::DefaultProfile);
+        assert_eq!(spec.risk, RiskClass::PassiveRemote);
+
+        // The six legacy per-type endpoints also share the merged binary
+        for (endpoint, expected_sub) in &[
+            ("js.analyze", "js"),
+            ("sourcemap.fetch", "sourcemap"),
+            ("apikey.extract", "apikey"),
+            ("metadata.extract", "metadata"),
+            ("apk.analyze", "apk"),
+            ("ipa.analyze", "ipa"),
+        ] {
+            let tool = subprocess_tool_for(endpoint).unwrap();
+            assert_eq!(tool.binary, "mg-artifact-audit", "{endpoint}");
+            assert_eq!(
+                tool_subcommand_for_endpoint(endpoint),
+                Some(*expected_sub),
+                "{endpoint}"
+            );
         }
     }
 }

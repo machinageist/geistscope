@@ -77,10 +77,7 @@ impl ChatBackend for OllamaChat {
                         "tool_calls": tool_calls,
                     }));
                 }
-                (
-                    ChatRole::User,
-                    ChatContent::ToolResult { content, .. },
-                ) => {
+                (ChatRole::User, ChatContent::ToolResult { content, .. }) => {
                     // Ollama uses a "tool" role and does not key by call id
                     api_messages.push(json!({
                         "role": "tool",
@@ -140,7 +137,11 @@ fn parse_ollama_response(value: &Value) -> Result<ChatStep, ChatError> {
         let mut calls = Vec::new();
         for (i, tc) in tcs.iter().enumerate() {
             let func = tc.get("function").cloned().unwrap_or(Value::Null);
-            let name = func.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let name = func
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             // Ollama returns arguments as an object directly (not stringified)
             let args = func.get("arguments").cloned().unwrap_or(Value::Null);
             // Ollama doesn't issue ids — synthesize one for round-tripping

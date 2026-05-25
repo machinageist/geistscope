@@ -88,7 +88,9 @@ impl ChatBackend for OpenAiChat {
                 }
                 (
                     ChatRole::User,
-                    ChatContent::ToolResult { call_id, content, .. },
+                    ChatContent::ToolResult {
+                        call_id, content, ..
+                    },
                 ) => {
                     api_messages.push(json!({
                         "role": "tool",
@@ -154,9 +156,17 @@ fn parse_openai_response(value: &Value) -> Result<ChatStep, ChatError> {
     {
         let mut calls = Vec::new();
         for tc in tcs {
-            let id = tc.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let id = tc
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             let func = tc.get("function").cloned().unwrap_or(Value::Null);
-            let name = func.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let name = func
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             // arguments comes back as a JSON-encoded string per OpenAI spec
             let args = match func.get("arguments").and_then(Value::as_str) {
                 Some(s) => serde_json::from_str(s).unwrap_or(Value::Null),

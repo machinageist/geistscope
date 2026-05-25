@@ -43,16 +43,28 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(text: impl Into<String>) -> Self {
-        Self { role: ChatRole::System, content: ChatContent::Text(text.into()) }
+        Self {
+            role: ChatRole::System,
+            content: ChatContent::Text(text.into()),
+        }
     }
     pub fn user(text: impl Into<String>) -> Self {
-        Self { role: ChatRole::User, content: ChatContent::Text(text.into()) }
+        Self {
+            role: ChatRole::User,
+            content: ChatContent::Text(text.into()),
+        }
     }
     pub fn assistant_text(text: impl Into<String>) -> Self {
-        Self { role: ChatRole::Assistant, content: ChatContent::Text(text.into()) }
+        Self {
+            role: ChatRole::Assistant,
+            content: ChatContent::Text(text.into()),
+        }
     }
     pub fn assistant_tool_calls(calls: Vec<ToolCall>) -> Self {
-        Self { role: ChatRole::Assistant, content: ChatContent::ToolCalls(calls) }
+        Self {
+            role: ChatRole::Assistant,
+            content: ChatContent::ToolCalls(calls),
+        }
     }
     pub fn tool_result(call: &ToolCall, content: String, is_error: bool) -> Self {
         Self {
