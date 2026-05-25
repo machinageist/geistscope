@@ -104,13 +104,21 @@ docker build -t geistscope .
 ### Chat REPL
 
 `mg-harness chat <engagement>` opens an interactive coding-agent loop pinned to
-one engagement. The model gets tool-use access to every implemented harness
-endpoint — recon, scans, graph queries, report generation — and findings emitted
-by the tools land in the engagement workspace automatically.
+one engagement. The model gets tool-use access to a profile-filtered harness
+catalog — default, advanced, or lab — so common recon, request-corpus, graph,
+and reporting work stays prominent while noisy or hazardous standalone tools
+are hidden until the operator asks for them. Findings emitted by tools land in
+the engagement workspace automatically.
 
 ```bash
-# Local Ollama, no API key required
+# Default profile: common engagement, request corpus, graph, recon, report, and safe audit helpers
 mg-harness chat my-engagement --backend ollama --model qwen2.5-coder
+
+# Advanced profile: adds OOB/aifuzz/high-active helpers; still hides retired/lab-only tools
+mg-harness chat my-engagement --backend ollama --model qwen2.5-coder --tool-profile advanced
+
+# Lab profile: exposes lab-only scaffolding; destructive tools still need --unsafe-mode
+mg-harness chat my-engagement --backend ollama --model qwen2.5-coder --tool-profile lab
 
 # OpenAI-compatible server (LM Studio, vLLM, OpenRouter, etc.)
 mg-harness chat my-engagement --backend openai --base-url http://localhost:1234/v1 \
@@ -120,8 +128,11 @@ mg-harness chat my-engagement --backend openai --base-url http://localhost:1234/
 mg-harness chat my-engagement --backend anthropic --model claude-opus-4-7
 ```
 
-Active-class endpoints prompt before running. Destructive endpoints (privesc,
-loot) are hidden from the catalog unless `--unsafe-mode` is passed.
+Active-class endpoints prompt before running. The default tool profile hides
+retired, lab-only, service-internal, and destructive affordances. Use
+`--tool-profile advanced` for explicit high-active/OOB work, use
+`--tool-profile lab` for lab-only scaffolding, and combine lab with
+`--unsafe-mode` only when destructive endpoints are intentionally needed.
 Slash commands: `/help`, `/tools`, `/reset`, `/quit`.
 
 Credential profiles are stored as environment-variable references, not raw
@@ -191,7 +202,7 @@ docker compose -f tests/target/docker-compose.yml down -v
 | `mg-authz` | IDOR/BOLA — multi-role request replay, ownership-scoped URL detection |
 | `mg-brute` | Login brute force — rate-limit and lockout detection |
 | `mg-session-audit` | Session fixation, entropy, cookie flags, invalidation testing |
-| `mg-apikey` | API key extraction — 11-pattern regex scan across crawl corpus |
+| `mg-artifact-audit apikey` | API key extraction — 11-pattern regex scan across crawl corpus |
 
 ### Recon & OSINT
 
@@ -208,7 +219,7 @@ docker compose -f tests/target/docker-compose.yml down -v
 | `mg-github` | GitHub org dork search for exposed secrets and config files |
 | `mg-cloud-enum` | S3/GCS/Azure bucket enumeration — 36 candidate names |
 | `mg-social` | GitHub org member enumeration, email pattern derivation |
-| `mg-metadata` | Document metadata extraction from PDF/DOCX/XLSX/JPEG |
+| `mg-artifact-audit metadata` | Document metadata extraction from PDF/DOCX/XLSX/JPEG |
 | `mg-google-dork` | 14 targeted Google dork queries with optional CSE execution |
 | `mg-breach` | HIBP domain breach lookup with password-data classification |
 
@@ -223,12 +234,19 @@ docker compose -f tests/target/docker-compose.yml down -v
 | `mg-cors-exploit` | Active CORS — reflection, null-origin, subdomain bypass |
 | `mg-csp` | CSP header analyzer — unsafe-inline, wildcards, JSONP bypass domains |
 
-### JavaScript & Client-Side
+### Artifact Analysis (merged: `mg-artifact-audit`)
 
-| Binary | What it does |
+The `mg-artifact-audit` binary merges six passive artifact analyzers into one subcommand-routed tool. Each subcommand stays on its original harness endpoint (e.g. `js.analyze`, `apk.analyze`), and `artifact.audit` runs multiple types per call.
+
+| Subcommand | What it does |
 |---|---|
-| `mg-js-analyze` | Static JS analysis — endpoints, secrets, JWT tokens, source maps |
-| `mg-sourcemap` | Source map downloader — reconstructs original source, scans for secrets |
+| `mg-artifact-audit js` | Static JS analysis — endpoints, secrets, JWT tokens, source maps |
+| `mg-artifact-audit sourcemap` | Source map downloader — reconstructs original source, scans for secrets |
+| `mg-artifact-audit apikey` | API key extraction — 11-pattern regex scan across crawl corpus |
+| `mg-artifact-audit metadata` | Document metadata extraction from PDF/DOCX/XLSX/JPEG |
+| `mg-artifact-audit apk` | Android APK static analysis — manifest flags, DEX secrets, network config |
+| `mg-artifact-audit ipa` | iOS IPA static analysis — ATS config, entitlements, binary string extraction |
+| `mg-artifact-audit audit` | Run multiple analyzers in one pass (`--types js,apikey,...`) |
 
 ### Infrastructure & Protocol Auditing
 
@@ -260,13 +278,6 @@ docker compose -f tests/target/docker-compose.yml down -v
 | `mg-privesc-linux` | Linux privesc enumeration — SUID, sudo, caps, cron, NFS |
 | `mg-privesc-windows` | Windows privesc enumeration — token privs, unquoted paths, registry |
 | `mg-loot` | Post-access credential harvesting — SSH keys, AWS, git, Docker, kubectl |
-
-### Mobile
-
-| Binary | What it does |
-|---|---|
-| `mg-apk` | Android APK static analysis — manifest flags, DEX secrets, network config |
-| `mg-ipa` | iOS IPA static analysis — ATS config, entitlements, binary string extraction |
 
 ### OOB & Interoperability
 

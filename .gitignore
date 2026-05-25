@@ -6,3 +6,5 @@ target/
 *.key
 engagements/*
 crates/engagements/*
+# Local-only research material — never published (repo or release tarballs)
+research/
