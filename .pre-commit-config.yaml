@@ -1,0 +1,28 @@
+# Pre-commit hooks for geistscope
+# Mirrors the fast CI checks (fmt, clippy); test/build stay in CI.
+# The Rust workspace lives under crates/, so cargo runs against that manifest.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --manifest-path crates/Cargo.toml --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --manifest-path crates/Cargo.toml --all-targets -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
