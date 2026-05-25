@@ -17,8 +17,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::Resolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -139,7 +140,14 @@ fn is_private_ip(addr: IpAddr) -> bool {
 async fn resolve_ttl(domain: &str, timeout_secs: u64) -> u64 {
     let mut opts = ResolverOpts::default();
     opts.timeout = std::time::Duration::from_secs(timeout_secs);
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), opts);
+    let Ok(resolver) = Resolver::builder_with_config(
+        ResolverConfig::default(),
+        TokioRuntimeProvider::default(),
+    )
+    .with_options(opts)
+    .build() else {
+        return FALLBACK_TTL_SECS;
+    };
 
     match resolver.lookup_ip(domain).await {
         Ok(lookup) => {

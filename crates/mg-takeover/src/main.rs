@@ -19,8 +19,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::{Resolver, TokioResolver};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -116,7 +117,7 @@ struct TakeoverOutput {
 
 // Resolve CNAME chain for a hostname; return (chain, final_target)
 async fn resolve_cname_chain(
-    resolver: &TokioAsyncResolver,
+    resolver: &TokioResolver,
     hostname: &str,
 ) -> (Vec<String>, String) {
     let mut chain: Vec<String> = Vec::new();
@@ -139,9 +140,9 @@ async fn resolve_cname_chain(
         {
             Ok(lookup) => {
                 let mut found_cname = false;
-                for record in lookup.iter() {
-                    if let Some(cname) = record.as_cname() {
-                        let target = cname.to_string();
+                for record in lookup.answers() {
+                    if let hickory_resolver::proto::rr::RData::CNAME(cname) = &record.data {
+                        let target = cname.0.to_string();
                         let target = target.trim_end_matches('.').to_string();
                         chain.push(current.clone());
                         current = target;
@@ -162,7 +163,7 @@ async fn resolve_cname_chain(
 }
 
 // Check whether a CNAME target is NXDOMAIN (no A/AAAA records)
-async fn is_nxdomain(resolver: &TokioAsyncResolver, target: &str) -> bool {
+async fn is_nxdomain(resolver: &TokioResolver, target: &str) -> bool {
     resolver.lookup_ip(target).await.is_err()
 }
 
@@ -188,7 +189,7 @@ async fn fetch_body(client: &reqwest::Client, hostname: &str) -> String {
 // Probe one subdomain: resolve CNAME chain, match fingerprints, check body
 async fn probe_subdomain(
     subdomain: String,
-    resolver: Arc<TokioAsyncResolver>,
+    resolver: Arc<TokioResolver>,
     client: Arc<reqwest::Client>,
 ) -> Option<TakeoverResult> {
     let (chain, final_cname) = resolve_cname_chain(&resolver, &subdomain).await;
@@ -281,7 +282,12 @@ async fn main() -> Result<()> {
 
     // build shared DNS resolver with system defaults
     let resolver = Arc::new(
-        TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default()),
+        Resolver::builder_with_config(
+            ResolverConfig::default(),
+            TokioRuntimeProvider::default(),
+        )
+        .with_options(ResolverOpts::default())
+        .build()?,
     );
 
     // build shared HTTP client — short timeout, follow no redirects for body check

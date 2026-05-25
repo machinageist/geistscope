@@ -20,9 +20,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-use hickory_resolver::proto::rr::RecordType;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::{Resolver, TokioResolver};
+use hickory_resolver::proto::rr::{Name, RData, RecordType};
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -155,33 +156,40 @@ fn ts_for_filename(ts: &str) -> String {
         .collect()
 }
 
-// Build a TokioAsyncResolver using either the system config or a custom nameserver IP
-fn build_resolver(nameserver_ip: Option<&str>, timeout_secs: u64) -> Result<TokioAsyncResolver> {
+// Build a TokioResolver using either the system config or a custom nameserver IP
+fn build_resolver(nameserver_ip: Option<&str>, timeout_secs: u64) -> Result<TokioResolver> {
     let mut opts = ResolverOpts::default();
     opts.timeout = Duration::from_secs(timeout_secs);
 
     let config = match nameserver_ip {
         Some(ip) => {
             let addr: std::net::IpAddr = ip.parse().with_context(|| format!("parse nameserver IP: {ip}"))?;
-            let socket_addr = std::net::SocketAddr::new(addr, AXFR_PORT);
-            use hickory_resolver::config::{NameServerConfig, Protocol, ResolverConfig as RC};
-            let ns = NameServerConfig::new(socket_addr, Protocol::Udp);
-            let mut rc = RC::new();
-            rc.add_name_server(ns);
-            rc
+            use hickory_resolver::config::{ConnectionConfig, NameServerConfig};
+            // Single UDP connection on the standard DNS port to the chosen server
+            let mut conn = ConnectionConfig::udp();
+            conn.port = AXFR_PORT;
+            let ns = NameServerConfig::new(addr, true, vec![conn]);
+            ResolverConfig::from_parts(None, vec![], vec![ns])
         }
         None => ResolverConfig::default(),
     };
 
-    Ok(TokioAsyncResolver::tokio(config, opts))
+    Resolver::builder_with_config(config, TokioRuntimeProvider::default())
+        .with_options(opts)
+        .build()
+        .context("build DNS resolver")
 }
 
 // Resolve NS records for a domain; return list of nameserver hostnames
-async fn resolve_ns(resolver: &TokioAsyncResolver, domain: &str) -> Vec<String> {
+async fn resolve_ns(resolver: &TokioResolver, domain: &str) -> Vec<String> {
     match resolver.ns_lookup(domain).await {
         Ok(lookup) => lookup
+            .answers()
             .iter()
-            .map(|ns| ns.0.to_string())
+            .filter_map(|r| match &r.data {
+                RData::NS(ns) => Some(ns.0.to_string()),
+                _ => None,
+            })
             .collect(),
         Err(_) => Vec::new(),
     }
@@ -387,7 +395,7 @@ fn random_probe_label() -> String {
 }
 
 // Check for wildcard DNS by resolving a guaranteed-nonexistent label
-async fn check_wildcard(resolver: &TokioAsyncResolver, domain: &str) -> WildcardResult {
+async fn check_wildcard(resolver: &TokioResolver, domain: &str) -> WildcardResult {
     let label = random_probe_label();
     let probe = format!("{label}.{domain}");
     match resolver.lookup_ip(probe.as_str()).await {
@@ -408,26 +416,30 @@ async fn check_wildcard(resolver: &TokioAsyncResolver, domain: &str) -> Wildcard
 }
 
 // Check for DNSKEY record presence (indicates DNSSEC is deployed)
-async fn check_dnssec(resolver: &TokioAsyncResolver, domain: &str) -> DnssecResult {
+async fn check_dnssec(resolver: &TokioResolver, domain: &str) -> DnssecResult {
     let fqdn = format!("{domain}.");
     let found = resolver
         .lookup(fqdn.as_str(), RecordType::DNSKEY)
         .await
-        .map(|l| !l.records().is_empty())
+        .map(|l| !l.answers().is_empty())
         .unwrap_or(false);
     DnssecResult { dnskey_found: found }
 }
 
 // Query SRV records for all known service names under the domain
-async fn probe_srv_records(resolver: &TokioAsyncResolver, domain: &str) -> Vec<SrvResult> {
+async fn probe_srv_records(resolver: &TokioResolver, domain: &str) -> Vec<SrvResult> {
     let mut results = Vec::new();
     for svc in SRV_NAMES {
         let qname = format!("{svc}.{domain}");
         let (resolved, targets) = match resolver.srv_lookup(qname.as_str()).await {
             Ok(lookup) => {
                 let targets: Vec<String> = lookup
+                    .answers()
                     .iter()
-                    .map(|srv| format!("{}:{}", srv.target(), srv.port()))
+                    .filter_map(|r| match &r.data {
+                        RData::SRV(srv) => Some(format!("{}:{}", srv.target, srv.port)),
+                        _ => None,
+                    })
                     .collect();
                 (!targets.is_empty(), targets)
             }
@@ -452,7 +464,7 @@ fn parse_cidr(cidr: &str) -> Result<(Ipv4Addr, u8)> {
 }
 
 // Sweep PTR records for every IP in a /24 CIDR
-async fn sweep_ptr(resolver: &TokioAsyncResolver, cidr: &str) -> Result<Vec<PtrResult>> {
+async fn sweep_ptr(resolver: &TokioResolver, cidr: &str) -> Result<Vec<PtrResult>> {
     let (base, prefix) = parse_cidr(cidr)?;
 
     anyhow::ensure!(
@@ -466,8 +478,11 @@ async fn sweep_ptr(resolver: &TokioAsyncResolver, cidr: &str) -> Result<Vec<PtrR
 
     for host_byte in 0u32..=255 {
         let ip = Ipv4Addr::from(base_octets | host_byte);
-        let hostname = match resolver.reverse_lookup(ip.into()).await {
-            Ok(names) => names.iter().next().map(|n| n.to_string()),
+        let hostname = match resolver.reverse_lookup(Name::from(ip)).await {
+            Ok(lookup) => lookup.answers().iter().find_map(|r| match &r.data {
+                RData::PTR(ptr) => Some(ptr.0.to_string()),
+                _ => None,
+            }),
             Err(_) => None,
         };
         if hostname.is_some() {

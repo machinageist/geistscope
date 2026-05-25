@@ -16,8 +16,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::Resolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -149,7 +150,13 @@ struct ShodanResults {
 
 // Resolve a domain name to its first IPv4/IPv6 address
 async fn resolve_domain(domain: &str) -> Result<IpAddr> {
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+    let resolver = Resolver::builder_with_config(
+        ResolverConfig::default(),
+        TokioRuntimeProvider::default(),
+    )
+    .with_options(ResolverOpts::default())
+    .build()
+    .context("build DNS resolver")?;
     let response = resolver
         .lookup_ip(domain)
         .await

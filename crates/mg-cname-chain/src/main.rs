@@ -19,9 +19,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::{Resolver, TokioResolver};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -168,17 +168,20 @@ fn load_subdomains(recon_dir: &Path) -> Result<Vec<String>> {
     )
 }
 
-// Build a TokioAsyncResolver with the given timeout
-fn build_resolver(timeout_secs: u64) -> TokioAsyncResolver {
+// Build a TokioResolver with the given timeout
+fn build_resolver(timeout_secs: u64) -> TokioResolver {
     let mut opts = ResolverOpts::default();
     opts.timeout = Duration::from_secs(timeout_secs);
-    TokioAsyncResolver::tokio(ResolverConfig::default(), opts)
+    Resolver::builder_with_config(ResolverConfig::default(), TokioRuntimeProvider::default())
+        .with_options(opts)
+        .build()
+        .expect("build DNS resolver with default config")
 }
 
 // Follow the CNAME chain for a single subdomain up to max_hops
 // Returns (chain, final_resolution_label, anomalies, external_domains)
 async fn resolve_chain(
-    resolver: &TokioAsyncResolver,
+    resolver: &TokioResolver,
     start: &str,
     max_hops: usize,
     origin_apex: &str,
@@ -200,7 +203,7 @@ async fn resolve_chain(
                 final_resolution = first_ip;
                 break;
             }
-            Err(ref e) if matches!(e.kind(), ResolveErrorKind::NoRecordsFound { .. }) => {
+            Err(ref e) if e.is_no_records_found() => {
                 // could be NXDOMAIN or NOERROR/NXDOMAIN — try CNAME lookup
                 match resolver
                     .lookup(current.as_str(), hickory_resolver::proto::rr::RecordType::CNAME)
@@ -208,12 +211,10 @@ async fn resolve_chain(
                 {
                     Ok(cname_lookup) => {
                         let targets: Vec<String> = cname_lookup
-                            .records()
+                            .answers()
                             .iter()
                             .filter_map(|r| {
-                                if let Some(hickory_resolver::proto::rr::RData::CNAME(c)) =
-                                    r.data()
-                                {
+                                if let hickory_resolver::proto::rr::RData::CNAME(c) = &r.data {
                                     Some(c.0.to_string())
                                 } else {
                                     None
