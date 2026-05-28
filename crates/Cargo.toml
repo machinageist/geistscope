@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "action-policy",
     "mg-scan",
     "subdomain-enum",
     "http-client",
