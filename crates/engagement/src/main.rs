@@ -259,16 +259,55 @@ fn cmd_show(root: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_check(root: &Path, name: &str, target: &str) -> Result<()> {
+fn cmd_check(root: &Path, name: &str, target: &str, json: bool) -> Result<()> {
     let e = Engagement::load_named(root, name)?;
     let s = e.scope()?;
-    if s.is_in_scope(target) {
+    let decision = s.explain(target);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&decision)?);
+    } else if matches!(decision.decision, engagement::ScopeVerdict::InScope) {
         println!("IN SCOPE   {target}");
-        Ok(())
     } else {
         println!("OUT OF SCOPE   {target}");
+    }
+
+    if matches!(decision.decision, engagement::ScopeVerdict::InScope) {
+        Ok(())
+    } else {
         std::process::exit(2);
     }
+}
+
+fn cmd_explain_scope(root: &Path, name: &str, target: &str, json: bool) -> Result<()> {
+    let e = Engagement::load_named(root, name)?;
+    let decision = e.scope()?.explain(target);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&decision)?);
+    } else {
+        println!("input: {}", decision.input);
+        println!(
+            "normalized_host: {}",
+            decision.normalized_host.as_deref().unwrap_or("-")
+        );
+        if let Some(url) = &decision.normalized_url {
+            println!("normalized_url: {url}");
+        }
+        println!("decision: {:?}", decision.decision);
+        println!("reason: {}", decision.reason);
+        if !decision.matched_allow.is_empty() {
+            println!("matched_allow:");
+            for rule in &decision.matched_allow {
+                println!("  + {}", rule.pattern);
+            }
+        }
+        if !decision.matched_deny.is_empty() {
+            println!("matched_deny:");
+            for rule in &decision.matched_deny {
+                println!("  - {}", rule.pattern);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn cmd_scope_modify(
@@ -446,7 +485,10 @@ fn main() -> Result<()> {
         } => cmd_init(root, name, target, platform, url, tags),
         cli::Command::List => cmd_list(root),
         cli::Command::Show { name } => cmd_show(root, &name),
-        cli::Command::Check { name, target } => cmd_check(root, &name, &target),
+        cli::Command::Check { name, target, json } => cmd_check(root, &name, &target, json),
+        cli::Command::ExplainScope { name, target, json } => {
+            cmd_explain_scope(root, &name, &target, json)
+        }
         cli::Command::ScopeAdd {
             name,
             pattern,

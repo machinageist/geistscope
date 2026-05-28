@@ -39,7 +39,21 @@ pub enum Command {
     /// Show engagement metadata + scope summary
     Show { name: String },
     /// Check whether a target is in scope for an engagement
-    Check { name: String, target: String },
+    Check {
+        name: String,
+        target: String,
+        /// Emit stable ScopeDecision JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain the scope decision for a target
+    ExplainScope {
+        name: String,
+        target: String,
+        /// Emit stable ScopeDecision JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Add a pattern to in-scope (or remove via --remove)
     ScopeAdd {
         name: String,
