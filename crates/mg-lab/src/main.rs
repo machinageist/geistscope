@@ -4,10 +4,11 @@
 // Notes: Stores lab metadata under the engagement root without secrets
 
 use anyhow::{Context, Result};
+use browser_lab::{BrowserEngine, BrowserProfile, ProxySettings, RedactedBrowserProfile};
 use clap::{Parser, Subcommand};
 use lab_model::{Identity, LabModel, Resource, Role, Tenant};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const LAB_DIR: &str = "lab";
@@ -15,6 +16,10 @@ const IDENTITIES_DIR: &str = "identities";
 const TENANTS_DIR: &str = "tenants";
 const ROLES_DIR: &str = "roles";
 const RESOURCES_DIR: &str = "resources";
+const BROWSER_PROFILES_DIR: &str = "browser-profiles";
+const DEFAULT_BROWSER_IMAGE: &str = "mcr.microsoft.com/playwright:latest";
+const DEFAULT_PROXY_HOST: &str = "127.0.0.1";
+const DEFAULT_PROXY_PORT: u16 = 8080;
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -57,6 +62,11 @@ enum Command {
     Resource {
         #[command(subcommand)]
         command: ResourceCommand,
+    },
+    /// Create or query isolated browser profiles
+    Browser {
+        #[command(subcommand)]
+        command: BrowserCommand,
     },
 }
 
@@ -131,11 +141,101 @@ enum ResourceCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum BrowserCommand {
+    /// Create an isolated browser profile metadata record
+    Create {
+        /// Engagement root directory
+        engagement: PathBuf,
+        /// Safe browser profile id
+        id: String,
+        /// Controlled identity id
+        #[arg(long)]
+        identity: String,
+        /// Controlled tenant id
+        #[arg(long)]
+        tenant: String,
+        /// Controlled role id
+        #[arg(long)]
+        role: String,
+        /// Container/browser engine: podman|docker|playwright-local
+        #[arg(long)]
+        engine: String,
+        /// Named session id for this browser profile
+        #[arg(long)]
+        session: Option<String>,
+        /// Browser image to launch later
+        #[arg(long, default_value = DEFAULT_BROWSER_IMAGE)]
+        image: String,
+        /// Emit stable JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build container run arguments for an isolated browser profile
+    Start {
+        /// Engagement root directory
+        engagement: PathBuf,
+        /// Browser profile id
+        id: String,
+        /// Print launch args without starting a container
+        #[arg(long)]
+        dry_run: bool,
+        /// Allow proxy hosts outside loopback
+        #[arg(long)]
+        allow_non_loopback_proxy: bool,
+        /// Emit stable JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List browser profiles as redacted metadata
+    List {
+        /// Engagement root directory
+        engagement: PathBuf,
+        /// Emit stable JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Validate profile account labels against lab records
+    Validate {
+        /// Engagement root directory
+        engagement: PathBuf,
+        /// Browser profile id
+        id: String,
+        /// Emit stable JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 #[derive(Debug, Serialize)]
 struct WriteOutput<T: Serialize> {
     kind: &'static str,
     path: String,
     record: T,
+}
+
+#[derive(Debug, Serialize)]
+struct BrowserStartOutput {
+    dry_run: bool,
+    launched: bool,
+    engine: BrowserEngine,
+    profile_id: String,
+    args: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BrowserValidateOutput {
+    valid: bool,
+    profile_id: String,
+    identity: Identity,
+    tenant: Tenant,
+    role: Role,
+}
+
+#[derive(Debug, Serialize)]
+struct BrowserListOutput {
+    kind: &'static str,
+    records: Vec<RedactedBrowserProfile>,
 }
 
 // ── Entrypoint ───────────────────────────────────────────────────────────────
@@ -188,6 +288,42 @@ where
                 resource_type,
                 json,
             } => create_resource(&engagement, &id, &tenant, &resource_type, json),
+        },
+        Command::Browser { command } => match command {
+            BrowserCommand::Create {
+                engagement,
+                id,
+                identity,
+                tenant,
+                role,
+                engine,
+                session,
+                image,
+                json,
+            } => create_browser_profile(
+                &engagement,
+                &id,
+                &identity,
+                &tenant,
+                &role,
+                &engine,
+                session.as_deref(),
+                image,
+                json,
+            ),
+            BrowserCommand::Start {
+                engagement,
+                id,
+                dry_run,
+                allow_non_loopback_proxy,
+                json,
+            } => start_browser_profile(&engagement, &id, dry_run, allow_non_loopback_proxy, json),
+            BrowserCommand::List { engagement, json } => list_browser_profiles(&engagement, json),
+            BrowserCommand::Validate {
+                engagement,
+                id,
+                json,
+            } => validate_browser_profile(&engagement, &id, json),
         },
     }
 }
@@ -301,6 +437,191 @@ fn create_resource(
         resource,
         json,
     )
+}
+
+// Create a browser profile record under lab/browser-profiles
+#[allow(clippy::too_many_arguments)]
+fn create_browser_profile(
+    engagement: &Path,
+    id: &str,
+    identity_id: &str,
+    tenant_id: &str,
+    role_id: &str,
+    engine: &str,
+    session_id: Option<&str>,
+    image: String,
+    json: bool,
+) -> Result<String> {
+    let engine = parse_browser_engine(engine)?;
+    let session_id = session_id
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("session-{identity_id}"));
+    let profile = BrowserProfile::new(
+        id,
+        engine,
+        image,
+        session_id,
+        identity_id.into(),
+        tenant_id.into(),
+        role_id.into(),
+        ProxySettings::loopback(DEFAULT_PROXY_HOST, DEFAULT_PROXY_PORT),
+    )?;
+    let record_id = profile.id.clone();
+    write_record(
+        engagement,
+        "browser_profile",
+        BROWSER_PROFILES_DIR,
+        &record_id,
+        profile,
+        json,
+    )
+}
+
+// List browser profiles using redacted model-visible metadata
+fn list_browser_profiles(engagement: &Path, json: bool) -> Result<String> {
+    let profiles: Vec<BrowserProfile> = read_collection(engagement, BROWSER_PROFILES_DIR)?;
+    let records = profiles
+        .into_iter()
+        .map(|profile| profile.redacted_metadata())
+        .collect::<Vec<_>>();
+    let output = BrowserListOutput {
+        kind: "browser_profiles",
+        records,
+    };
+
+    if json {
+        Ok(format!("{}\n", serde_json::to_string_pretty(&output)?))
+    } else {
+        Ok(format!("browser_profiles={}\n", output.records.len()))
+    }
+}
+
+// Validate that a browser profile points at existing lab account records
+fn validate_browser_profile(engagement: &Path, id: &str, json: bool) -> Result<String> {
+    let profile: BrowserProfile = read_record(engagement, BROWSER_PROFILES_DIR, id)?;
+    let identity: Identity = read_record(engagement, IDENTITIES_DIR, &profile.identity_id)?;
+    let tenant: Tenant = read_record(engagement, TENANTS_DIR, &profile.tenant_id)?;
+    let role: Role = read_record(engagement, ROLES_DIR, &profile.role_id)?;
+    let output = BrowserValidateOutput {
+        valid: true,
+        profile_id: profile.id,
+        identity,
+        tenant,
+        role,
+    };
+
+    if json {
+        Ok(format!("{}\n", serde_json::to_string_pretty(&output)?))
+    } else {
+        Ok(format!("browser profile {} valid\n", output.profile_id))
+    }
+}
+
+// Build launch arguments for a browser profile without exposing secrets
+fn start_browser_profile(
+    engagement: &Path,
+    id: &str,
+    dry_run: bool,
+    allow_non_loopback_proxy: bool,
+    json: bool,
+) -> Result<String> {
+    let profile: BrowserProfile = read_record(engagement, BROWSER_PROFILES_DIR, id)?;
+    if !allow_non_loopback_proxy && !is_loopback_host(&profile.proxy.host) {
+        anyhow::bail!("non-loopback proxy exposure requires --allow-non-loopback-proxy");
+    }
+    if !dry_run {
+        anyhow::bail!("browser start currently requires --dry-run");
+    }
+
+    let args = browser_run_args(engagement, &profile);
+    let output = BrowserStartOutput {
+        dry_run,
+        launched: false,
+        engine: profile.engine.clone(),
+        profile_id: profile.id,
+        args,
+    };
+
+    if json {
+        Ok(format!("{}\n", serde_json::to_string_pretty(&output)?))
+    } else {
+        Ok(format!(
+            "{} {}\n",
+            format_engine(&output.engine),
+            output.args.join(" ")
+        ))
+    }
+}
+
+// Read one typed lab record by id
+fn read_record<T>(engagement: &Path, collection: &str, id: &str) -> Result<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let path = engagement
+        .join(LAB_DIR)
+        .join(collection)
+        .join(format!("{id}.json"));
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("read lab record {}", path.display()))?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+// Build deterministic container args for a browser dry run
+fn browser_run_args(engagement: &Path, profile: &BrowserProfile) -> Vec<String> {
+    vec![
+        "run".into(),
+        "--rm".into(),
+        "--network=host".into(),
+        "--name".into(),
+        format!("mg-browser-{}", profile.id),
+        "-e".into(),
+        format!(
+            "HTTPS_PROXY={}://{}:{}",
+            profile.proxy.scheme, profile.proxy.host, profile.proxy.port
+        ),
+        "-v".into(),
+        format!(
+            "{}:/home/pwuser/.cache/ms-playwright:rw",
+            engagement
+                .join(LAB_DIR)
+                .join(&profile.cache_volume)
+                .display()
+        ),
+        "-v".into(),
+        format!(
+            "{}:/home/pwuser/profile:rw",
+            engagement
+                .join(LAB_DIR)
+                .join(&profile.storage_volume)
+                .display()
+        ),
+        profile.image.clone(),
+    ]
+}
+
+// Check whether a proxy host is loopback scoped
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+// Format an engine for text output
+fn format_engine(engine: &BrowserEngine) -> &'static str {
+    match engine {
+        BrowserEngine::Podman => "podman",
+        BrowserEngine::Docker => "docker",
+        BrowserEngine::PlaywrightLocal => "playwright-local",
+    }
+}
+
+// Parse browser engine names from CLI input
+fn parse_browser_engine(engine: &str) -> Result<BrowserEngine> {
+    match engine {
+        "podman" => Ok(BrowserEngine::Podman),
+        "docker" => Ok(BrowserEngine::Docker),
+        "playwright-local" => Ok(BrowserEngine::PlaywrightLocal),
+        other => anyhow::bail!("unsupported browser engine: {other}"),
+    }
 }
 
 // Write one lab record to its stable relative path
@@ -467,5 +788,241 @@ mod tests {
         assert_eq!(parsed["tenants"][0]["id"], "tenant-a");
         assert_eq!(parsed["roles"].as_array().unwrap().len(), 0);
         assert_eq!(parsed["resources"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn browser_create_json_writes_profile_under_lab_browser_profiles() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engagement = tmp.path().join("example-program");
+        std::fs::create_dir_all(&engagement).unwrap();
+
+        let output = run_with_args([
+            "mg-lab",
+            "browser",
+            "create",
+            engagement.to_str().unwrap(),
+            "alice-admin",
+            "--identity",
+            "alice",
+            "--tenant",
+            "tenant-a",
+            "--role",
+            "admin",
+            "--engine",
+            "podman",
+            "--json",
+        ])
+        .unwrap();
+
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["kind"], "browser_profile");
+        assert_eq!(parsed["path"], "lab/browser-profiles/alice-admin.json");
+        assert_eq!(parsed["record"]["identity_id"], "alice");
+        assert_eq!(parsed["record"]["tenant_id"], "tenant-a");
+        assert_eq!(parsed["record"]["role_id"], "admin");
+        assert_eq!(parsed["record"]["engine"], "podman");
+        assert!(
+            engagement
+                .join("lab/browser-profiles/alice-admin.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn browser_start_dry_run_json_emits_container_args_without_launching() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engagement = tmp.path().join("example-program");
+        std::fs::create_dir_all(&engagement).unwrap();
+        run_with_args([
+            "mg-lab",
+            "browser",
+            "create",
+            engagement.to_str().unwrap(),
+            "alice-admin",
+            "--identity",
+            "alice",
+            "--tenant",
+            "tenant-a",
+            "--role",
+            "admin",
+            "--engine",
+            "podman",
+            "--json",
+        ])
+        .unwrap();
+
+        let output = run_with_args([
+            "mg-lab",
+            "browser",
+            "start",
+            engagement.to_str().unwrap(),
+            "alice-admin",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap();
+
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["dry_run"], true);
+        assert_eq!(parsed["engine"], "podman");
+        assert_eq!(parsed["args"][0], "run");
+        assert!(
+            parsed["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|arg| arg == "--network=host")
+        );
+        assert_eq!(parsed["launched"], false);
+    }
+
+    #[test]
+    fn browser_start_refuses_non_loopback_proxy_without_approval() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engagement = tmp.path().join("example-program");
+        std::fs::create_dir_all(engagement.join("lab/browser-profiles")).unwrap();
+        std::fs::write(
+            engagement.join("lab/browser-profiles/alice-admin.json"),
+            r#"{
+  "id": "alice-admin",
+  "engine": "podman",
+  "image": "mcr.microsoft.com/playwright:latest",
+  "session_id": "session-alice",
+  "identity_id": "alice",
+  "tenant_id": "tenant-a",
+  "role_id": "admin",
+  "proxy": { "host": "0.0.0.0", "port": 8080, "scheme": "http" },
+  "storage_volume": "browser-profiles/alice-admin/storage",
+  "cache_volume": "browser-profiles/alice-admin/cache"
+}"#,
+        )
+        .unwrap();
+
+        let err = run_with_args([
+            "mg-lab",
+            "browser",
+            "start",
+            engagement.to_str().unwrap(),
+            "alice-admin",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap_err();
+
+        assert!(err.to_string().contains("non-loopback proxy exposure"));
+    }
+
+    #[test]
+    fn browser_validate_confirms_profile_account_labels() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engagement = tmp.path().join("example-program");
+        std::fs::create_dir_all(&engagement).unwrap();
+        run_with_args([
+            "mg-lab",
+            "identity",
+            "create",
+            engagement.to_str().unwrap(),
+            "alice",
+            "--label",
+            "Alice Admin",
+            "--json",
+        ])
+        .unwrap();
+        run_with_args([
+            "mg-lab",
+            "tenant",
+            "create",
+            engagement.to_str().unwrap(),
+            "tenant-a",
+            "--label",
+            "Tenant A",
+            "--json",
+        ])
+        .unwrap();
+        run_with_args([
+            "mg-lab",
+            "role",
+            "create",
+            engagement.to_str().unwrap(),
+            "admin",
+            "--label",
+            "Admin",
+            "--json",
+        ])
+        .unwrap();
+        run_with_args([
+            "mg-lab",
+            "browser",
+            "create",
+            engagement.to_str().unwrap(),
+            "alice-admin",
+            "--identity",
+            "alice",
+            "--tenant",
+            "tenant-a",
+            "--role",
+            "admin",
+            "--engine",
+            "podman",
+            "--json",
+        ])
+        .unwrap();
+
+        let output = run_with_args([
+            "mg-lab",
+            "browser",
+            "validate",
+            engagement.to_str().unwrap(),
+            "alice-admin",
+            "--json",
+        ])
+        .unwrap();
+
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["valid"], true);
+        assert_eq!(parsed["profile_id"], "alice-admin");
+        assert_eq!(parsed["identity"]["id"], "alice");
+        assert_eq!(parsed["tenant"]["id"], "tenant-a");
+        assert_eq!(parsed["role"]["id"], "admin");
+    }
+
+    #[test]
+    fn browser_list_json_emits_redacted_profile_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engagement = tmp.path().join("example-program");
+        std::fs::create_dir_all(&engagement).unwrap();
+        run_with_args([
+            "mg-lab",
+            "browser",
+            "create",
+            engagement.to_str().unwrap(),
+            "alice-admin",
+            "--identity",
+            "alice",
+            "--tenant",
+            "tenant-a",
+            "--role",
+            "admin",
+            "--engine",
+            "podman",
+            "--json",
+        ])
+        .unwrap();
+
+        let output = run_with_args([
+            "mg-lab",
+            "browser",
+            "list",
+            engagement.to_str().unwrap(),
+            "--json",
+        ])
+        .unwrap();
+
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["kind"], "browser_profiles");
+        assert_eq!(parsed["records"][0]["id"], "alice-admin");
+        assert_eq!(parsed["records"][0]["identity_id"], "alice");
+        assert!(parsed["records"][0].get("image").is_none());
+        assert!(parsed["records"][0].get("storage_volume").is_none());
     }
 }

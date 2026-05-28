@@ -206,11 +206,11 @@ fn harmless_marker(target_url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::BrowserProfile;
     use crate::planner::{
         BrowserAction, ClientSidePlanRequest, ClientSidePlanner, ClientSideTestKind, PayloadMode,
         PlannerError,
     };
-    use crate::BrowserProfile;
 
     #[test]
     fn reflected_input_plan_uses_harmless_marker_by_default() {
@@ -271,13 +271,15 @@ mod tests {
 
         assert!(plan.evidence.screenshot);
         assert!(plan.evidence.dom_snapshot);
-        assert!(plan
-            .evidence
-            .output_path
-            .starts_with("evidence/client-side/"));
-        assert!(plan
-            .stop_conditions
-            .iter()
-            .any(|item| item.contains("destructive")));
+        assert!(
+            plan.evidence
+                .output_path
+                .starts_with("evidence/client-side/")
+        );
+        assert!(
+            plan.stop_conditions
+                .iter()
+                .any(|item| item.contains("destructive"))
+        );
     }
 }

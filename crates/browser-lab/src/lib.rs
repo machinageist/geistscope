@@ -101,6 +101,7 @@ impl ProxySettings {
 
 impl BrowserProfile {
     // Create a browser profile bound to one controlled identity and tenant
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: &str,
         engine: BrowserEngine,

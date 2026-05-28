@@ -2589,6 +2589,7 @@ name = "mg-lab"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "browser-lab",
  "clap",
  "lab-model",
  "serde",
