@@ -3,6 +3,8 @@
 // Description: Isolated browser/container profiles for controlled account testing
 // Notes: Profile metadata must not expose cookies, storage values, or extension secrets
 
+pub mod planner;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Component, Path};
