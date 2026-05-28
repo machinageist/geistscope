@@ -3,6 +3,7 @@
 // Description: Isolated browser/container profiles for controlled account testing
 // Notes: Profile metadata must not expose cookies, storage values, or extension secrets
 
+pub mod client_side;
 pub mod planner;
 
 use serde::{Deserialize, Serialize};
