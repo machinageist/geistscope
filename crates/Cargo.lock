@@ -2585,6 +2585,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-lab"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "lab-model",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "mg-leak-monitor"
 version = "0.1.0"
 dependencies = [

@@ -3,6 +3,7 @@ members = [
     "action-policy",
     "browser-lab",
     "lab-model",
+    "mg-lab",
     "mg-scan",
     "subdomain-enum",
     "http-client",
