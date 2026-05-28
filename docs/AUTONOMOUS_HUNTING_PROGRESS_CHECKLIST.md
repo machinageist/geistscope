@@ -148,17 +148,26 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - makes `lab-model` operator-usable
     - needed before browser profile CLI and account-bound testing
 
-- [ ] Task 2.3: Replace single session config with named session profiles
-  - Next recommended task
-  - Not started
+- [x] Task 2.3: Replace single session config with named session profiles
+  - Commit: `330c0ca feat(session): add named session profiles`
   - Files:
     - `crates/session/src/lib.rs`
-    - later `crates/mg-harness/src/lib.rs`
+    - `crates/session/Cargo.toml`
   - TDD from plan:
-    - [ ] metadata only, no plaintext cookies/headers
-    - [ ] redacted summary contains no token-like material
-    - [ ] expired sessions fail closed
-    - [ ] lookup returns secret refs, not values
+    - [x] metadata only, no plaintext cookies/headers
+    - [x] redacted summary contains no token-like material
+    - [x] expired sessions fail closed
+    - [x] lookup returns secret refs, not values
+  - Implemented:
+    - `SessionProfile`
+    - `SecretRef`
+    - `save_session_profile`
+    - `load_session_profile`
+    - `require_active_session_profile`
+    - `session_profile_path`
+    - `SessionProfile::redacted_summary`
+  - Still possible later:
+    - wire named profiles into `mg-harness` endpoint compatibility
 
 ### Phase 2.5: Containerized account and browser profile testing
 
@@ -180,6 +189,7 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - redacted model-visible metadata
 
 - [ ] Task 2.5.2: Add `mg-lab` browser profile CLI
+  - Next recommended task
   - Should follow Task 2.2 after `mg-lab` exists
   - Files:
     - modify `crates/mg-lab/src/main.rs`
@@ -277,6 +287,7 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ## Latest known commits for this work
 
 ```text
+330c0ca feat(session): add named session profiles
 2929937 feat(lab): add mg-lab CRUD CLI skeleton
 47db67b feat(browser): add client-side test planner
 b080d37 feat(browser): add isolated browser profiles
@@ -297,6 +308,8 @@ Last full targeted verification from the implementation session:
 cd /home/mgeist/geistscope/crates
 cargo test -p mg-lab -p lab-model
 cargo clippy -p mg-lab -- -D warnings
+cargo test -p session
+cargo clippy -p session -- -D warnings
 cargo test -p browser-lab
 cargo test -p lab-model
 cargo test -p action-policy
@@ -307,6 +320,7 @@ Observed results:
 
 - `mg-lab`: 3 tests passed; clippy passed with `-D warnings`
 - `lab-model`: 3 tests passed during Task 2.2 verification
+- `session`: 8 tests passed; clippy passed with `-D warnings`
 - `browser-lab`: 9 tests passed
 - `lab-model`: 3 tests passed
 - `action-policy`: 7 tests passed
@@ -340,7 +354,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 2.3: replace single session config with named session profiles, using strict TDD and atomic commits.
+Continue with Task 2.5.2: add `mg-lab` browser profile CLI, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
