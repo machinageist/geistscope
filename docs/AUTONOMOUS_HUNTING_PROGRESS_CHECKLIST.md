@@ -210,15 +210,27 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - non-loopback proxy exposure requires explicit approval flag
     - list output uses `RedactedBrowserProfile`, not raw profile internals
 
-- [ ] Task 2.5.3: Add client-side bug capture model
-  - Next recommended task
+- [x] Task 2.5.3: Add client-side bug capture model
+  - Commit: `ebafe91 feat(browser): add client-side observation model`
   - Files:
-    - create or extend `crates/browser-lab/src/client_side.rs`
+    - `crates/browser-lab/src/client_side.rs`
   - TDD from plan:
-    - [ ] DOM observation records URL, frame origin, selector/path, sink type, source type, and redacted snippet
-    - [ ] console and network errors are bounded and prompt-injection-escaped
-    - [ ] localStorage/sessionStorage/cookie values are never emitted; only key names and hashes
-    - [ ] postMessage observations include origin, target origin, schema shape, and risk class
+    - [x] DOM observation records URL, frame origin, selector/path, sink type, source type, and redacted snippet
+    - [x] console and network errors are bounded and prompt-injection-escaped
+    - [x] localStorage/sessionStorage/cookie values are never emitted; only key names and hashes
+    - [x] postMessage observations include origin, target origin, schema shape, and risk class
+  - Implemented:
+    - `ClientSideObservation`
+    - `DomObservation`
+    - `ConsoleObservation`
+    - `NetworkObservation`
+    - `StorageObservation`
+    - `PostMessageObservation`
+    - sink/source/storage/risk enums
+  - Safety gates:
+    - secret-like snippets are redacted before serialization
+    - storage values are SHA-256 hashes only
+    - console/network text is bounded and prompt-injection escaped
 
 - [x] Task 2.5.4: Add safe client-side test planner
   - Commit: `47db67b feat(browser): add client-side test planner`
@@ -245,7 +257,7 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ### Phase 3: Proxy-first traffic capture
 
 - [ ] Task 3.1: Add traffic schema v1
-  - Not started
+  - Next recommended task
   - Files:
     - likely modify `crates/engagement/src/traffic.rs`
   - TDD from plan:
@@ -332,7 +344,7 @@ Observed results:
 - `mg-lab`: 8 tests passed; clippy passed with `-D warnings`
 - `lab-model`: 3 tests passed during Task 2.2 verification
 - `session`: 8 tests passed; clippy passed with `-D warnings`
-- `browser-lab`: 9 tests passed
+- `browser-lab`: 13 tests passed; clippy passed with `-D warnings`
 - `lab-model`: 3 tests passed
 - `action-policy`: 7 tests passed
 - `engagement`: 43 lib tests passed, 2 `mg-engagement` binary tests passed, doctests passed
@@ -365,7 +377,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 2.5.3: add client-side bug capture model, using strict TDD and atomic commits.
+Continue with Task 3.1: add traffic schema v1, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
