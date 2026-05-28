@@ -7,12 +7,14 @@
  *                  All other types are internal to their respective modules.
  *******************************************************************/
 
+pub mod artifact_store;
 pub mod engagement;
 pub mod finding;
 pub mod scope;
 pub mod tool_finding;
 pub mod traffic;
 
+pub use artifact_store::{ArtifactStore, ArtifactWriteRecord};
 pub use engagement::{Engagement, EngagementMeta};
 pub use finding::{Finding, Severity, Status};
 pub use scope::{Scope, ScopeDecision, ScopeRuleMatch, ScopeVerdict};
