@@ -8,6 +8,8 @@
  *******************************************************************/
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 use url::Url;
 
@@ -18,8 +20,28 @@ pub struct Scope {
     pub target: String,
     pub in_scope: Vec<String>,
     pub out_of_scope: Vec<String>,
+    #[serde(default)]
+    pub program_assets: Vec<ProgramAsset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProgramAsset {
+    pub identifier: String,
+    pub asset_type: String,
+    pub platform: String,
+    pub in_scope: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounty_eligible: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submission_eligible: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_severity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,6 +87,7 @@ impl Scope {
             target: target.to_string(),
             in_scope: vec![target.to_string(), format!("*.{target}")],
             out_of_scope: Vec::new(),
+            program_assets: Vec::new(),
             notes: None,
         }
     }
@@ -100,6 +123,7 @@ impl Scope {
         let host = normalized_host.as_deref().unwrap_or_default();
         let matched_deny = matching_rules(&self.out_of_scope, host);
         let matched_allow = matching_rules(&self.in_scope, host);
+        let matched_asset = self.asset_for_host(host);
         let (decision, reason) = if !matched_deny.is_empty() {
             (ScopeVerdict::OutOfScope, "explicit deny rule matched")
         } else if !matched_allow.is_empty() {
@@ -116,11 +140,84 @@ impl Scope {
             matched_allow,
             matched_deny,
             reason: reason.into(),
-            asset_type: None,
-            bounty_eligible: None,
-            submission_eligible: None,
-            notes: Vec::new(),
+            asset_type: matched_asset.map(|asset| asset.asset_type.clone()),
+            bounty_eligible: matched_asset.and_then(|asset| asset.bounty_eligible),
+            submission_eligible: matched_asset.and_then(|asset| asset.submission_eligible),
+            notes: matched_asset
+                .and_then(|asset| asset.instructions.clone())
+                .into_iter()
+                .collect(),
         }
+    }
+
+    // Return the first platform asset matching a normalized or raw host
+    pub fn asset_for_host(&self, target: &str) -> Option<&ProgramAsset> {
+        let host = normalize_target(target)
+            .ok()
+            .and_then(|(host, _)| host)
+            .unwrap_or_else(|| normalize_host(target));
+        self.program_assets
+            .iter()
+            .filter(|asset| matches_pattern(&asset.identifier, &host))
+            .max_by_key(|asset| (if asset.in_scope { 0 } else { 1 }, asset.identifier.len()))
+    }
+
+    // Import HackerOne-style CSV into platform-neutral scope assets
+    pub fn from_hackerone_csv(target: &str, raw: &str) -> Result<Self, EngagementError> {
+        Self::from_program_csv("hackerone", target, raw)
+    }
+
+    // Import generic CSV into platform-neutral scope assets
+    pub fn from_program_csv(
+        platform: &str,
+        target: &str,
+        raw: &str,
+    ) -> Result<Self, EngagementError> {
+        let mut lines = raw.lines().filter(|line| !line.trim().is_empty());
+        let header = lines
+            .next()
+            .ok_or_else(|| EngagementError::Invalid("program CSV is empty".into()))?;
+        let headers: Vec<String> = header.split(',').map(normalize_key).collect();
+        let mut assets = Vec::new();
+        for line in lines {
+            let values: Vec<&str> = line.split(',').map(str::trim).collect();
+            let mut row = HashMap::new();
+            for (index, header) in headers.iter().enumerate() {
+                row.insert(
+                    header.as_str(),
+                    values.get(index).copied().unwrap_or_default(),
+                );
+            }
+            assets.push(asset_from_map(platform, &row)?);
+        }
+        Ok(scope_from_assets(target, assets))
+    }
+
+    // Import generic JSON into platform-neutral scope assets
+    pub fn from_program_json(
+        platform: &str,
+        target: &str,
+        raw: &str,
+    ) -> Result<Self, EngagementError> {
+        let value: Value = serde_json::from_str(raw)?;
+        let rows = if let Some(items) = value.as_array() {
+            items.clone()
+        } else if let Some(items) = value.get("assets").and_then(Value::as_array) {
+            items.clone()
+        } else {
+            return Err(EngagementError::Invalid(
+                "program JSON must be an array or object with assets".into(),
+            ));
+        };
+
+        let mut assets = Vec::new();
+        for row in rows {
+            let object = row.as_object().ok_or_else(|| {
+                EngagementError::Invalid("program asset must be an object".into())
+            })?;
+            assets.push(asset_from_json(platform, object)?);
+        }
+        Ok(scope_from_assets(target, assets))
     }
 
     // Deserialize scope rules from a JSON file
@@ -134,6 +231,154 @@ impl Scope {
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(path, json)?;
         Ok(())
+    }
+}
+
+// Build a scope from normalized program assets
+fn scope_from_assets(target: &str, assets: Vec<ProgramAsset>) -> Scope {
+    let mut in_scope = Vec::new();
+    let mut out_of_scope = Vec::new();
+    for asset in &assets {
+        if asset.in_scope {
+            push_unique(&mut in_scope, asset.identifier.clone());
+        } else {
+            push_unique(&mut out_of_scope, asset.identifier.clone());
+        }
+    }
+
+    Scope {
+        target: target.into(),
+        in_scope,
+        out_of_scope,
+        program_assets: assets,
+        notes: None,
+    }
+}
+
+// Convert a CSV row map into a platform-neutral asset
+fn asset_from_map(
+    platform: &str,
+    row: &HashMap<&str, &str>,
+) -> Result<ProgramAsset, EngagementError> {
+    let identifier = first_present(row, &["asset_identifier", "identifier", "target", "asset"])
+        .ok_or_else(|| EngagementError::Invalid("program asset missing identifier".into()))?;
+    let asset_type = first_present(row, &["asset_type", "type"])
+        .unwrap_or("unknown")
+        .to_string();
+    let bounty_eligible = first_present(row, &["eligible_for_bounty", "bounty_eligible"])
+        .and_then(parse_optional_bool);
+    let submission_eligible = first_present(
+        row,
+        &[
+            "eligible_for_submission",
+            "submission_eligible",
+            "eligible_for_report",
+        ],
+    )
+    .and_then(parse_optional_bool);
+    let in_scope = first_present(row, &["in_scope", "eligible_for_submission"])
+        .and_then(parse_optional_bool)
+        .unwrap_or_else(|| bounty_eligible.unwrap_or(false));
+
+    Ok(ProgramAsset {
+        identifier: identifier.to_string(),
+        asset_type,
+        platform: platform.to_string(),
+        in_scope,
+        bounty_eligible,
+        submission_eligible,
+        max_severity: first_present(row, &["max_severity", "max_severity_rating"])
+            .filter(|value| !value.is_empty() && *value != "none")
+            .map(str::to_string),
+        instructions: first_present(row, &["instructions", "instruction", "notes"])
+            .map(str::to_string),
+        metadata: HashMap::new(),
+    })
+}
+
+// Convert a JSON object into a platform-neutral asset
+fn asset_from_json(
+    platform: &str,
+    row: &serde_json::Map<String, Value>,
+) -> Result<ProgramAsset, EngagementError> {
+    let identifier = json_string(row, &["identifier", "target", "asset_identifier", "asset"])
+        .ok_or_else(|| EngagementError::Invalid("program asset missing identifier".into()))?;
+    let asset_type = json_string(row, &["asset_type", "type"]).unwrap_or_else(|| "unknown".into());
+    let bounty_eligible = json_bool(row, &["eligible_for_bounty", "bounty_eligible"]);
+    let submission_eligible = json_bool(
+        row,
+        &[
+            "eligible_for_submission",
+            "submission_eligible",
+            "eligible_for_report",
+        ],
+    );
+    let in_scope = json_bool(row, &["in_scope"])
+        .or(submission_eligible)
+        .unwrap_or_else(|| bounty_eligible.unwrap_or(false));
+
+    Ok(ProgramAsset {
+        identifier,
+        asset_type,
+        platform: platform.into(),
+        in_scope,
+        bounty_eligible,
+        submission_eligible,
+        max_severity: json_string(row, &["max_severity", "max_severity_rating"])
+            .filter(|value| value != "none"),
+        instructions: json_string(row, &["instructions", "instruction", "notes"]),
+        metadata: HashMap::new(),
+    })
+}
+
+// Return the first non-empty CSV value for candidate keys
+fn first_present<'a>(row: &'a HashMap<&str, &str>, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| row.get(key).copied())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+// Return a string field from a JSON object
+fn json_string(row: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        row.get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+// Return a boolean field from a JSON object
+fn json_bool(row: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<bool> {
+    keys.iter().find_map(|key| {
+        row.get(*key).and_then(|value| {
+            value
+                .as_bool()
+                .or_else(|| value.as_str().and_then(parse_optional_bool))
+        })
+    })
+}
+
+// Parse common program eligibility booleans
+fn parse_optional_bool(value: &str) -> Option<bool> {
+    match value.trim().to_lowercase().as_str() {
+        "true" | "yes" | "eligible" | "in_scope" | "1" => Some(true),
+        "false" | "no" | "not_eligible" | "out_of_scope" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+// Normalize CSV/JSON keys to snake_case-ish lookup keys
+fn normalize_key(value: &str) -> String {
+    value.trim().to_lowercase().replace([' ', '-'], "_")
+}
+
+// Push a value if it is not already present
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
     }
 }
 
@@ -214,6 +459,7 @@ mod tests {
             target: "example.com".into(),
             in_scope: in_scope.iter().map(|s| s.to_string()).collect(),
             out_of_scope: out.iter().map(|s| s.to_string()).collect(),
+            program_assets: Vec::new(),
             notes: None,
         }
     }
@@ -305,5 +551,56 @@ mod tests {
         assert_eq!(decision.decision, ScopeVerdict::Ambiguous);
         assert_eq!(decision.normalized_host, None);
         assert!(decision.reason.contains("empty"));
+    }
+
+    #[test]
+    fn imports_hackerone_csv_into_common_program_assets() {
+        let csv = "asset_identifier,asset_type,eligible_for_bounty,eligible_for_submission,max_severity\n*.example.com,url,true,true,high\nold.example.com,url,false,false,none\n";
+
+        let scope = Scope::from_hackerone_csv("example", csv).unwrap();
+
+        assert!(scope.in_scope.contains(&"*.example.com".into()));
+        assert!(scope.out_of_scope.contains(&"old.example.com".into()));
+        let asset = scope.asset_for_host("api.example.com").unwrap();
+        assert_eq!(asset.platform, "hackerone");
+        assert_eq!(asset.asset_type, "url");
+        assert_eq!(asset.bounty_eligible, Some(true));
+        assert_eq!(asset.max_severity.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn imports_bugcrowd_json_into_common_program_assets() {
+        let raw = r#"[
+            {"target":"*.example.org","type":"website","in_scope":true,"eligible_for_bounty":true},
+            {"target":"staging.example.org","type":"website","in_scope":false,"eligible_for_bounty":false}
+        ]"#;
+
+        let scope = Scope::from_program_json("bugcrowd", "example", raw).unwrap();
+
+        assert!(scope.in_scope.contains(&"*.example.org".into()));
+        assert!(scope.out_of_scope.contains(&"staging.example.org".into()));
+        let decision = scope.explain("staging.example.org");
+        assert_eq!(decision.decision, ScopeVerdict::OutOfScope);
+        assert_eq!(decision.bounty_eligible, Some(false));
+    }
+
+    #[test]
+    fn imports_manual_json_without_platform_assumptions() {
+        let raw = r#"{
+            "assets": [
+                {"identifier":"api.private.test","asset_type":"api","in_scope":true,"submission_eligible":true,"instructions":"private program notes"}
+            ]
+        }"#;
+
+        let scope = Scope::from_program_json("manual", "private", raw).unwrap();
+
+        let decision = scope.explain("https://api.private.test/v1/me");
+        assert_eq!(decision.decision, ScopeVerdict::InScope);
+        assert_eq!(decision.asset_type.as_deref(), Some("api"));
+        assert_eq!(decision.submission_eligible, Some(true));
+        assert!(decision
+            .notes
+            .iter()
+            .any(|note| note.contains("private program notes")));
     }
 }

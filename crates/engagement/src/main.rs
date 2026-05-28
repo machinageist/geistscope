@@ -5,15 +5,15 @@
  *******************************************************************/
 mod cli;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use engagement::{
     Engagement, EngagementMeta, Finding, Severity, Status, TrafficFilter, TrafficImportFormat,
 };
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct SessionConfig {
@@ -310,6 +310,40 @@ fn cmd_explain_scope(root: &Path, name: &str, target: &str, json: bool) -> Resul
     Ok(())
 }
 
+fn cmd_scope_import(
+    root: &Path,
+    name: &str,
+    platform: &str,
+    file: &str,
+    format: &str,
+    json: bool,
+) -> Result<()> {
+    let engagement = Engagement::load_named(root, name)?;
+    let raw = std::fs::read_to_string(file).with_context(|| format!("read scope import {file}"))?;
+    let scope = match format {
+        "csv" => {
+            if platform == "hackerone" {
+                engagement::Scope::from_hackerone_csv(&engagement.meta.target, &raw)?
+            } else {
+                engagement::Scope::from_program_csv(platform, &engagement.meta.target, &raw)?
+            }
+        }
+        "json" => engagement::Scope::from_program_json(platform, &engagement.meta.target, &raw)?,
+        other => return Err(anyhow!("unsupported scope import format: {other}")),
+    };
+    engagement.save_scope(&scope)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&scope)?);
+    } else {
+        println!(
+            "imported {} program asset(s) into {}/scope.json",
+            scope.program_assets.len(),
+            engagement.root.display()
+        );
+    }
+    Ok(())
+}
+
 fn cmd_scope_modify(
     root: &Path,
     name: &str,
@@ -489,6 +523,13 @@ fn main() -> Result<()> {
         cli::Command::ExplainScope { name, target, json } => {
             cmd_explain_scope(root, &name, &target, json)
         }
+        cli::Command::ScopeImport {
+            name,
+            platform,
+            file,
+            format,
+            json,
+        } => cmd_scope_import(root, &name, &platform, &file, &format, json),
         cli::Command::ScopeAdd {
             name,
             pattern,

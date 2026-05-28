@@ -99,6 +99,23 @@ impl ActionPolicy {
                     reason: "program rules disallow automation".into(),
                 };
             }
+
+            match request.scope.bounty_eligible {
+                Some(true) => {}
+                Some(false) => {
+                    return PolicyDecision {
+                        verdict: PolicyVerdict::Blocked,
+                        reason: "target is not bounty eligible".into(),
+                    };
+                }
+                None if matches!(request.approval, ApprovalState::Granted { .. }) => {}
+                None => {
+                    return PolicyDecision {
+                        verdict: PolicyVerdict::RequiresApproval,
+                        reason: "target eligibility is unknown and requires approval".into(),
+                    };
+                }
+            }
         }
 
         if matches!(request.risk, RiskLevel::HighActive)
@@ -144,7 +161,7 @@ mod tests {
             matched_deny: Vec::new(),
             reason: "test fixture".into(),
             asset_type: None,
-            bounty_eligible: None,
+            bounty_eligible: Some(true),
             submission_eligible: None,
             notes: Vec::new(),
         }
@@ -241,6 +258,17 @@ mod tests {
 
         assert_eq!(policy_decision.verdict, PolicyVerdict::Blocked);
         assert!(policy_decision.reason.contains("automation"));
+    }
+
+    #[test]
+    fn unknown_bounty_eligibility_requires_approval_for_active_actions() {
+        let mut request = request(RiskLevel::LowActive, None);
+        request.scope.bounty_eligible = None;
+
+        let policy_decision = ActionPolicy.evaluate(&request);
+
+        assert_eq!(policy_decision.verdict, PolicyVerdict::RequiresApproval);
+        assert!(policy_decision.reason.contains("eligibility"));
     }
 
     #[test]

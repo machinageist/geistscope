@@ -54,6 +54,22 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Import platform scope assets into the engagement scope
+    ScopeImport {
+        name: String,
+        /// Platform adapter: hackerone|bugcrowd|intigriti|manual
+        #[arg(long)]
+        platform: String,
+        /// Input file path
+        #[arg(long)]
+        file: String,
+        /// Input format: csv|json
+        #[arg(long, default_value = "json")]
+        format: String,
+        /// Emit imported scope as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Add a pattern to in-scope (or remove via --remove)
     ScopeAdd {
         name: String,

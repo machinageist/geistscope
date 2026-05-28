@@ -21,7 +21,7 @@ pub use audit::{AuditDecision, AuditEvent, AuditRisk, append_audit_event};
 pub use engagement::{Engagement, EngagementMeta};
 pub use finding::{Finding, Severity, Status};
 pub use program::ProgramRulesSnapshot;
-pub use scope::{Scope, ScopeDecision, ScopeRuleMatch, ScopeVerdict};
+pub use scope::{ProgramAsset, Scope, ScopeDecision, ScopeRuleMatch, ScopeVerdict};
 pub use tool_finding::{FindingSeverity, ToolFinding, write_finding};
 pub use traffic::{
     AuthState, BodyRef, HeaderRecord, ImportSummary, ResponseDiff, ResponseFingerprint,
