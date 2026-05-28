@@ -3,8 +3,9 @@
 // Description: Rust-owned action policy decisions for autonomous hunting tools
 // Notes: Active tools must ask this crate before network or browser actions
 
-use engagement::{ScopeDecision, ScopeVerdict};
+use engagement::{ProgramRulesSnapshot, ScopeDecision, ScopeVerdict};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,6 +47,8 @@ pub struct PolicyRequest {
     pub scope: ScopeDecision,
     pub session: SessionRequirement,
     pub approval: ApprovalState,
+    pub program_rules: Option<ProgramRulesSnapshot>,
+    pub evaluated_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +78,29 @@ impl ActionPolicy {
             };
         }
 
+        if is_active(request.risk) {
+            let Some(program_rules) = &request.program_rules else {
+                return PolicyDecision {
+                    verdict: PolicyVerdict::Blocked,
+                    reason: "active action requires current program rules snapshot".into(),
+                };
+            };
+
+            if !program_rules.is_current_at(request.evaluated_at) {
+                return PolicyDecision {
+                    verdict: PolicyVerdict::Blocked,
+                    reason: "program rules snapshot is expired".into(),
+                };
+            }
+
+            if !program_rules.automation_allowed {
+                return PolicyDecision {
+                    verdict: PolicyVerdict::Blocked,
+                    reason: "program rules disallow automation".into(),
+                };
+            }
+        }
+
         if matches!(request.risk, RiskLevel::HighActive)
             && !matches!(request.approval, ApprovalState::Granted { .. })
         {
@@ -91,9 +117,15 @@ impl ActionPolicy {
     }
 }
 
+// Return true for actions that can touch a target system
+fn is_active(risk: RiskLevel) -> bool {
+    matches!(risk, RiskLevel::LowActive | RiskLevel::HighActive)
+}
+
 #[cfg(test)]
 mod tests {
-    use engagement::{ScopeDecision, ScopeRuleMatch, ScopeVerdict};
+    use engagement::{ProgramRulesSnapshot, ScopeDecision, ScopeRuleMatch, ScopeVerdict};
+    use time::{Duration, OffsetDateTime};
 
     use crate::{
         ActionKind, ActionPolicy, ApprovalState, PolicyRequest, PolicyVerdict, RiskLevel,
@@ -118,15 +150,34 @@ mod tests {
         }
     }
 
-    #[test]
-    fn high_active_actions_require_approval() {
-        let request = PolicyRequest {
-            action: ActionKind::ReplayRequest,
-            risk: RiskLevel::HighActive,
+    fn valid_rules(now: OffsetDateTime) -> ProgramRulesSnapshot {
+        ProgramRulesSnapshot {
+            captured_at: now - Duration::hours(1),
+            expires_at: now + Duration::days(1),
+            automation_allowed: true,
+            source: "manual".into(),
+            notes: Vec::new(),
+        }
+    }
+
+    fn request(risk: RiskLevel, rules: Option<ProgramRulesSnapshot>) -> PolicyRequest {
+        let now = OffsetDateTime::now_utc();
+        PolicyRequest {
+            action: ActionKind::HttpRequest,
+            risk,
             scope: decision(ScopeVerdict::InScope),
             session: SessionRequirement::AnonymousAllowed,
-            approval: ApprovalState::Missing,
-        };
+            approval: ApprovalState::NotRequired,
+            program_rules: rules.or_else(|| Some(valid_rules(now))),
+            evaluated_at: now,
+        }
+    }
+
+    #[test]
+    fn high_active_actions_require_approval() {
+        let mut request = request(RiskLevel::HighActive, None);
+        request.action = ActionKind::ReplayRequest;
+        request.approval = ApprovalState::Missing;
 
         let policy_decision = ActionPolicy.evaluate(&request);
 
@@ -137,13 +188,8 @@ mod tests {
     #[test]
     fn out_of_scope_or_ambiguous_scope_fails_closed() {
         for verdict in [ScopeVerdict::OutOfScope, ScopeVerdict::Ambiguous] {
-            let request = PolicyRequest {
-                action: ActionKind::HttpRequest,
-                risk: RiskLevel::LowActive,
-                scope: decision(verdict),
-                session: SessionRequirement::AnonymousAllowed,
-                approval: ApprovalState::NotRequired,
-            };
+            let mut request = request(RiskLevel::LowActive, None);
+            request.scope = decision(verdict);
 
             let policy_decision = ActionPolicy.evaluate(&request);
 
@@ -153,13 +199,61 @@ mod tests {
     }
 
     #[test]
-    fn read_only_scoped_anonymous_actions_are_allowed() {
+    fn active_actions_without_rules_snapshot_are_blocked() {
+        let now = OffsetDateTime::now_utc();
+        let request = PolicyRequest {
+            action: ActionKind::HttpRequest,
+            risk: RiskLevel::LowActive,
+            scope: decision(ScopeVerdict::InScope),
+            session: SessionRequirement::AnonymousAllowed,
+            approval: ApprovalState::NotRequired,
+            program_rules: None,
+            evaluated_at: now,
+        };
+
+        let policy_decision = ActionPolicy.evaluate(&request);
+
+        assert_eq!(policy_decision.verdict, PolicyVerdict::Blocked);
+        assert!(policy_decision.reason.contains("program rules"));
+    }
+
+    #[test]
+    fn expired_rules_snapshot_blocks_active_actions() {
+        let now = OffsetDateTime::now_utc();
+        let mut rules = valid_rules(now);
+        rules.expires_at = now - Duration::seconds(1);
+        let request = request(RiskLevel::LowActive, Some(rules));
+
+        let policy_decision = ActionPolicy.evaluate(&request);
+
+        assert_eq!(policy_decision.verdict, PolicyVerdict::Blocked);
+        assert!(policy_decision.reason.contains("expired"));
+    }
+
+    #[test]
+    fn automation_disallowed_blocks_active_actions() {
+        let now = OffsetDateTime::now_utc();
+        let mut rules = valid_rules(now);
+        rules.automation_allowed = false;
+        let request = request(RiskLevel::LowActive, Some(rules));
+
+        let policy_decision = ActionPolicy.evaluate(&request);
+
+        assert_eq!(policy_decision.verdict, PolicyVerdict::Blocked);
+        assert!(policy_decision.reason.contains("automation"));
+    }
+
+    #[test]
+    fn read_only_scoped_anonymous_actions_are_allowed_without_rules_snapshot() {
+        let now = OffsetDateTime::now_utc();
         let request = PolicyRequest {
             action: ActionKind::HttpRequest,
             risk: RiskLevel::ReadOnly,
             scope: decision(ScopeVerdict::InScope),
             session: SessionRequirement::AnonymousAllowed,
             approval: ApprovalState::NotRequired,
+            program_rules: None,
+            evaluated_at: now,
         };
 
         let policy_decision = ActionPolicy.evaluate(&request);

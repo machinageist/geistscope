@@ -10,6 +10,7 @@
 pub mod artifact_store;
 pub mod engagement;
 pub mod finding;
+pub mod program;
 pub mod scope;
 pub mod tool_finding;
 pub mod traffic;
@@ -17,6 +18,7 @@ pub mod traffic;
 pub use artifact_store::{ArtifactStore, ArtifactWriteRecord};
 pub use engagement::{Engagement, EngagementMeta};
 pub use finding::{Finding, Severity, Status};
+pub use program::ProgramRulesSnapshot;
 pub use scope::{Scope, ScopeDecision, ScopeRuleMatch, ScopeVerdict};
 pub use tool_finding::{FindingSeverity, ToolFinding, write_finding};
 pub use traffic::{
