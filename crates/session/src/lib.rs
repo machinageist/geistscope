@@ -10,12 +10,16 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use engagement::Engagement;
 use reqwest::header::{COOKIE, HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use url::Url;
+
+const SESSIONS_DIR: &str = "sessions";
 
 // Session config persisted at engagements/<name>/session.json
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,6 +64,67 @@ impl Default for SessionConfig {
     }
 }
 
+// Named session profile persisted under sessions/<name>.json
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionProfile {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_url: Option<String>,
+    #[serde(default)]
+    pub auth_refs: Vec<SecretRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_until: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecretRef {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_var: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+impl SecretRef {
+    // Create a reference to a secret stored in an environment variable
+    pub fn env(kind: &str, env_var: &str) -> Self {
+        Self {
+            kind: kind.into(),
+            env_var: Some(env_var.into()),
+            value: None,
+        }
+    }
+
+    // Create an unsafe plaintext ref for rejection tests and validation boundaries
+    pub fn plaintext(kind: &str, value: &str) -> Self {
+        Self {
+            kind: kind.into(),
+            env_var: None,
+            value: Some(value.into()),
+        }
+    }
+}
+
+impl SessionProfile {
+    // Summarize the profile without exposing secret names or values
+    pub fn redacted_summary(&self) -> String {
+        let auth_kinds: Vec<&str> = self
+            .auth_refs
+            .iter()
+            .map(|auth_ref| auth_ref.kind.as_str())
+            .collect();
+        format!(
+            "session={} username_present={} login_url_present={} auth_refs={}",
+            self.name,
+            self.username.is_some(),
+            self.login_url.is_some(),
+            auth_kinds.join(",")
+        )
+    }
+}
+
 // Session errors for callers
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -83,6 +148,12 @@ pub enum SessionError {
     PlaintextSecretRejected,
     #[error("invalid url: {0}")]
     InvalidUrl(String),
+    #[error("session profile name must be a single safe component")]
+    InvalidSessionName,
+    #[error("session profile is expired")]
+    Expired,
+    #[error("invalid session expiry: {0}")]
+    InvalidExpiry(String),
 }
 
 // Load auth headers for an engagement; empty when no session.json exists
@@ -145,6 +216,79 @@ pub fn load_session_config(engagement: &Engagement) -> Result<SessionConfig, Ses
 // Return the session.json path for an engagement
 pub fn session_path(engagement: &Engagement) -> PathBuf {
     engagement.root.join("session.json")
+}
+
+// Save a named session profile without writing plaintext secret material
+pub fn save_session_profile(
+    engagement: &Engagement,
+    profile: &SessionProfile,
+) -> Result<PathBuf, SessionError> {
+    validate_session_name(&profile.name)?;
+    if profile
+        .auth_refs
+        .iter()
+        .any(|auth_ref| auth_ref.value.is_some())
+    {
+        return Err(SessionError::PlaintextSecretRejected);
+    }
+
+    let path = session_profile_path(engagement, &profile.name)?;
+    let parent = path.parent().ok_or(SessionError::InvalidSessionName)?;
+    fs::create_dir_all(parent)?;
+    let json = serde_json::to_string_pretty(profile)?;
+    fs::write(&path, json)?;
+    Ok(path)
+}
+
+// Load a named session profile by safe local name
+pub fn load_session_profile(
+    engagement: &Engagement,
+    name: &str,
+) -> Result<SessionProfile, SessionError> {
+    let path = session_profile_path(engagement, name)?;
+    if !path.exists() {
+        return Err(SessionError::NotConfigured);
+    }
+    let raw = fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+// Load a named session profile and fail closed if expired
+pub fn require_active_session_profile(
+    engagement: &Engagement,
+    name: &str,
+) -> Result<SessionProfile, SessionError> {
+    let profile = load_session_profile(engagement, name)?;
+    if let Some(valid_until) = &profile.valid_until {
+        let expires_at = OffsetDateTime::parse(valid_until, &Rfc3339)
+            .map_err(|_| SessionError::InvalidExpiry(valid_until.clone()))?;
+        if expires_at <= OffsetDateTime::now_utc() {
+            return Err(SessionError::Expired);
+        }
+    }
+    Ok(profile)
+}
+
+// Return the path for a named profile after validating the name
+pub fn session_profile_path(engagement: &Engagement, name: &str) -> Result<PathBuf, SessionError> {
+    validate_session_name(name)?;
+    Ok(engagement
+        .root
+        .join(SESSIONS_DIR)
+        .join(format!("{name}.json")))
+}
+
+// Reject names that could cross engagement boundaries or become paths
+fn validate_session_name(name: &str) -> Result<(), SessionError> {
+    if name.is_empty() || name.chars().any(char::is_control) {
+        return Err(SessionError::InvalidSessionName);
+    }
+
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) if !name.contains('/') && !name.contains('\\') => Ok(()),
+        _ => Err(SessionError::InvalidSessionName),
+    }
 }
 
 // Build auth headers with an injectable token lookup for testability
@@ -280,5 +424,89 @@ mod tests {
         let engagement = test_engagement();
         let err = ensure_url_in_scope(&engagement, "https://other.test/api").unwrap_err();
         assert!(matches!(err, SessionError::OutOfScope(_)));
+    }
+
+    #[test]
+    fn named_profile_save_stores_metadata_only_and_rejects_plaintext_secret_values() {
+        let engagement = test_engagement();
+        let profile = SessionProfile {
+            name: "alice-admin".into(),
+            username: Some("alice@example.test".into()),
+            login_url: Some("https://example.com/login".into()),
+            auth_refs: vec![SecretRef::env("token", "MG_ALICE_TOKEN")],
+            valid_until: None,
+        };
+
+        let path = save_session_profile(&engagement, &profile).unwrap();
+        let raw = fs::read_to_string(path).unwrap();
+        assert!(raw.contains("MG_ALICE_TOKEN"));
+        assert!(!raw.contains("Bearer secret-token"));
+
+        let unsafe_profile = SessionProfile {
+            name: "unsafe".into(),
+            username: None,
+            login_url: None,
+            auth_refs: vec![SecretRef::plaintext("cookie", "sid=secret-token")],
+            valid_until: None,
+        };
+        let err = save_session_profile(&engagement, &unsafe_profile).unwrap_err();
+        assert!(matches!(err, SessionError::PlaintextSecretRejected));
+    }
+
+    #[test]
+    fn redacted_summary_never_contains_token_like_material() {
+        let profile = SessionProfile {
+            name: "alice-admin".into(),
+            username: Some("alice@example.test".into()),
+            login_url: Some("https://example.com/login".into()),
+            auth_refs: vec![SecretRef::env("authorization", "MG_ALICE_TOKEN")],
+            valid_until: None,
+        };
+
+        let summary = profile.redacted_summary();
+
+        assert!(summary.contains("alice-admin"));
+        assert!(summary.contains("authorization"));
+        assert!(!summary.contains("MG_ALICE_TOKEN"));
+        assert!(!summary.contains("secret"));
+        assert!(!summary.contains("Bearer"));
+    }
+
+    #[test]
+    fn expired_named_profile_fails_closed() {
+        let engagement = test_engagement();
+        let profile = SessionProfile {
+            name: "expired".into(),
+            username: None,
+            login_url: None,
+            auth_refs: vec![SecretRef::env("token", "MG_EXPIRED_TOKEN")],
+            valid_until: Some("2000-01-01T00:00:00Z".into()),
+        };
+        save_session_profile(&engagement, &profile).unwrap();
+
+        let err = require_active_session_profile(&engagement, "expired").unwrap_err();
+
+        assert!(matches!(err, SessionError::Expired));
+    }
+
+    #[test]
+    fn named_session_lookup_returns_secret_refs_not_secret_values() {
+        let engagement = test_engagement();
+        let profile = SessionProfile {
+            name: "alice-admin".into(),
+            username: None,
+            login_url: None,
+            auth_refs: vec![SecretRef::env("token", "MG_ALICE_TOKEN")],
+            valid_until: None,
+        };
+        save_session_profile(&engagement, &profile).unwrap();
+
+        let loaded = load_session_profile(&engagement, "alice-admin").unwrap();
+
+        assert_eq!(
+            loaded.auth_refs[0].env_var.as_deref(),
+            Some("MG_ALICE_TOKEN")
+        );
+        assert!(loaded.auth_refs[0].value.is_none());
     }
 }
