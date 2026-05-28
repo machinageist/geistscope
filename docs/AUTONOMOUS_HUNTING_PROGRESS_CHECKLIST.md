@@ -188,19 +188,30 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - mount validation
     - redacted model-visible metadata
 
-- [ ] Task 2.5.2: Add `mg-lab` browser profile CLI
-  - Next recommended task
+- [x] Task 2.5.2: Add `mg-lab` browser profile CLI
+  - Commit: `12e9fc3 feat(lab): add browser profile CLI`
   - Should follow Task 2.2 after `mg-lab` exists
   - Files:
-    - modify `crates/mg-lab/src/main.rs`
+    - `crates/mg-lab/src/main.rs`
+    - `crates/mg-lab/Cargo.toml`
+    - `crates/browser-lab/src/lib.rs`
   - TDD from plan:
-    - [ ] `mg-lab browser create <engagement> --identity alice --tenant tenant-a --role admin --engine podman --json` writes metadata under `<engagement>/lab/browser-profiles/`
-    - [ ] `mg-lab browser start --dry-run --json` emits container run args without launching
-    - [ ] profile start refuses non-loopback proxy exposure unless explicitly approved
-    - [ ] browser validate confirms profile/session/account labels match expected identity markers
+    - [x] `mg-lab browser create <engagement> --identity alice --tenant tenant-a --role admin --engine podman --json` writes metadata under `<engagement>/lab/browser-profiles/`
+    - [x] `mg-lab browser start --dry-run --json` emits container run args without launching
+    - [x] profile start refuses non-loopback proxy exposure unless explicitly approved
+    - [x] browser validate confirms profile/session/account labels match expected identity markers
+  - Implemented:
+    - `mg-lab browser create <engagement> <id> --identity <identity-id> --tenant <tenant-id> --role <role-id> --engine <engine> --json`
+    - `mg-lab browser list <engagement> --json` with redacted profile metadata
+    - `mg-lab browser start <engagement> <id> --dry-run --json`
+    - `mg-lab browser validate <engagement> <id> --json`
+  - Safety gates:
+    - start is dry-run only for now and does not launch containers
+    - non-loopback proxy exposure requires explicit approval flag
+    - list output uses `RedactedBrowserProfile`, not raw profile internals
 
 - [ ] Task 2.5.3: Add client-side bug capture model
-  - Not started
+  - Next recommended task
   - Files:
     - create or extend `crates/browser-lab/src/client_side.rs`
   - TDD from plan:
@@ -318,7 +329,7 @@ cargo test -p engagement
 
 Observed results:
 
-- `mg-lab`: 3 tests passed; clippy passed with `-D warnings`
+- `mg-lab`: 8 tests passed; clippy passed with `-D warnings`
 - `lab-model`: 3 tests passed during Task 2.2 verification
 - `session`: 8 tests passed; clippy passed with `-D warnings`
 - `browser-lab`: 9 tests passed
@@ -354,7 +365,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 2.5.2: add `mg-lab` browser profile CLI, using strict TDD and atomic commits.
+Continue with Task 2.5.3: add client-side bug capture model, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
