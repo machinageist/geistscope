@@ -95,6 +95,26 @@ pub enum MessageRiskClass {
     SensitiveDataExposure,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ClientSideVerdictEngine;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientSideVerdict {
+    pub classification: ClientSideVerdictClass,
+    pub boundary_violation: bool,
+    pub evidence_refs: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientSideVerdictClass {
+    SecureBaseline,
+    DomSinkExposure,
+    PostMessageOriginWeakness,
+    SensitiveDataExposure,
+}
+
 impl ClientSideObservation {
     // Wrap a DOM sink/source observation
     pub fn dom(observation: DomObservation) -> Self {
@@ -186,6 +206,114 @@ impl PostMessageObservation {
     }
 }
 
+impl ClientSideVerdictEngine {
+    // Classify browser-side observations without exposing raw snippets or storage values
+    pub fn classify(&self, observations: &[ClientSideObservation]) -> ClientSideVerdict {
+        if let Some(verdict) = classify_dom_sink(observations) {
+            return verdict;
+        }
+        if let Some(verdict) = classify_post_message(observations) {
+            return verdict;
+        }
+        if let Some(verdict) = classify_sensitive_data(observations) {
+            return verdict;
+        }
+        ClientSideVerdict {
+            classification: ClientSideVerdictClass::SecureBaseline,
+            boundary_violation: false,
+            evidence_refs: Vec::new(),
+            reason: "observations contain only bounded or hash-only browser evidence".into(),
+        }
+    }
+}
+
+// Detect attacker-controllable DOM data flowing to sensitive sinks
+fn classify_dom_sink(observations: &[ClientSideObservation]) -> Option<ClientSideVerdict> {
+    let refs: Vec<String> = observations
+        .iter()
+        .filter_map(|observation| match observation {
+            ClientSideObservation::Dom(dom)
+                if is_attacker_controllable_source(&dom.source_type) =>
+            {
+                Some(format!("dom:{}", dom.selector_path))
+            }
+            _ => None,
+        })
+        .collect();
+    if refs.is_empty() {
+        None
+    } else {
+        Some(ClientSideVerdict {
+            classification: ClientSideVerdictClass::DomSinkExposure,
+            boundary_violation: true,
+            evidence_refs: refs,
+            reason: "attacker-controllable browser source reached a DOM sink".into(),
+        })
+    }
+}
+
+// Detect weak postMessage origin handling without echoing message payloads
+fn classify_post_message(observations: &[ClientSideObservation]) -> Option<ClientSideVerdict> {
+    let refs: Vec<String> = observations
+        .iter()
+        .filter_map(|observation| match observation {
+            ClientSideObservation::PostMessage(message)
+                if matches!(
+                    message.risk_class,
+                    MessageRiskClass::TrustsWildcardOrigin | MessageRiskClass::MissingOriginCheck
+                ) || message.target_origin == "*" =>
+            {
+                Some(format!("post_message:{}", message.origin))
+            }
+            _ => None,
+        })
+        .collect();
+    if refs.is_empty() {
+        None
+    } else {
+        Some(ClientSideVerdict {
+            classification: ClientSideVerdictClass::PostMessageOriginWeakness,
+            boundary_violation: false,
+            evidence_refs: refs,
+            reason: "postMessage observation indicates wildcard or missing origin validation"
+                .into(),
+        })
+    }
+}
+
+// Detect browser observations explicitly marked as sensitive exposure
+fn classify_sensitive_data(observations: &[ClientSideObservation]) -> Option<ClientSideVerdict> {
+    let refs: Vec<String> = observations
+        .iter()
+        .filter_map(|observation| match observation {
+            ClientSideObservation::PostMessage(message)
+                if message.risk_class == MessageRiskClass::SensitiveDataExposure =>
+            {
+                Some(format!("post_message:{}", message.origin))
+            }
+            _ => None,
+        })
+        .collect();
+    if refs.is_empty() {
+        None
+    } else {
+        Some(ClientSideVerdict {
+            classification: ClientSideVerdictClass::SensitiveDataExposure,
+            boundary_violation: true,
+            evidence_refs: refs,
+            reason: "browser observation indicates sensitive data exposure".into(),
+        })
+    }
+}
+
+// Treat only user-controlled sources as candidate proof sources
+fn is_attacker_controllable_source(source_type: &SourceType) -> bool {
+    matches!(
+        source_type,
+        SourceType::QueryParam | SourceType::Fragment | SourceType::PostMessage
+    )
+}
+
 // Hash secret browser values before model-visible output
 fn sha256_hex(value: &str) -> String {
     let mut hasher = Sha256::new();
@@ -231,8 +359,9 @@ fn truncate_chars(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use crate::client_side::{
-        ClientSideObservation, DomObservation, MessageRiskClass, NetworkObservation,
-        PostMessageObservation, SinkType, SourceType, StorageArea, StorageObservation,
+        ClientSideObservation, ClientSideVerdictClass, ClientSideVerdictEngine, DomObservation,
+        MessageRiskClass, NetworkObservation, PostMessageObservation, SinkType, SourceType,
+        StorageArea, StorageObservation,
     };
 
     #[test]
@@ -308,5 +437,82 @@ mod tests {
         assert!(raw.contains("https://app.example.test"));
         assert!(raw.contains("account_id"));
         assert!(raw.contains("trusts_wildcard_origin"));
+    }
+
+    #[test]
+    fn client_side_verdict_classifies_attacker_controlled_dom_sink_as_boundary_violation() {
+        let observation = ClientSideObservation::dom(DomObservation::new(
+            "https://app.example.test/search?q=marker",
+            "https://app.example.test",
+            "#results",
+            SinkType::InnerHtml,
+            SourceType::QueryParam,
+            "<div>mg-marker</div>",
+        ));
+
+        let verdict = ClientSideVerdictEngine::default().classify(&[observation]);
+
+        assert_eq!(
+            verdict.classification,
+            ClientSideVerdictClass::DomSinkExposure
+        );
+        assert!(verdict.boundary_violation);
+        assert!(
+            verdict
+                .evidence_refs
+                .iter()
+                .any(|item| item == "dom:#results")
+        );
+        assert!(
+            !serde_json::to_string(&verdict)
+                .unwrap()
+                .contains("mg-marker")
+        );
+    }
+
+    #[test]
+    fn client_side_verdict_classifies_wildcard_post_message_origin() {
+        let observation = ClientSideObservation::post_message(PostMessageObservation::new(
+            "https://widget.example.test",
+            "*",
+            vec!["type".into(), "account_id".into()],
+            MessageRiskClass::TrustsWildcardOrigin,
+        ));
+
+        let verdict = ClientSideVerdictEngine::default().classify(&[observation]);
+
+        assert_eq!(
+            verdict.classification,
+            ClientSideVerdictClass::PostMessageOriginWeakness
+        );
+        assert!(!verdict.boundary_violation);
+        assert!(
+            verdict
+                .evidence_refs
+                .iter()
+                .any(|item| item == "post_message:https://widget.example.test")
+        );
+    }
+
+    #[test]
+    fn client_side_verdict_treats_storage_hash_only_observations_as_secure_baseline() {
+        let observation = ClientSideObservation::storage(StorageObservation::new(
+            StorageArea::Cookie,
+            "session",
+            "raw-secret-storage-value",
+        ));
+
+        let verdict = ClientSideVerdictEngine::default().classify(&[observation]);
+
+        assert_eq!(
+            verdict.classification,
+            ClientSideVerdictClass::SecureBaseline
+        );
+        assert!(!verdict.boundary_violation);
+        assert!(
+            !serde_json::to_string(&verdict)
+                .unwrap()
+                .contains("raw-secret-storage-value")
+        );
     }
 }
