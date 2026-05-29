@@ -96,9 +96,10 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - CLI scope import wiring
     - asset metadata in `ScopeDecision`
     - unknown bounty eligibility requires approval
-  - Still possible later:
-    - explicit Intigriti fixture coverage if desired
-    - YAML manual scope import if desired
+  - Follow-up completed:
+    - explicit Intigriti JSON fixture coverage
+    - manual YAML scope import support
+    - Commit: `0cec901 feat(engagement): add intigriti and yaml scope imports`
 
 - [x] Task 1.3: Add typed audit_event helper
   - Commit: `28993b8 feat(engagement): add typed audit events`
@@ -166,8 +167,9 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - `require_active_session_profile`
     - `session_profile_path`
     - `SessionProfile::redacted_summary`
-  - Still possible later:
-    - wire named profiles into `mg-harness` endpoint compatibility
+  - Follow-up completed:
+    - named profiles wired into `mg-harness` endpoint compatibility
+    - Commit: `7a7edb4 feat(harness): wire named session profiles`
 
 ### Phase 2.5: Containerized account and browser profile testing
 
@@ -465,9 +467,55 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - state-changing and browser-only candidates are skipped by policy
     - resume prevents duplicate plan hashes from being selected again
 
+### Phase 7: Hardening and evidence polish
+
+- [x] Task 7.1: Add client-side semantic verdicts
+  - Commit: `707c3aa feat(browser): add client-side semantic verdicts`
+  - Added deterministic verdict classes for client-side observations.
+  - Covered DOM sinks, storage observations, network/console errors, and postMessage origin/schema risk.
+  - Safety gates:
+    - verdict text stays structured and model-safe
+    - secret-like snippets remain redacted before verdict generation
+
+- [x] Task 7.2: Add redacted browser snapshot evidence artifacts
+  - Commit: `9aaf9b3 feat(evidence): add redacted browser snapshots`
+  - Added redacted DOM snapshot artifacts and hashed screenshot artifacts to evidence bundles.
+  - Safety gates:
+    - DOM artifacts redact token/email-like material before writing model-visible files
+    - screenshot bytes are stored as hashed evidence artifacts without embedding secrets in summaries
+
+- [x] Task 7.3: Wire named session profile compatibility into `mg-harness`
+  - Commit: `7a7edb4 feat(harness): wire named session profiles`
+  - Added harness support for listing named session profiles and resolving active profile headers.
+  - Safety gates:
+    - profile listing emits redacted metadata only
+    - secret reference names and values are not exposed to model-visible endpoint results
+
+- [x] Task 7.4: Gate assisted `mg-hunt` orchestration
+  - Commit: `2f0368f feat(hunt): gate assisted orchestration`
+  - Added explicit confirmation gating for non-dry-run orchestration.
+  - Added resume-state writes for confirmed plans without sending network traffic.
+  - Safety gates:
+    - unconfirmed active orchestration fails closed with `approval_required`
+    - confirmed runs record deterministic plan hashes for resume/dedupe
+
+- [x] Task 7.5: Add Intigriti and YAML scope import coverage
+  - Commit: `0cec901 feat(engagement): add intigriti and yaml scope imports`
+  - Added Intigriti JSON fixture coverage using the common `ProgramAsset` model.
+  - Added manual YAML scope import support and CLI wiring for `--format yaml|yml`.
+  - Safety gates:
+    - platform adapters remain behind the platform-neutral scope model
+    - deny precedence and asset metadata continue through `ScopeDecision`
+
 ## Latest known commits for this work
 
 ```text
+0cec901 feat(engagement): add intigriti and yaml scope imports
+2f0368f feat(hunt): gate assisted orchestration
+7a7edb4 feat(harness): wire named session profiles
+9aaf9b3 feat(evidence): add redacted browser snapshots
+707c3aa feat(browser): add client-side semantic verdicts
+d31d4b3 docs: update autonomous hunting phase 6 progress
 83e8aab feat(hunt): add assisted loop skeleton
 540e38c feat(tui): add autonomous hunting panes
 3158f3d feat(harness): add autonomous endpoint wrappers
@@ -579,7 +627,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue after Phase 6. Tasks 6.1-6.4 are complete and committed through `83e8aab feat(hunt): add assisted loop skeleton`; choose the next implementation slice from the Phase 7/8 roadmap before coding.
+Continue after Phase 7. Tasks 7.1-7.5 are complete and committed through `0cec901 feat(engagement): add intigriti and yaml scope imports`; choose the next implementation slice from the Phase 8 roadmap before coding.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```

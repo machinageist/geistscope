@@ -292,6 +292,10 @@ The `mg-artifact-audit` binary merges six passive artifact analyzers into one su
 | Binary | What it does |
 |---|---|
 | `mg-screenshot` | Headless bulk screenshotter with HTML index grid |
+| `mg-engagement` | Engagement scope, program import, session metadata, traffic corpus, and audit workflow |
+| `mg-harness` | Policy-metadata-backed local AI tool endpoint registry for autonomous hunting |
+| `mg-hunt` | Assisted autonomous hunt planner with budgets, approval gates, resume hashes, and safety stops |
+| `mg-evidence` | Immutable evidence bundle writer with semantic diffs and redacted browser snapshots |
 | `mg-diff` | Scan-over-scan diff — new subdomains, ports, endpoints, status changes |
 | `mg-notify` | Finding webhook push to Slack/Discord/ntfy.sh |
 | `mg-timeline` | Chronological engagement timeline reconstructed from workspace files |
