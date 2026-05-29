@@ -256,17 +256,27 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 
 ### Phase 3: Proxy-first traffic capture
 
-- [ ] Task 3.1: Add traffic schema v1
-  - Next recommended task
+- [x] Task 3.1: Add traffic schema v1
+  - Commit: `d887369 feat(engagement): add traffic schema v1`
   - Files:
-    - likely modify `crates/engagement/src/traffic.rs`
+    - `crates/engagement/src/traffic.rs`
+    - `crates/engagement/src/lib.rs`
   - TDD from plan:
-    - [ ] schema round trip with session/identity/role/tenant, scheme/port/query, hashes, operation metadata, risk class, scope decision, tags
-    - [ ] redacted headers never include cookie/authorization/set-cookie
-    - [ ] raw artifact refs include SHA-256 and length
+    - [x] schema round trip with session/identity/role/tenant, scheme/port/query, hashes, operation metadata, risk class, scope decision, tags
+    - [x] redacted headers never include cookie/authorization/set-cookie
+    - [x] raw artifact refs include SHA-256 and length
+  - Implemented:
+    - `TrafficRiskClass`
+    - session/identity/role/tenant fields
+    - scheme/port/query fields
+    - operation, scope decision, sorted tags, request/response SHA-256 fields
+    - body artifact references with relative path, byte length, SHA-256, truncation flag
+  - Safety gates:
+    - sensitive request/response headers are omitted from serialized records
+    - internal `x-mg-*` label headers are extracted into metadata and not retained as forwarded/visible headers
 
 - [ ] Task 3.2: Add proxy-core capture library skeleton
-  - Not started
+  - Next recommended task
   - Files:
     - create `crates/proxy-core/Cargo.toml`
     - create `crates/proxy-core/src/lib.rs`
@@ -310,6 +320,9 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ## Latest known commits for this work
 
 ```text
+d887369 feat(engagement): add traffic schema v1
+ebafe91 feat(browser): add client-side observation model
+12e9fc3 feat(lab): add browser profile CLI
 330c0ca feat(session): add named session profiles
 2929937 feat(lab): add mg-lab CRUD CLI skeleton
 47db67b feat(browser): add client-side test planner
@@ -337,6 +350,7 @@ cargo test -p browser-lab
 cargo test -p lab-model
 cargo test -p action-policy
 cargo test -p engagement
+cargo clippy -p engagement -- -D warnings
 ```
 
 Observed results:
@@ -347,7 +361,7 @@ Observed results:
 - `browser-lab`: 13 tests passed; clippy passed with `-D warnings`
 - `lab-model`: 3 tests passed
 - `action-policy`: 7 tests passed
-- `engagement`: 43 lib tests passed, 2 `mg-engagement` binary tests passed, doctests passed
+- `engagement`: 46 lib tests passed, 2 `mg-engagement` binary tests passed, doctests passed; clippy passed with `-D warnings`
 
 Latest known git status before this checklist was created:
 
@@ -377,7 +391,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 3.1: add traffic schema v1, using strict TDD and atomic commits.
+Continue with Task 3.2: add proxy-core capture library skeleton, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
