@@ -1052,6 +1052,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "evidence-core"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,6 +2426,18 @@ dependencies = [
  "time",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "mg-evidence"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "evidence-core",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
