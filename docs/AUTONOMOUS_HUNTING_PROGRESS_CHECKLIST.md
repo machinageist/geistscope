@@ -549,6 +549,15 @@ Last full targeted verification from the implementation session:
 
 ```bash
 cd /home/mgeist/geistscope/crates
+cargo test -p browser-lab -p evidence-core -p mg-harness -p mg-hunt -p engagement
+cargo clippy -p browser-lab -p evidence-core -p mg-harness -p mg-hunt -p engagement -- -D warnings
+git diff --check
+```
+
+Historical broader verification from earlier implementation sessions:
+
+```bash
+cd /home/mgeist/geistscope/crates
 cargo test -p mg-lab -p lab-model
 cargo clippy -p mg-lab -- -D warnings
 cargo test -p session
@@ -576,7 +585,16 @@ cargo test -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay
 cargo clippy -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine -p evidence-core -p mg-evidence -- -D warnings
 ```
 
-Observed results:
+Observed latest targeted results:
+
+- `browser-lab`: 16 tests passed, doctests passed; clippy passed with `-D warnings`
+- `engagement`: 48 lib tests passed, 2 `mg-engagement` binary tests passed, doctests passed; clippy passed with `-D warnings`
+- `evidence-core`: 4 tests passed, doctests passed; clippy passed with `-D warnings`
+- `mg-harness`: 47 tests passed, binary tests passed; clippy passed with `-D warnings`
+- `mg-hunt`: 8 tests passed; clippy passed with `-D warnings`
+- `git diff --check`: passed
+
+Historical observed results:
 
 - `mg-lab`: 8 tests passed; clippy passed with `-D warnings`
 - `lab-model`: 3 tests passed during Task 2.2 verification
@@ -599,24 +617,10 @@ Observed results:
 - Phase 6 integration check: `mg-harness` 45 tests passed, `mg-tui` 8 tests passed, `mg-hunt` 6 tests passed; clippy passed with `-D warnings`
 - Phase 4/5 integration check: `browser-lab` 13 tests passed, `engagement` 46 lib tests + 2 binary tests passed, `request-corpus` 6 tests passed, `mg-corpus` 2 tests passed, `replay-engine` 7 tests passed, `evidence-core` 3 tests passed, `mg-evidence` 1 test passed; clippy passed with `-D warnings`
 
-Latest known git status before this checklist was created:
+Latest known git status after Phase 7 documentation update:
 
 ```text
 clean working tree
-```
-
-After this checklist file is created, git status should show:
-
-```text
-?? docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md
-```
-
-Commit this checklist if you want it versioned:
-
-```bash
-cd /home/mgeist/geistscope
-git add docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md
-git commit -m "docs: add autonomous hunting progress checklist"
 ```
 
 ## Next restart prompt
