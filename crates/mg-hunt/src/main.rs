@@ -265,7 +265,9 @@ fn plan_dry_run(
             continue;
         }
 
-        let plan_hash = plan_hash_for_candidate(&candidate.id);
+        let replay_plan =
+            build_read_only_replay_plan(&candidate).expect("read-only replay plan builds");
+        let plan_hash = replay_plan.plan_hash;
         if resume.tested_plan_hashes.contains(&plan_hash) {
             skipped_by_resume += 1;
             continue;
@@ -308,14 +310,24 @@ fn is_read_only_candidate(candidate: &CorpusCandidate) -> bool {
     candidate.autonomous_safe && candidate.state_change == CandidateStateChange::ReadOnly
 }
 
-// Derive deterministic local plan hash from candidate id
-fn plan_hash_for_candidate(id: &str) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in id.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("plan-{hash:016x}")
+// Derive deterministic replay plan metadata for a read-only candidate
+fn build_read_only_replay_plan(candidate: &CorpusCandidate) -> Result<replay_engine::ReplayPlan> {
+    PlanBuilder
+        .build(
+            ReplayPlanRequest::new(candidate.clone(), ScopeDecision::InScope)
+                .with_sessions(["default"])
+                .with_expected_secure_result("authorization denial or no controlled target marker")
+                .with_stop_conditions([
+                    "rate_limited",
+                    "waf_detected",
+                    "server_error",
+                    "auth_expired",
+                    "scope_drift",
+                    "out_of_scope_redirect",
+                ])
+                .with_evidence_output_dir(format!("evidence/{}", candidate.id)),
+        )
+        .context("build read-only replay plan")
 }
 
 // Apply approval-gated orchestration side effects without sending network traffic
@@ -361,22 +373,7 @@ fn execute_read_only_test(
     engagement: &Path,
     test: &PlannedTest,
 ) -> Result<(ExecutedTest, Option<StopReason>)> {
-    let replay_plan = PlanBuilder
-        .build(
-            ReplayPlanRequest::new(test.candidate.clone(), ScopeDecision::InScope)
-                .with_sessions(["default"])
-                .with_expected_secure_result("authorization denial or no controlled target marker")
-                .with_stop_conditions([
-                    "rate_limited",
-                    "waf_detected",
-                    "server_error",
-                    "auth_expired",
-                    "scope_drift",
-                    "out_of_scope_redirect",
-                ])
-                .with_evidence_output_dir(format!("evidence/{}", test.candidate_id)),
-        )
-        .context("build read-only replay plan")?;
+    let replay_plan = build_read_only_replay_plan(&test.candidate)?;
     let outcome = load_replay_outcome(engagement, &test.candidate_id)?;
     let verdict = SemanticDiffEngine.classify(&outcome);
     let plan_json = serde_json::to_string_pretty(&replay_plan).context("serialize replay plan")?;
@@ -597,14 +594,12 @@ mod tests {
     #[test]
     fn resume_skips_already_tested_plan_hashes() {
         let mut resume = ResumeState::default();
+        let one = candidate("one", CandidateStateChange::ReadOnly);
         resume
             .tested_plan_hashes
-            .insert(plan_hash_for_candidate("one"));
+            .insert(build_read_only_replay_plan(&one).unwrap().plan_hash);
         let plan = plan_dry_run(
-            vec![
-                candidate("one", CandidateStateChange::ReadOnly),
-                candidate("two", CandidateStateChange::ReadOnly),
-            ],
+            vec![one, candidate("two", CandidateStateChange::ReadOnly)],
             HuntBudget::default(),
             &resume,
         );
@@ -658,11 +653,17 @@ mod tests {
         assert_eq!(plan.executed.len(), 1);
         assert_eq!(plan.executed[0].candidate_id, "one");
         assert_eq!(plan.executed[0].verdict_class, "interesting_diff");
-        assert!(
-            tmp.path()
-                .join(&plan.executed[0].evidence_bundle)
-                .join("plan.json")
-                .exists()
+        let plan_path = tmp
+            .path()
+            .join(&plan.executed[0].evidence_bundle)
+            .join("plan.json");
+        assert!(plan_path.exists());
+        let replay_plan: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(plan_path).expect("read evidence plan"))
+                .expect("parse evidence plan");
+        assert_eq!(
+            replay_plan["plan_hash"].as_str(),
+            Some(plan.executed[0].plan_hash.as_str())
         );
         assert!(
             tmp.path()

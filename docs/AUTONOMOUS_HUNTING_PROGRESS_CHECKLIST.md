@@ -514,6 +514,7 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
   - `mg-hunt` confirmed orchestration now calls replay/evidence primitives for selected read-only candidates instead of only writing resume hashes.
   - Writes one evidence bundle per executed read-only plan with `plan.json`, `semantic_diff.json`, `approvals.json`, and a redacted summary.
   - Adds deterministic local replay outcome fixture support under `hunt/replay-outcomes/<candidate-id>.json` until live HTTP replay wiring lands.
+  - Uses replay-engine plan hashes for selected/executed/resume state so evidence `plan.json` and tested-plan hashes refer to the same immutable replay plan.
   - Safety gates:
     - unconfirmed active orchestration still fails closed with `approval_required`
     - state-changing/browser-only candidates are still filtered before execution
