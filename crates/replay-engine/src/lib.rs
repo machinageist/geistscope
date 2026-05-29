@@ -13,6 +13,42 @@ use thiserror::Error;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PlanBuilder;
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SemanticDiffEngine;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayOutcome {
+    pub status: u16,
+    pub body: String,
+    pub target_tenant_markers: Vec<String>,
+    pub auth_failure_shape: Option<AuthFailureShape>,
+    pub graphql_errors: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticVerdict {
+    pub classification: SemanticVerdictClass,
+    pub boundary_violation: bool,
+    pub matched_markers: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticVerdictClass {
+    SecureDenied,
+    InterestingDiff,
+    BoundaryViolationRead,
+    InvalidTest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthFailureShape {
+    ExpiredToken,
+    MissingSession,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayPlanRequest {
     pub candidate: CorpusCandidate,
@@ -74,6 +110,83 @@ struct ReplayPlanHashMaterial<'a> {
     expected_secure_result: &'a str,
     stop_conditions: &'a [String],
     evidence_output_dir: &'a str,
+}
+
+impl ReplayOutcome {
+    // Create an HTTP replay outcome from local replay metadata
+    pub fn http(status: u16, body: impl Into<String>) -> Self {
+        Self {
+            status,
+            body: body.into(),
+            target_tenant_markers: Vec::new(),
+            auth_failure_shape: None,
+            graphql_errors: false,
+        }
+    }
+
+    // Create a GraphQL outcome carrying error-shape context
+    pub fn graphql_errors(status: u16, body: impl Into<String>) -> Self {
+        Self {
+            graphql_errors: true,
+            ..Self::http(status, body)
+        }
+    }
+
+    // Attach controlled target markers used to detect authorization boundary reads
+    pub fn with_target_tenant_markers<I, S>(mut self, markers: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.target_tenant_markers = markers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    // Attach an auth failure shape that invalidates the proof attempt
+    pub fn with_auth_failure_shape(mut self, shape: AuthFailureShape) -> Self {
+        self.auth_failure_shape = Some(shape);
+        self
+    }
+}
+
+impl SemanticDiffEngine {
+    // Classify replay outcome metadata without exposing raw body data in the verdict
+    pub fn classify(&self, outcome: &ReplayOutcome) -> SemanticVerdict {
+        if outcome.auth_failure_shape == Some(AuthFailureShape::ExpiredToken) {
+            return SemanticVerdict {
+                classification: SemanticVerdictClass::InvalidTest,
+                boundary_violation: false,
+                matched_markers: Vec::new(),
+                reason: "attacker session token was expired, so the proof is invalid".into(),
+            };
+        }
+
+        let matched_markers = matched_target_markers(outcome);
+        if !matched_markers.is_empty() {
+            return SemanticVerdict {
+                classification: SemanticVerdictClass::BoundaryViolationRead,
+                boundary_violation: true,
+                matched_markers,
+                reason: "attacker replay response contained controlled target tenant marker".into(),
+            };
+        }
+
+        if is_secure_denial_status(outcome.status) || is_graphql_authorization_denial(outcome) {
+            return SemanticVerdict {
+                classification: SemanticVerdictClass::SecureDenied,
+                boundary_violation: false,
+                matched_markers: Vec::new(),
+                reason: "target denied access using an authorization failure shape".into(),
+            };
+        }
+
+        SemanticVerdict {
+            classification: SemanticVerdictClass::InterestingDiff,
+            boundary_violation: false,
+            matched_markers: Vec::new(),
+            reason: "response did not match a secure denial or controlled boundary marker".into(),
+        }
+    }
 }
 
 impl ReplayPlanRequest {
@@ -178,6 +291,33 @@ impl PlanBuilder {
     }
 }
 
+// Find controlled target markers that appear in the attacker-visible response body
+fn matched_target_markers(outcome: &ReplayOutcome) -> Vec<String> {
+    outcome
+        .target_tenant_markers
+        .iter()
+        .filter(|marker| !marker.is_empty() && outcome.body.contains(marker.as_str()))
+        .cloned()
+        .collect()
+}
+
+// Treat standard authz denial statuses as secure denials for replay proofs
+fn is_secure_denial_status(status: u16) -> bool {
+    matches!(status, 401 | 403 | 404)
+}
+
+// Detect common GraphQL authorization-denial error shapes
+fn is_graphql_authorization_denial(outcome: &ReplayOutcome) -> bool {
+    if !outcome.graphql_errors {
+        return false;
+    }
+    let body = outcome.body.to_ascii_lowercase();
+    body.contains("forbidden")
+        || body.contains("unauthorized")
+        || body.contains("access denied")
+        || body.contains("not authorized")
+}
+
 // Require approval for ambiguous scope or state-changing candidates
 fn requires_approval(request: &ReplayPlanRequest) -> bool {
     request.scope_decision == ScopeDecision::Ambiguous
@@ -220,6 +360,59 @@ mod tests {
     use request_corpus::{
         CandidateKind, CandidateSafety, CandidateSource, CandidateStateChange, CorpusCandidate,
     };
+
+    #[test]
+    fn semantic_diff_401_403_404_becomes_secure_denied() {
+        for status in [401, 403, 404] {
+            let outcome = ReplayOutcome::http(status, "{\"error\":\"denied\"}");
+            let verdict = SemanticDiffEngine::default().classify(&outcome);
+
+            assert_eq!(verdict.classification, SemanticVerdictClass::SecureDenied);
+            assert!(!verdict.boundary_violation);
+        }
+    }
+
+    #[test]
+    fn semantic_diff_target_tenant_marker_in_attacker_response_becomes_boundary_violation_read() {
+        let outcome = ReplayOutcome::http(
+            200,
+            "{\"tenant_id\":\"tenant-victim\",\"project\":\"victim-owned\"}",
+        )
+        .with_target_tenant_markers(["tenant-victim"]);
+
+        let verdict = SemanticDiffEngine::default().classify(&outcome);
+
+        assert_eq!(
+            verdict.classification,
+            SemanticVerdictClass::BoundaryViolationRead
+        );
+        assert!(verdict.boundary_violation);
+        assert_eq!(verdict.matched_markers, vec!["tenant-victim"]);
+    }
+
+    #[test]
+    fn semantic_diff_expired_token_shape_becomes_invalid_test() {
+        let outcome = ReplayOutcome::http(401, "{\"error\":\"token expired\"}")
+            .with_auth_failure_shape(AuthFailureShape::ExpiredToken);
+
+        let verdict = SemanticDiffEngine::default().classify(&outcome);
+
+        assert_eq!(verdict.classification, SemanticVerdictClass::InvalidTest);
+        assert!(!verdict.boundary_violation);
+    }
+
+    #[test]
+    fn semantic_diff_graphql_authorization_error_becomes_secure_denied() {
+        let outcome = ReplayOutcome::graphql_errors(
+            200,
+            "{\"errors\":[{\"message\":\"Access denied\",\"extensions\":{\"code\":\"FORBIDDEN\"}}]}",
+        );
+
+        let verdict = SemanticDiffEngine::default().classify(&outcome);
+
+        assert_eq!(verdict.classification, SemanticVerdictClass::SecureDenied);
+        assert!(!verdict.boundary_violation);
+    }
 
     #[test]
     fn out_of_scope_candidate_cannot_produce_executable_plan() {
