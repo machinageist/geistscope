@@ -344,9 +344,46 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - state-changing operations require approval and are not autonomous-safe
     - GraphQL analysis is optional and not enabled in the core grouping path
 
-- [ ] Task 4.2: Add `mg-corpus` CLI
-  - Next recommended task
-- [ ] Task 4.3: Add replay-engine plan builder
+- [x] Task 4.2: Add `mg-corpus` CLI
+  - Commit: `8c9ae2f feat(corpus): add mg-corpus CLI`
+  - Files:
+    - `crates/mg-corpus/Cargo.toml`
+    - `crates/mg-corpus/src/main.rs`
+    - `crates/Cargo.toml`
+  - TDD from plan:
+    - [x] `build --json` emits candidate count
+    - [x] `candidates --risk-class read_only` filters correctly
+  - Implemented:
+    - `mg-corpus build <engagement> --json`
+    - `mg-corpus candidates <engagement> --risk-class read_only --json`
+    - stable JSON/JSONL candidate output under `corpus/candidates.jsonl`
+  - Safety gates:
+    - CLI builds and queries inert candidate metadata only
+    - no replay, request execution, proxy start, or browser automation
+
+- [x] Task 4.3: Add replay-engine plan builder
+  - Commit: `d755d9b feat(replay): add replay plan builder`
+  - Files:
+    - `crates/replay-engine/Cargo.toml`
+    - `crates/replay-engine/src/lib.rs`
+    - `crates/Cargo.toml`
+  - TDD from plan:
+    - [x] out-of-scope candidate cannot produce executable plan
+    - [x] ambiguous read-only proof requires approval
+    - [x] approval grant hash must match plan hash
+  - Implemented:
+    - `PlanBuilder`
+    - `ReplayPlanRequest`
+    - `ReplayPlan`
+    - `ScopeDecision`
+    - `ReplaySubstitution`
+    - `ReplayPlanError`
+  - Safety gates:
+    - replay plans are immutable JSON metadata only
+    - out-of-scope candidates fail closed
+    - ambiguous or non-autonomous-safe plans require approval
+    - approval grants are bound to the derived plan hash
+    - evidence output dirs must be safe relative paths
 
 ### Phase 5: Semantic diff and evidence
 
@@ -363,6 +400,8 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ## Latest known commits for this work
 
 ```text
+d755d9b feat(replay): add replay plan builder
+8c9ae2f feat(corpus): add mg-corpus CLI
 732aed0 feat(corpus): add request candidate model
 13d0273 feat(proxy): add mg-proxy CLI skeleton
 05748c1 feat(proxy): add proxy-core skeleton
@@ -401,8 +440,12 @@ cargo test -p proxy-core
 cargo clippy -p proxy-core -- -D warnings
 cargo test -p request-corpus
 cargo clippy -p request-corpus -- -D warnings
-cargo test -p browser-lab -p engagement -p request-corpus
-cargo clippy -p browser-lab -p engagement -p request-corpus -- -D warnings
+cargo test -p mg-corpus
+cargo clippy -p mg-corpus -- -D warnings
+cargo test -p replay-engine
+cargo clippy -p replay-engine -- -D warnings
+cargo test -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine
+cargo clippy -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine -- -D warnings
 ```
 
 Observed results:
@@ -417,7 +460,9 @@ Observed results:
 - `proxy-core`: 5 tests passed, doctests passed; clippy passed with `-D warnings`
 - `mg-proxy`: 3 tests passed; clippy passed with `-D warnings`
 - `request-corpus`: 6 tests passed, doctests passed; clippy passed with `-D warnings`
-- integration check: `browser-lab` 13 tests passed, `engagement` 46 lib tests + 2 binary tests passed, `request-corpus` 6 tests passed; clippy passed with `-D warnings`
+- `mg-corpus`: 2 tests passed; clippy passed with `-D warnings`
+- `replay-engine`: 3 tests passed, doctests passed; clippy passed with `-D warnings`
+- Phase 4 integration check: `browser-lab` 13 tests passed, `engagement` 46 lib tests + 2 binary tests passed, `request-corpus` 6 tests passed, `mg-corpus` 2 tests passed, `replay-engine` 3 tests passed; clippy passed with `-D warnings`
 
 Latest known git status before this checklist was created:
 
@@ -447,7 +492,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 4.2: add `mg-corpus` CLI, using strict TDD and atomic commits.
+Continue with Task 5.1: add semantic diff verdict engine, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
