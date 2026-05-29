@@ -23,6 +23,15 @@ pub enum Tab {
     Logs,
     Harness,
     Browser,
+    ProxyFeed,
+    SessionVault,
+    BrowserProfiles,
+    LabMatrix,
+    Corpus,
+    ReplayPlans,
+    SemanticDiffs,
+    EvidenceBundles,
+    AiNextSafeTest,
 }
 
 impl Tab {
@@ -35,6 +44,15 @@ impl Tab {
         Tab::Logs,
         Tab::Harness,
         Tab::Browser,
+        Tab::ProxyFeed,
+        Tab::SessionVault,
+        Tab::BrowserProfiles,
+        Tab::LabMatrix,
+        Tab::Corpus,
+        Tab::ReplayPlans,
+        Tab::SemanticDiffs,
+        Tab::EvidenceBundles,
+        Tab::AiNextSafeTest,
     ];
 
     pub fn title(self) -> &'static str {
@@ -47,6 +65,15 @@ impl Tab {
             Tab::Logs => "Logs",
             Tab::Harness => "Harness",
             Tab::Browser => "Browser",
+            Tab::ProxyFeed => "Proxy Feed",
+            Tab::SessionVault => "Session Vault",
+            Tab::BrowserProfiles => "Browser Profiles",
+            Tab::LabMatrix => "Lab Matrix",
+            Tab::Corpus => "Corpus",
+            Tab::ReplayPlans => "Replay Plans",
+            Tab::SemanticDiffs => "Semantic Diffs",
+            Tab::EvidenceBundles => "Evidence Bundles",
+            Tab::AiNextSafeTest => "AI Next Safe Test",
         }
     }
 
@@ -56,6 +83,33 @@ impl Tab {
 
     pub fn from_index(i: usize) -> Tab {
         Tab::ALL.get(i).copied().unwrap_or(Tab::Engagements)
+    }
+}
+
+// Operator prompt metadata for active autonomous actions
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveActionPrompt {
+    pub engagement: String,
+    pub target: String,
+    pub scope_decision: String,
+    pub session: String,
+    pub risk: String,
+    pub output_path: String,
+    pub approval_state: String,
+}
+
+impl ActiveActionPrompt {
+    // Render active action policy context for confirmation panes
+    pub fn lines(&self) -> Vec<String> {
+        vec![
+            format!("Engagement: {}", self.engagement),
+            format!("Target: {}", self.target),
+            format!("Scope: {}", self.scope_decision),
+            format!("Session: {}", self.session),
+            format!("Risk: {}", self.risk),
+            format!("Output: {}", self.output_path),
+            format!("Approval: {}", self.approval_state),
+        ]
     }
 }
 
@@ -327,6 +381,7 @@ pub struct App {
     pub engagements_dir: PathBuf,
     pub should_quit: bool,
     pub browser: BrowserState,
+    pub active_action_prompt: Option<ActiveActionPrompt>,
 }
 
 impl App {
@@ -354,6 +409,7 @@ impl App {
                 show_inspector: true,
                 ..BrowserState::default()
             },
+            active_action_prompt: None,
         }
     }
 
@@ -381,6 +437,7 @@ impl App {
     }
 
     // Move cursor up in the active list
+    #[allow(clippy::collapsible_match)]
     pub fn cursor_up(&mut self) {
         match self.tab {
             Tab::Engagements => {
@@ -423,10 +480,12 @@ impl App {
                     self.browser.scroll -= 1;
                 }
             }
+            _ => {}
         }
     }
 
     // Move cursor down in the active list
+    #[allow(clippy::collapsible_match)]
     pub fn cursor_down(&mut self) {
         match self.tab {
             Tab::Engagements => {
@@ -471,6 +530,7 @@ impl App {
                     self.browser.scroll += 1;
                 }
             }
+            _ => {}
         }
     }
 
@@ -519,6 +579,55 @@ mod tests {
             images: vec![],
             forms: vec![],
             form_elements: vec![],
+        }
+    }
+
+    #[test]
+    fn tab_enum_includes_autonomous_hunting_panes() {
+        let titles: std::collections::BTreeSet<_> =
+            Tab::ALL.iter().map(|tab| tab.title()).collect();
+        for title in [
+            "Proxy Feed",
+            "Session Vault",
+            "Browser Profiles",
+            "Lab Matrix",
+            "Corpus",
+            "Replay Plans",
+            "Semantic Diffs",
+            "Evidence Bundles",
+            "AI Next Safe Test",
+        ] {
+            assert!(titles.contains(title), "missing TUI pane {title}");
+        }
+    }
+
+    #[test]
+    fn active_action_prompt_displays_policy_context() {
+        let prompt = ActiveActionPrompt {
+            engagement: "acme".into(),
+            target: "https://api.example.com/v1/users/2".into(),
+            scope_decision: "allowed: wildcard *.example.com".into(),
+            session: "attacker-readonly".into(),
+            risk: "low_active".into(),
+            output_path: "evidence/acme/replay/run-1".into(),
+            approval_state: "pending".into(),
+        };
+
+        let rendered = prompt.lines().join("\n");
+
+        for expected in [
+            "Engagement: acme",
+            "Target: https://api.example.com/v1/users/2",
+            "Scope: allowed: wildcard *.example.com",
+            "Session: attacker-readonly",
+            "Risk: low_active",
+            "Output: evidence/acme/replay/run-1",
+            "Approval: pending",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing prompt field {expected}"
+            );
         }
     }
 

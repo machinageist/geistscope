@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Tabs},
+    widgets::{Block, Borders, Paragraph, Tabs},
 };
 
 // Render all UI layers: tab bar, active view, status bar
@@ -38,9 +38,66 @@ pub fn render(f: &mut Frame, app: &App) {
         Tab::Logs => logs::render(f, app, chunks[1]),
         Tab::Harness => harness::render(f, app, chunks[1]),
         Tab::Browser => browser::render(f, app, chunks[1]),
+        Tab::ProxyFeed
+        | Tab::SessionVault
+        | Tab::BrowserProfiles
+        | Tab::LabMatrix
+        | Tab::Corpus
+        | Tab::ReplayPlans
+        | Tab::SemanticDiffs
+        | Tab::EvidenceBundles
+        | Tab::AiNextSafeTest => render_autonomous_pane(f, app, chunks[1]),
     }
 
     render_status_bar(f, app, chunks[2]);
+}
+
+// Render autonomous hunting placeholder pane with policy metadata
+fn render_autonomous_pane(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let selected = app.selected_engagement.as_deref().unwrap_or("(none)");
+    let endpoint_names = mg_harness::registry()
+        .into_iter()
+        .filter(|spec| {
+            spec.name.starts_with("hunt.")
+                || spec.name.starts_with("replay.")
+                || spec.name.starts_with("evidence.")
+        })
+        .map(|spec| spec.name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "Engagement: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(selected.to_string(), Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("Pane: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(app.tab.title(), Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(""),
+        Line::from("Policy metadata shown for active actions:"),
+        Line::from("- scope decision"),
+        Line::from("- session/profile context"),
+        Line::from("- risk class and approval state"),
+        Line::from("- local output/evidence path"),
+        Line::from(""),
+        Line::from(format!("Registered autonomous endpoints: {endpoint_names}")),
+    ];
+    if let Some(prompt) = &app.active_action_prompt {
+        lines.push(Line::from(""));
+        lines.push(Line::from("Active action prompt:"));
+        lines.extend(prompt.lines().into_iter().map(Line::from));
+    }
+
+    let paragraph = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" {} ", app.tab.title())),
+    );
+    f.render_widget(paragraph, area);
 }
 
 // Render tab bar highlighting the active tab
