@@ -56,6 +56,9 @@ enum Command {
         /// Resume from local tested plan hashes
         #[arg(long)]
         resume: bool,
+        /// Operator approval for non-dry-run orchestration
+        #[arg(long)]
+        confirmed: bool,
         /// Emit stable JSON
         #[arg(long)]
         json: bool,
@@ -98,6 +101,7 @@ struct ResumeState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 enum StopReason {
     MaxTests,
     MaxDuration,
@@ -105,9 +109,11 @@ enum StopReason {
     RateLimited,
     ServerErrors,
     WafDetected,
+    ApprovalRequired,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[allow(dead_code)]
 struct LoopState {
     server_errors: usize,
 }
@@ -140,6 +146,7 @@ impl HuntPlan {
 
 impl LoopState {
     // Record execution feedback and return a safety stop reason if thresholds trip
+    #[allow(dead_code)]
     fn record_response(&mut self, status: u16, waf_like: bool) -> Option<StopReason> {
         if waf_like {
             return Some(StopReason::WafDetected);
@@ -186,6 +193,7 @@ fn run(args: Args) -> Result<String> {
             max_duration,
             max_bytes,
             resume,
+            confirmed,
             json,
         } => {
             let candidates = load_candidates(&engagement.join(CANDIDATES_RELATIVE_PATH))?;
@@ -194,7 +202,7 @@ fn run(args: Args) -> Result<String> {
             } else {
                 ResumeState::default()
             };
-            let plan = plan_dry_run(
+            let mut plan = plan_dry_run(
                 candidates,
                 HuntBudget {
                     max_tests,
@@ -204,8 +212,7 @@ fn run(args: Args) -> Result<String> {
                 &resume_state,
             );
             if !dry_run {
-                let mut loop_state = LoopState::default();
-                let _ = loop_state.record_response(200, false);
+                apply_policy_gated_orchestration(&engagement, &mut plan, confirmed)?;
             }
             render(json, &plan, || {
                 format!(
@@ -287,6 +294,38 @@ fn plan_hash_for_candidate(id: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("plan-{hash:016x}")
+}
+
+// Apply approval-gated orchestration side effects without sending network traffic
+fn apply_policy_gated_orchestration(
+    engagement: &Path,
+    plan: &mut HuntPlan,
+    confirmed: bool,
+) -> Result<()> {
+    if !confirmed {
+        plan.stop_reason = Some(StopReason::ApprovalRequired);
+        return Ok(());
+    }
+    if plan.selected.is_empty() {
+        return Ok(());
+    }
+    let resume_path = engagement.join(RESUME_RELATIVE_PATH);
+    if let Some(parent) = resume_path.parent() {
+        std::fs::create_dir_all(parent).context("create hunt state directory")?;
+    }
+    let mut existing = load_resume_state(&resume_path)?;
+    for test in &plan.selected {
+        existing.tested_plan_hashes.insert(test.plan_hash.clone());
+    }
+    let mut serialized = existing
+        .tested_plan_hashes
+        .iter()
+        .cloned()
+        .collect::<Vec<String>>()
+        .join("\n");
+    serialized.push('\n');
+    std::fs::write(&resume_path, serialized).context("write tested plan hashes")?;
+    Ok(())
 }
 
 // Load stable JSONL candidates
@@ -465,5 +504,36 @@ mod tests {
 
         assert_eq!(plan.selected_ids(), vec!["two"]);
         assert_eq!(plan.skipped_by_resume, 1);
+    }
+
+    #[test]
+    fn active_orchestration_requires_explicit_confirmation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut plan = plan_dry_run(
+            vec![candidate("one", CandidateStateChange::ReadOnly)],
+            HuntBudget::default(),
+            &ResumeState::default(),
+        );
+
+        apply_policy_gated_orchestration(tmp.path(), &mut plan, false).unwrap();
+
+        assert_eq!(plan.stop_reason, Some(StopReason::ApprovalRequired));
+        assert!(!tmp.path().join(RESUME_RELATIVE_PATH).exists());
+    }
+
+    #[test]
+    fn confirmed_orchestration_records_tested_plan_hashes_for_resume() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut plan = plan_dry_run(
+            vec![candidate("one", CandidateStateChange::ReadOnly)],
+            HuntBudget::default(),
+            &ResumeState::default(),
+        );
+        let expected_hash = plan.selected[0].plan_hash.clone();
+
+        apply_policy_gated_orchestration(tmp.path(), &mut plan, true).unwrap();
+
+        let resume = load_resume_state(&tmp.path().join(RESUME_RELATIVE_PATH)).unwrap();
+        assert!(resume.tested_plan_hashes.contains(&expected_hash));
     }
 }
