@@ -2729,6 +2729,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "proxy-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "mg-recon"
 version = "0.1.0"
 dependencies = [

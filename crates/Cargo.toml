@@ -15,6 +15,7 @@ members = [
     "ai-prioritize",
     "mg-crawl",
     "mg-probe",
+    "mg-proxy",
     "mg-fuzz",
     "mg-replay",
     "mg-tui",
