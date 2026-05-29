@@ -434,7 +434,11 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 
 ### Phase 6: Harness, TUI, and assisted hunt loop
 
-- [ ] Task 6.1: Add harness endpoint policy metadata
+- [x] Task 6.1: Add harness endpoint policy metadata
+  - Added immutable endpoint policy metadata to every `mg-harness` `EndpointSpec`.
+  - Added regression coverage that model-supplied arguments cannot alter endpoint policy metadata.
+  - Mapped invalid model/tool arguments to typed `endpoint.invalid_args` results instead of generic endpoint errors.
+  - Verified sensitive request headers remain absent from model-visible request output.
 - [ ] Task 6.2: Add autonomous endpoint families
 - [ ] Task 6.3: Add TUI panes
 - [ ] Task 6.4: Add `mg-hunt` assisted loop
