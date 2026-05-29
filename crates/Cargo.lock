@@ -2591,6 +2591,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-hunt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "request-corpus",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "mg-jwt"
 version = "0.1.0"
 dependencies = [

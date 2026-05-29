@@ -23,6 +23,7 @@ members = [
     "mg-replay",
     "mg-tui",
     "mg-harness",
+    "mg-hunt",
     "mg-report",
     "session",
     "payload-engine",
