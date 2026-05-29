@@ -96,6 +96,17 @@ impl AuthState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TrafficRiskClass {
+    #[default]
+    Unknown,
+    Informational,
+    Authorization,
+    ClientSide,
+    SensitiveData,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrafficResponse {
     pub status: u16,
@@ -129,6 +140,32 @@ pub struct TrafficRecord {
     pub url: String,
     pub host: String,
     pub path: String,
+    #[serde(default)]
+    pub scheme: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_decision: Option<String>,
+    #[serde(default)]
+    pub risk_class: TrafficRiskClass,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub request_sha256: String,
+    #[serde(default)]
+    pub response_sha256: String,
     #[serde(default)]
     pub params: Vec<String>,
     #[serde(default)]
@@ -779,6 +816,22 @@ fn build_pending_record(
     let parsed = Url::parse(&url).ok()?;
     let host = parsed.host_str()?.to_string();
     let path = parsed.path().to_string();
+    let scheme = parsed.scheme().to_string();
+    let port = parsed.port_or_known_default();
+    let query = parsed.query().map(str::to_string);
+    let session_id = header_value(&request_headers, "x-mg-session-id");
+    let identity_id = header_value(&request_headers, "x-mg-identity-id");
+    let role_id = header_value(&request_headers, "x-mg-role-id");
+    let tenant_id = header_value(&request_headers, "x-mg-tenant-id");
+    let operation = header_value(&request_headers, "x-mg-operation");
+    let scope_decision = header_value(&request_headers, "x-mg-scope-decision");
+    let risk_class = header_value(&request_headers, "x-mg-risk-class")
+        .as_deref()
+        .map(parse_risk_class)
+        .unwrap_or_default();
+    let tags = header_value(&request_headers, "x-mg-tags")
+        .map(parse_tags)
+        .unwrap_or_default();
     let mut params: BTreeSet<String> = parsed
         .query_pairs()
         .map(|(name, _)| name.to_string())
@@ -848,6 +901,19 @@ fn build_pending_record(
             url,
             host,
             path,
+            scheme,
+            port,
+            query,
+            session_id,
+            identity_id,
+            role_id,
+            tenant_id,
+            operation,
+            scope_decision,
+            risk_class,
+            tags,
+            request_sha256: request_body_hash,
+            response_sha256: response_body_hash,
             params: params.into_iter().collect(),
             request_headers,
             request_body: None,
@@ -1227,21 +1293,11 @@ where
 fn sanitize_headers(headers: &[(String, String)]) -> Vec<HeaderRecord> {
     headers
         .iter()
-        .map(|(name, value)| {
-            let redacted = is_sensitive_header(name);
-            HeaderRecord {
-                name: name.to_ascii_lowercase(),
-                value: if redacted {
-                    if name.eq_ignore_ascii_case("set-cookie") {
-                        sanitize_set_cookie(value)
-                    } else {
-                        "<redacted>".into()
-                    }
-                } else {
-                    value.clone()
-                },
-                redacted,
-            }
+        .filter(|(name, _)| !is_sensitive_header(name) && !is_internal_label_header(name))
+        .map(|(name, value)| HeaderRecord {
+            name: name.to_ascii_lowercase(),
+            value: value.clone(),
+            redacted: false,
         })
         .collect()
 }
@@ -1258,6 +1314,32 @@ fn is_sensitive_header(name: &str) -> bool {
             | "x-csrf-token"
             | "x-xsrf-token"
     )
+}
+
+fn is_internal_label_header(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("x-mg-")
+}
+
+fn parse_risk_class(value: &str) -> TrafficRiskClass {
+    match value.to_ascii_lowercase().as_str() {
+        "authorization" | "authz" => TrafficRiskClass::Authorization,
+        "client_side" | "client-side" | "client" => TrafficRiskClass::ClientSide,
+        "sensitive_data" | "sensitive-data" => TrafficRiskClass::SensitiveData,
+        "informational" | "info" => TrafficRiskClass::Informational,
+        _ => TrafficRiskClass::Unknown,
+    }
+}
+
+fn parse_tags(value: String) -> Vec<String> {
+    let mut tags = value
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    tags.sort();
+    tags.dedup();
+    tags
 }
 
 fn detect_auth_state(headers: &[(String, String)], params: &BTreeSet<String>) -> AuthState {
@@ -1313,18 +1395,6 @@ fn cookie_names(headers: &[(String, String)]) -> Vec<String> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
-}
-
-fn sanitize_set_cookie(raw: &str) -> String {
-    let mut parts = raw.split(';').map(str::trim);
-    let first = parts.next().unwrap_or_default();
-    let name = first.split_once('=').map_or(first, |(name, _)| name);
-    let attrs = parts.collect::<Vec<_>>();
-    if attrs.is_empty() {
-        format!("{name}=<redacted>")
-    } else {
-        format!("{name}=<redacted>; {}", attrs.join("; "))
-    }
 }
 
 fn mime_without_params(raw: &str) -> String {
@@ -1475,6 +1545,112 @@ mod tests {
     }
 
     #[test]
+    fn traffic_record_v1_round_trip_preserves_labels_scope_and_operation_metadata() {
+        let pending = build_pending_record(
+            "proxy",
+            None,
+            "2026-05-28T00:00:00Z".into(),
+            "POST",
+            "https://app.example.test:8443/api/orders?debug=true",
+            vec![
+                ("X-Mg-Session-Id".into(), "session-alice".into()),
+                ("X-Mg-Identity-Id".into(), "alice".into()),
+                ("X-Mg-Role-Id".into(), "admin".into()),
+                ("X-Mg-Tenant-Id".into(), "tenant-a".into()),
+                ("X-Mg-Operation".into(), "create_order".into()),
+                ("X-Mg-Scope-Decision".into(), "scope_allow_1".into()),
+                ("X-Mg-Risk-Class".into(), "authz".into()),
+                ("X-Mg-Tags".into(), "browser,authorization".into()),
+            ],
+            Some(br#"{"order_id":1}"#.to_vec()),
+            Vec::new(),
+            Some(ParsedResponse {
+                status: 201,
+                mime: Some("application/json".into()),
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: Some(br#"{"ok":true}"#.to_vec()),
+                redirect_location: None,
+            }),
+        )
+        .unwrap();
+
+        let raw = serde_json::to_string(&pending.record).unwrap();
+        let parsed: TrafficRecord = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(parsed.session_id.as_deref(), Some("session-alice"));
+        assert_eq!(parsed.identity_id.as_deref(), Some("alice"));
+        assert_eq!(parsed.role_id.as_deref(), Some("admin"));
+        assert_eq!(parsed.tenant_id.as_deref(), Some("tenant-a"));
+        assert_eq!(parsed.scheme, "https");
+        assert_eq!(parsed.port, Some(8443));
+        assert_eq!(parsed.query.as_deref(), Some("debug=true"));
+        assert_eq!(parsed.operation.as_deref(), Some("create_order"));
+        assert_eq!(parsed.scope_decision.as_deref(), Some("scope_allow_1"));
+        assert_eq!(parsed.risk_class, TrafficRiskClass::Authorization);
+        assert_eq!(
+            parsed.tags,
+            vec!["authorization".to_string(), "browser".to_string()]
+        );
+        assert!(!parsed.request_sha256.is_empty());
+        assert!(!parsed.response_sha256.is_empty());
+    }
+
+    #[test]
+    fn redacted_headers_omit_sensitive_header_names_and_values() {
+        let headers = sanitize_headers(&[
+            ("Authorization".into(), "Bearer secret".into()),
+            ("Cookie".into(), "sid=secret".into()),
+            ("Set-Cookie".into(), "sid=secret".into()),
+            ("Content-Type".into(), "application/json".into()),
+        ]);
+        let raw = serde_json::to_string(&headers).unwrap();
+
+        assert!(!raw.to_ascii_lowercase().contains("authorization"));
+        assert!(!raw.to_ascii_lowercase().contains("set-cookie"));
+        assert!(!raw.to_ascii_lowercase().contains("cookie"));
+        assert!(!raw.contains("secret"));
+        assert!(raw.contains("content-type"));
+    }
+
+    #[test]
+    fn raw_body_artifact_refs_include_sha256_and_length() {
+        let eng = test_engagement();
+        let har_path = eng.root.join("body.har");
+        fs::write(
+            &har_path,
+            r#"{
+              "log": {"entries": [{
+                "startedDateTime": "2026-05-28T00:00:00Z",
+                "request": {
+                  "method": "POST",
+                  "url": "https://api.example.com/orders",
+                  "headers": [{"name":"Content-Type","value":"application/json"}],
+                  "postData": {"mimeType":"application/json","text":"{\"order\":1}"}
+                },
+                "response": {
+                  "status": 200,
+                  "headers": [{"name":"Content-Type","value":"application/json"}],
+                  "content": {"mimeType":"application/json","text":"{\"ok\":true}"}
+                }
+              }]}}
+            "#,
+        )
+        .unwrap();
+
+        import_traffic_file(&eng, &har_path, TrafficImportFormat::Har).unwrap();
+        let records = load_traffic_records(&eng).unwrap();
+        let record = &records[0];
+        let request_body = record.request_body.as_ref().unwrap();
+        let response_body = record.response.as_ref().unwrap().body.as_ref().unwrap();
+
+        assert!(request_body.path.starts_with("traffic/bodies/"));
+        assert_eq!(request_body.len, br#"{"order":1}"#.len());
+        assert_eq!(request_body.sha256.len(), 64);
+        assert_eq!(response_body.len, br#"{"ok":true}"#.len());
+        assert_eq!(response_body.sha256.len(), 64);
+    }
+
+    #[test]
     fn har_import_indexes_and_redacts_request() {
         let eng = test_engagement();
         let har_path = eng.root.join("sample.har");
@@ -1511,7 +1687,12 @@ mod tests {
         assert_eq!(record.path, "/users");
         assert_eq!(record.auth_state, AuthState::Authenticated);
         assert!(record.params.contains(&"id".into()));
-        assert_eq!(record.request_headers[0].value, "<redacted>");
+        assert!(
+            record
+                .request_headers
+                .iter()
+                .all(|header| !header.name.eq_ignore_ascii_case("authorization"))
+        );
         let response = record.response.as_ref().unwrap();
         assert_eq!(response.status, 200);
         assert_eq!(response.html_title.as_deref(), Some("Users"));

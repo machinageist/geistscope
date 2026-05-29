@@ -69,7 +69,11 @@ pub struct ToolFinding {
 
 impl ToolFinding {
     // Construct a new finding; sets deterministic id and UTC timestamp
-    pub fn new(tool: impl Into<String>, title: impl Into<String>, severity: FindingSeverity) -> Self {
+    pub fn new(
+        tool: impl Into<String>,
+        title: impl Into<String>,
+        severity: FindingSeverity,
+    ) -> Self {
         let tool = tool.into();
         let title = title.into();
         let id = derive_id(&tool, "", "", &title, "");
@@ -162,10 +166,8 @@ pub fn write_finding(eng: &Engagement, finding: &ToolFinding) -> anyhow::Result<
         return Ok(path);
     }
 
-    let json = serde_json::to_string_pretty(finding)
-        .context("serialize ToolFinding")?;
-    std::fs::write(&path, json)
-        .with_context(|| format!("write {}", path.display()))?;
+    let json = serde_json::to_string_pretty(finding).context("serialize ToolFinding")?;
+    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
 
     Ok(path)
 }
@@ -192,7 +194,13 @@ fn derive_id(tool: &str, url: &str, parameter: &str, title: &str, discriminator:
 // Replace characters that are unsafe in filenames with dashes
 fn safe_component(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
@@ -230,18 +238,15 @@ mod tests {
 
     #[test]
     fn id_differs_by_url() {
-        let f1 = ToolFinding::new("mg-xss", "XSS", FindingSeverity::High)
-            .url("https://a.com");
-        let f2 = ToolFinding::new("mg-xss", "XSS", FindingSeverity::High)
-            .url("https://b.com");
+        let f1 = ToolFinding::new("mg-xss", "XSS", FindingSeverity::High).url("https://a.com");
+        let f2 = ToolFinding::new("mg-xss", "XSS", FindingSeverity::High).url("https://b.com");
         assert_ne!(f1.id, f2.id);
     }
 
     #[test]
     fn evidence_truncated_with_marker() {
         let long = "x".repeat(4096);
-        let f = ToolFinding::new("mg-sqli", "SQLi", FindingSeverity::Medium)
-            .evidence(long);
+        let f = ToolFinding::new("mg-sqli", "SQLi", FindingSeverity::Medium).evidence(long);
         let ev = f.evidence.unwrap();
         assert!(ev.ends_with(EVIDENCE_TRUNCATION_SUFFIX));
         assert!(ev.len() <= EVIDENCE_MAX_BYTES);

@@ -82,7 +82,7 @@ fn reject_control_characters(value: &str) -> Result<(), EngagementError> {
 mod tests {
     use time::OffsetDateTime;
 
-    use crate::audit::{append_audit_event, AuditDecision, AuditEvent, AuditRisk};
+    use crate::audit::{AuditDecision, AuditEvent, AuditRisk, append_audit_event};
 
     #[test]
     fn append_typed_audit_event_writes_jsonl() {

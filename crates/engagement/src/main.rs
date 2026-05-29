@@ -5,15 +5,15 @@
  *******************************************************************/
 mod cli;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use engagement::{
     Engagement, EngagementMeta, Finding, Severity, Status, TrafficFilter, TrafficImportFormat,
 };
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct SessionConfig {

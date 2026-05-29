@@ -25,10 +25,10 @@ pub use scope::{ProgramAsset, Scope, ScopeDecision, ScopeRuleMatch, ScopeVerdict
 pub use tool_finding::{FindingSeverity, ToolFinding, write_finding};
 pub use traffic::{
     AuthState, BodyRef, HeaderRecord, ImportSummary, ResponseDiff, ResponseFingerprint,
-    TrafficFilter, TrafficImportFormat, TrafficRecord, TrafficResponse, TrafficStore,
-    diff_response_fingerprints, find_traffic_record, import_traffic_file, load_traffic_records,
-    raw_http_request, response_fingerprint_from_parts, response_fingerprint_from_record,
-    search_traffic_records,
+    TrafficFilter, TrafficImportFormat, TrafficRecord, TrafficResponse, TrafficRiskClass,
+    TrafficStore, diff_response_fingerprints, find_traffic_record, import_traffic_file,
+    load_traffic_records, raw_http_request, response_fingerprint_from_parts,
+    response_fingerprint_from_record, search_traffic_records,
 };
 
 #[derive(Debug, thiserror::Error)]

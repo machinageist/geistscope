@@ -598,9 +598,11 @@ mod tests {
         assert_eq!(decision.decision, ScopeVerdict::InScope);
         assert_eq!(decision.asset_type.as_deref(), Some("api"));
         assert_eq!(decision.submission_eligible, Some(true));
-        assert!(decision
-            .notes
-            .iter()
-            .any(|note| note.contains("private program notes")));
+        assert!(
+            decision
+                .notes
+                .iter()
+                .any(|note| note.contains("private program notes"))
+        );
     }
 }
