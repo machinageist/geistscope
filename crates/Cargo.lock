@@ -3594,6 +3594,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "proxy-core"
+version = "0.1.0"
+dependencies = [
+ "engagement",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "psl-types"
 version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

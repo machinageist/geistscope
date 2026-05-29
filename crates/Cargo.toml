@@ -22,6 +22,7 @@ members = [
     "mg-report",
     "session",
     "payload-engine",
+    "proxy-core",
     "security-graph",
     "mg-recopilot",
     "mg-aifuzz",
