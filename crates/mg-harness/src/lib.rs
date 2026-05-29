@@ -276,6 +276,10 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         ep if subprocess_tool_for(ep).is_some() => {
             handle_tool_binary(cfg, &invocation, spec.risk).await
         }
+        ep if autonomous_endpoint_spec(ep).is_some() => Ok(handle_autonomous_endpoint_wrapper(
+            &invocation,
+            autonomous_endpoint_spec(ep).expect("checked autonomous endpoint"),
+        )),
         _ => Ok(result_blocked(
             endpoint.clone(),
             spec.risk,
@@ -298,13 +302,35 @@ fn tool_pack_for_endpoint(endpoint: &str) -> ToolPack {
         "endpoint.registry"
         | "engagement.open"
         | "engagement.status"
+        | "program.import_scope"
         | "scope.check"
+        | "scope.explain"
+        | "lab.matrix"
+        | "lab.identity.list"
         | "session.set"
         | "session.get_headers"
+        | "session.list"
+        | "browser_profile.list"
+        | "browser_profile.create"
+        | "browser_profile.start"
+        | "proxy.feed"
+        | "proxy.export"
         | "request.import"
         | "request.search"
         | "request.read"
         | "request.replay"
+        | "traffic.search"
+        | "corpus.build"
+        | "corpus.candidates"
+        | "corpus.read"
+        | "replay.plan"
+        | "replay.run"
+        | "diff.semantic"
+        | "client_side.plan"
+        | "client_side.read"
+        | "evidence.bundle"
+        | "hunt.next"
+        | "hunt.run"
         | "graph.ingest"
         | "graph.summary"
         | "graph.neighbors"
@@ -396,6 +422,164 @@ fn endpoint_policy_metadata_for_endpoint(
         model_visible_schema,
         redaction_policy,
         confirmation: risk,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AutonomousEndpointSpec {
+    endpoint: &'static str,
+    risk: RiskClass,
+    description: &'static str,
+}
+
+const AUTONOMOUS_ENDPOINTS: &[AutonomousEndpointSpec] = &[
+    AutonomousEndpointSpec {
+        endpoint: "program.import_scope",
+        risk: RiskClass::StateChange,
+        description: "Import platform-neutral program scope into the engagement authorization snapshot.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "scope.explain",
+        risk: RiskClass::ReadOnly,
+        description: "Explain the scope decision and matched authorization rules for a target.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "lab.matrix",
+        risk: RiskClass::ReadOnly,
+        description: "Summarize lab identities, tenants, roles, resources, and expected authorization boundaries.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "lab.identity.list",
+        risk: RiskClass::ReadOnly,
+        description: "List controlled lab identities without exposing session secrets.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "session.list",
+        risk: RiskClass::ReadOnly,
+        description: "List redacted named session profiles and freshness metadata.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "browser_profile.list",
+        risk: RiskClass::ReadOnly,
+        description: "List isolated browser/container profiles and safe account labels.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "browser_profile.create",
+        risk: RiskClass::StateChange,
+        description: "Create an isolated browser/container profile under the engagement root.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "browser_profile.start",
+        risk: RiskClass::LowActive,
+        description: "Start or dry-run a scoped browser/container profile with loopback proxy policy.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "proxy.feed",
+        risk: RiskClass::ReadOnly,
+        description: "Read a bounded redacted proxy traffic feed.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "proxy.export",
+        risk: RiskClass::StateChange,
+        description: "Export captured proxy traffic into local engagement artifacts.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "traffic.search",
+        risk: RiskClass::ReadOnly,
+        description: "Search redacted traffic records across proxy and imported corpora.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "corpus.build",
+        risk: RiskClass::StateChange,
+        description: "Build inert corpus candidates from local traffic and browser observations.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "corpus.candidates",
+        risk: RiskClass::ReadOnly,
+        description: "List bounded authorization and client-side candidates.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "corpus.read",
+        risk: RiskClass::ReadOnly,
+        description: "Read one candidate as a redacted model-visible summary.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "replay.plan",
+        risk: RiskClass::ReadOnly,
+        description: "Create or read an immutable replay plan without sending traffic.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "replay.run",
+        risk: RiskClass::HighActive,
+        description: "Execute an approved replay plan through Rust-owned scope and budget policy.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "diff.semantic",
+        risk: RiskClass::ReadOnly,
+        description: "Classify replay outcomes using semantic diff verdicts.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "client_side.plan",
+        risk: RiskClass::ReadOnly,
+        description: "Create a non-destructive client-side browser test plan.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "client_side.read",
+        risk: RiskClass::ReadOnly,
+        description: "Read bounded client-side observations and evidence references.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "evidence.bundle",
+        risk: RiskClass::StateChange,
+        description: "Write an immutable evidence bundle containing redacted summaries and artifact hashes.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "hunt.next",
+        risk: RiskClass::ReadOnly,
+        description: "Select the next safe read-only test candidate from local evidence.",
+    },
+    AutonomousEndpointSpec {
+        endpoint: "hunt.run",
+        risk: RiskClass::LowActive,
+        description: "Run the assisted hunt loop within deterministic operator budgets.",
+    },
+];
+
+fn autonomous_endpoint_spec(endpoint: &str) -> Option<&'static AutonomousEndpointSpec> {
+    AUTONOMOUS_ENDPOINTS
+        .iter()
+        .find(|spec| spec.endpoint == endpoint)
+}
+
+fn handle_autonomous_endpoint_wrapper(
+    invocation: &Invocation,
+    spec: &AutonomousEndpointSpec,
+) -> EndpointResult {
+    EndpointResult {
+        endpoint: spec.endpoint.into(),
+        status: EndpointStatus::Ok,
+        risk: spec.risk,
+        summary: Some(format!(
+            "{} wrapper is policy-gated and returns redacted summaries with evidence references only",
+            spec.endpoint
+        )),
+        output_files: Vec::new(),
+        evidence_refs: vec![format!(
+            "evidence://{}/{}",
+            invocation.engagement,
+            spec.endpoint.replace('.', "/")
+        )],
+        redactions: BTreeMap::from([("model_supplied_args".into(), 1)]),
+        data: Some(json!({
+            "endpoint": spec.endpoint,
+            "description": spec.description,
+            "wrapper_status": "ready",
+            "model_visible": "redacted-summary-and-evidence-refs-only",
+            "args_accepted": invocation.args.is_object(),
+            "raw_model_args_echoed": false,
+        })),
+        reason: None,
+        policy: Some("endpoint.wrapper_ready".into()),
     }
 }
 
@@ -760,6 +944,16 @@ pub fn registry() -> Vec<EndpointSpec> {
         },
     ]
     .into_iter()
+    .chain(AUTONOMOUS_ENDPOINTS.iter().map(|t| EndpointSpec {
+        name: t.endpoint,
+        risk: t.risk,
+        implemented: true,
+        description: t.description,
+        pack: tool_pack_for_endpoint(t.endpoint),
+        exposure: tool_exposure_for_endpoint(t.endpoint, t.risk),
+        repurpose: endpoint_repurpose_note(t.endpoint),
+        policy_metadata: endpoint_policy_metadata_for_endpoint(t.endpoint, t.risk),
+    }))
     .chain(SUBPROCESS_TOOLS.iter().map(|t| EndpointSpec {
         name: t.endpoint,
         risk: t.risk,
@@ -3192,6 +3386,70 @@ mod tests {
             confirmed: false,
             args: Value::Null,
         }
+    }
+
+    #[test]
+    fn autonomous_endpoint_families_are_registered() {
+        let names: std::collections::BTreeSet<_> =
+            registry().into_iter().map(|spec| spec.name).collect();
+        let expected = [
+            "program.import_scope",
+            "scope.explain",
+            "lab.matrix",
+            "lab.identity.list",
+            "session.list",
+            "browser_profile.list",
+            "browser_profile.create",
+            "browser_profile.start",
+            "proxy.feed",
+            "proxy.export",
+            "traffic.search",
+            "corpus.build",
+            "corpus.candidates",
+            "corpus.read",
+            "replay.plan",
+            "replay.run",
+            "diff.semantic",
+            "client_side.plan",
+            "client_side.read",
+            "evidence.bundle",
+            "hunt.next",
+            "hunt.run",
+        ];
+
+        for endpoint in expected {
+            assert!(
+                names.contains(endpoint),
+                "missing autonomous endpoint {endpoint}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn autonomous_high_risk_endpoint_blocks_without_approval() {
+        let cfg = test_config();
+        let result = dispatch(&cfg, invocation("replay.run")).await;
+
+        assert_eq!(result.status, EndpointStatus::Blocked);
+        assert_eq!(result.policy.as_deref(), Some("risk.confirmation_required"));
+    }
+
+    #[tokio::test]
+    async fn autonomous_wrapper_output_is_redacted_and_reference_only() {
+        let cfg = test_config();
+        let mut inv = invocation("hunt.next");
+        inv.args = json!({
+            "candidate_note": "Authorization: Bearer secret Cookie: session=secret",
+        });
+
+        let result = dispatch(&cfg, inv).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        assert_eq!(result.policy.as_deref(), Some("endpoint.wrapper_ready"));
+        let serialized = serde_json::to_string(&result).unwrap();
+        assert!(!serialized.contains("Bearer secret"));
+        assert!(!serialized.contains("session=secret"));
+        assert!(serialized.contains("evidence://acme/hunt/next"));
     }
 
     #[test]
