@@ -510,7 +510,7 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ## Phase 8 progress
 
 - [x] Task 8.1a: Start real read-only `mg-hunt` execution path
-  - Commit: pending
+  - Commit: `09fc6b0 feat(hunt): start read-only execution path`
   - `mg-hunt` confirmed orchestration now calls replay/evidence primitives for selected read-only candidates instead of only writing resume hashes.
   - Writes one evidence bundle per executed read-only plan with `plan.json`, `semantic_diff.json`, `approvals.json`, and a redacted summary.
   - Adds deterministic local replay outcome fixture support under `hunt/replay-outcomes/<candidate-id>.json` until live HTTP replay wiring lands.
