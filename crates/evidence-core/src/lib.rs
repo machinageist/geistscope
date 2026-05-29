@@ -22,6 +22,15 @@ pub struct EvidenceBundleRequest {
     pub semantic_diff_json: String,
     pub summary: String,
     pub raw_artifacts: Vec<RawEvidenceArtifact>,
+    pub browser_snapshots: Vec<BrowserSnapshotArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserSnapshotArtifact {
+    pub id: String,
+    pub url: String,
+    pub dom_html: String,
+    pub screenshot_png: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +82,7 @@ impl EvidenceBundleRequest {
             semantic_diff_json: "{}".into(),
             summary: String::new(),
             raw_artifacts: Vec::new(),
+            browser_snapshots: Vec::new(),
         }
     }
 
@@ -107,6 +117,29 @@ impl EvidenceBundleRequest {
             bytes: bytes.into(),
         });
         self
+    }
+
+    // Attach redacted browser DOM and screenshot evidence
+    pub fn with_browser_snapshot(mut self, snapshot: BrowserSnapshotArtifact) -> Self {
+        self.browser_snapshots.push(snapshot);
+        self
+    }
+}
+
+impl BrowserSnapshotArtifact {
+    // Create browser snapshot evidence from local DOM and screenshot bytes
+    pub fn new(
+        id: impl Into<String>,
+        url: impl Into<String>,
+        dom_html: impl Into<String>,
+        screenshot_png: impl Into<Vec<u8>>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            url: url.into(),
+            dom_html: dom_html.into(),
+            screenshot_png: screenshot_png.into(),
+        }
     }
 }
 
@@ -149,6 +182,30 @@ impl EvidenceBundleWriter {
                 path: rel_path.display().to_string(),
                 sha256: sha256_hex(&artifact.bytes),
                 len: artifact.bytes.len(),
+            });
+        }
+        for snapshot in request.browser_snapshots {
+            validate_component(&snapshot.id)?;
+            let rel_dir = PathBuf::from("browser-snapshots").join(&snapshot.id);
+            let abs_dir = bundle_dir.join(&rel_dir);
+            std::fs::create_dir_all(&abs_dir).map_err(io_error)?;
+            let metadata = serde_json::to_string_pretty(&serde_json::json!({
+                "id": snapshot.id,
+                "url": snapshot.url,
+                "dom_artifact": "dom.redacted.html",
+                "screenshot_artifact": "screenshot.png",
+            }))
+            .map_err(json_error)?;
+            write_text(abs_dir.join("metadata.json"), &metadata)?;
+            let redacted_dom = redact_dom_snapshot(&snapshot.dom_html);
+            write_text(abs_dir.join("dom.redacted.html"), &redacted_dom)?;
+            let screenshot_path = rel_dir.join("screenshot.png");
+            std::fs::write(bundle_dir.join(&screenshot_path), &snapshot.screenshot_png)
+                .map_err(io_error)?;
+            artifacts.push(EvidenceArtifactManifest {
+                path: screenshot_path.display().to_string(),
+                sha256: sha256_hex(&snapshot.screenshot_png),
+                len: snapshot.screenshot_png.len(),
             });
         }
 
@@ -217,6 +274,27 @@ fn redact_summary_line(line: &str) -> String {
         })
         .collect::<Vec<String>>()
         .join(" ")
+}
+
+// Redact DOM snapshot text before writing model-visible browser artifacts
+fn redact_dom_snapshot(dom: &str) -> String {
+    let mut redacted = dom.to_string();
+    for token in
+        dom.split(|ch: char| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'' | '='))
+    {
+        let lower = token.to_ascii_lowercase();
+        if !token.is_empty()
+            && (lower.contains("token")
+                || lower.contains("secret")
+                || lower.contains("cookie")
+                || lower.contains("password"))
+        {
+            redacted = redacted.replace(token, "[REDACTED_TOKEN]");
+        } else if looks_like_email(token) {
+            redacted = redacted.replace(token, "[REDACTED_EMAIL]");
+        }
+    }
+    redacted
 }
 
 // Detect simple email-like tokens without pulling in a regex dependency
@@ -294,5 +372,37 @@ mod tests {
         assert!(summary.contains("[REDACTED_COOKIE]"));
         assert!(summary.contains("[REDACTED_TOKEN]"));
         assert!(summary.contains("[REDACTED_EMAIL]"));
+    }
+
+    #[test]
+    fn browser_snapshot_artifacts_write_redacted_dom_and_hashed_screenshot() {
+        let root = tempfile::tempdir().unwrap();
+        let request = EvidenceBundleRequest::new(root.path(), "candidate-001", "run-browser")
+            .with_browser_snapshot(BrowserSnapshotArtifact::new(
+                "search-page",
+                "https://app.example.test/search?q=x",
+                "<html><body data-token=\"secret-token\">jeff@example.com</body></html>",
+                vec![137, 80, 78, 71, b's', b'e', b'c', b'r', b'e', b't'],
+            ));
+
+        let bundle = EvidenceBundleWriter.write(request).unwrap();
+        let dom = std::fs::read_to_string(
+            bundle
+                .bundle_dir
+                .join("browser-snapshots/search-page/dom.redacted.html"),
+        )
+        .unwrap();
+        let screenshot = bundle
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == "browser-snapshots/search-page/screenshot.png")
+            .unwrap();
+
+        assert!(dom.contains("[REDACTED_TOKEN]"));
+        assert!(dom.contains("[REDACTED_EMAIL]"));
+        assert!(!dom.contains("secret-token"));
+        assert!(!dom.contains("jeff@example.com"));
+        assert_eq!(screenshot.len, 10);
+        assert_eq!(screenshot.sha256.len(), 64);
     }
 }
