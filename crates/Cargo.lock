@@ -2297,6 +2297,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-corpus"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "engagement",
+ "request-corpus",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "url",
+]
+
+[[package]]
 name = "mg-crawl"
 version = "0.1.0"
 dependencies = [

@@ -16,6 +16,7 @@ members = [
     "mg-crawl",
     "mg-probe",
     "mg-proxy",
+    "mg-corpus",
     "mg-fuzz",
     "mg-replay",
     "mg-tui",

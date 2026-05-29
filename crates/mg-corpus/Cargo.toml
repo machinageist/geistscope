@@ -1,0 +1,20 @@
+[package]
+name = "mg-corpus"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "mg-corpus"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+engagement = { path = "../engagement" }
+request-corpus = { path = "../request-corpus" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+url = "2"
