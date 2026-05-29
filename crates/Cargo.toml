@@ -26,6 +26,7 @@ members = [
     "payload-engine",
     "proxy-core",
     "request-corpus",
+    "replay-engine",
     "security-graph",
     "mg-recopilot",
     "mg-aifuzz",
