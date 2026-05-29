@@ -387,8 +387,50 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 
 ### Phase 5: Semantic diff and evidence
 
-- [ ] Task 5.1: Add semantic diff verdict engine
-- [ ] Task 5.2: Add evidence bundle writer
+- [x] Task 5.1: Add semantic diff verdict engine
+  - Commit: `6169841 feat(replay): add semantic diff verdicts`
+  - Files:
+    - `crates/replay-engine/src/lib.rs`
+  - TDD from plan:
+    - [x] 401/403/404 becomes `SecureDenied`
+    - [x] target tenant marker in attacker response becomes `BoundaryViolationRead`
+    - [x] expired token shape becomes `InvalidTest`
+    - [x] GraphQL authorization error becomes `SecureDenied`
+  - Implemented:
+    - `SemanticDiffEngine`
+    - `ReplayOutcome`
+    - `SemanticVerdict`
+    - `SemanticVerdictClass`
+    - `AuthFailureShape`
+  - Safety gates:
+    - verdict output contains classifications, reasons, and controlled marker names only
+    - expired attacker/session token shapes invalidate proofs instead of producing findings
+    - GraphQL authorization-denial shapes are treated as secure denial
+
+- [x] Task 5.2: Add evidence bundle writer
+  - Commit: `0916e5b feat(evidence): add evidence bundle writer`
+  - Files:
+    - `crates/evidence-core/Cargo.toml`
+    - `crates/evidence-core/src/lib.rs`
+    - `crates/mg-evidence/Cargo.toml`
+    - `crates/mg-evidence/src/main.rs`
+    - `crates/Cargo.toml`
+  - TDD from plan:
+    - [x] evidence run path includes candidate id and run id
+    - [x] existing run cannot be overwritten
+    - [x] `summary.redacted.md` contains no synthetic cookies/tokens/PII
+  - Implemented:
+    - `EvidenceBundleWriter`
+    - `EvidenceBundleRequest`
+    - `EvidenceBundle`
+    - `EvidenceArtifactManifest`
+    - `EvidenceBundleError`
+    - `mg-evidence write <engagement> --candidate-id ... --run-id ... --json`
+  - Safety gates:
+    - evidence bundles are immutable and existing runs fail closed
+    - bundle paths include candidate id and run id under the engagement root
+    - raw artifacts are hashed in the manifest
+    - model-visible summaries redact cookie, bearer token, and email-like shapes
 
 ### Phase 6: Harness, TUI, and assisted hunt loop
 
@@ -400,6 +442,8 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ## Latest known commits for this work
 
 ```text
+0916e5b feat(evidence): add evidence bundle writer
+6169841 feat(replay): add semantic diff verdicts
 d755d9b feat(replay): add replay plan builder
 8c9ae2f feat(corpus): add mg-corpus CLI
 732aed0 feat(corpus): add request candidate model
@@ -444,8 +488,12 @@ cargo test -p mg-corpus
 cargo clippy -p mg-corpus -- -D warnings
 cargo test -p replay-engine
 cargo clippy -p replay-engine -- -D warnings
-cargo test -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine
-cargo clippy -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine -- -D warnings
+cargo test -p evidence-core -p mg-evidence
+cargo clippy -p evidence-core -p mg-evidence -- -D warnings
+cargo test -p replay-engine -p evidence-core -p mg-evidence
+cargo clippy -p replay-engine -p evidence-core -p mg-evidence -- -D warnings
+cargo test -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine -p evidence-core -p mg-evidence
+cargo clippy -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine -p evidence-core -p mg-evidence -- -D warnings
 ```
 
 Observed results:
@@ -461,8 +509,11 @@ Observed results:
 - `mg-proxy`: 3 tests passed; clippy passed with `-D warnings`
 - `request-corpus`: 6 tests passed, doctests passed; clippy passed with `-D warnings`
 - `mg-corpus`: 2 tests passed; clippy passed with `-D warnings`
-- `replay-engine`: 3 tests passed, doctests passed; clippy passed with `-D warnings`
-- Phase 4 integration check: `browser-lab` 13 tests passed, `engagement` 46 lib tests + 2 binary tests passed, `request-corpus` 6 tests passed, `mg-corpus` 2 tests passed, `replay-engine` 3 tests passed; clippy passed with `-D warnings`
+- `replay-engine`: 7 tests passed, doctests passed; clippy passed with `-D warnings`
+- `evidence-core`: 3 tests passed, doctests passed; clippy passed with `-D warnings`
+- `mg-evidence`: 1 test passed; clippy passed with `-D warnings`
+- Phase 5 integration check: `replay-engine` 7 tests passed, `evidence-core` 3 tests passed, `mg-evidence` 1 test passed; clippy passed with `-D warnings`
+- Phase 4/5 integration check: `browser-lab` 13 tests passed, `engagement` 46 lib tests + 2 binary tests passed, `request-corpus` 6 tests passed, `mg-corpus` 2 tests passed, `replay-engine` 7 tests passed, `evidence-core` 3 tests passed, `mg-evidence` 1 test passed; clippy passed with `-D warnings`
 
 Latest known git status before this checklist was created:
 
@@ -492,7 +543,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 5.1: add semantic diff verdict engine, using strict TDD and atomic commits.
+Continue with Task 6.1: add harness endpoint policy metadata, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
