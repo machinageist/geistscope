@@ -318,9 +318,34 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 
 ### Phase 4: Corpus candidates and replay plans
 
-- [ ] Task 4.1: Add request-corpus candidate model
-  - Next recommended task
+- [x] Task 4.1: Add request-corpus candidate model
+  - Commit: `732aed0 feat(corpus): add request candidate model`
+  - Files:
+    - `crates/request-corpus/Cargo.toml`
+    - `crates/request-corpus/src/lib.rs`
+    - `crates/Cargo.toml`
+  - TDD from plan:
+    - [x] comparable A/B GETs become `CrossTenantRead` candidate
+    - [x] POST product creation is classified state-changing and not autonomous
+    - [x] GraphQL global IDs are decoded by optional analyzer, not core logic
+    - [x] attacker-controllable DOM sink/source observations become `DomXssCandidate`
+    - [x] wildcard postMessage origin observations become `ClientSideOriginCandidate`
+  - Implemented:
+    - `CandidateBuilder`
+    - `CorpusCandidate`
+    - `CandidateKind`
+    - `CandidateSource`
+    - `CandidateSafety`
+    - `CandidateStateChange`
+    - optional `analyzers::graphql::decode_global_id`
+  - Safety gates:
+    - candidate generation is inert metadata only and does not execute requests
+    - read-only cross-tenant candidates are marked autonomous-safe only for proof planning
+    - state-changing operations require approval and are not autonomous-safe
+    - GraphQL analysis is optional and not enabled in the core grouping path
+
 - [ ] Task 4.2: Add `mg-corpus` CLI
+  - Next recommended task
 - [ ] Task 4.3: Add replay-engine plan builder
 
 ### Phase 5: Semantic diff and evidence
@@ -338,6 +363,7 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ## Latest known commits for this work
 
 ```text
+732aed0 feat(corpus): add request candidate model
 13d0273 feat(proxy): add mg-proxy CLI skeleton
 05748c1 feat(proxy): add proxy-core skeleton
 d887369 feat(engagement): add traffic schema v1
@@ -373,8 +399,10 @@ cargo test -p engagement
 cargo clippy -p engagement -- -D warnings
 cargo test -p proxy-core
 cargo clippy -p proxy-core -- -D warnings
-cargo test -p mg-proxy
-cargo clippy -p mg-proxy -- -D warnings
+cargo test -p request-corpus
+cargo clippy -p request-corpus -- -D warnings
+cargo test -p browser-lab -p engagement -p request-corpus
+cargo clippy -p browser-lab -p engagement -p request-corpus -- -D warnings
 ```
 
 Observed results:
@@ -388,6 +416,8 @@ Observed results:
 - `engagement`: 46 lib tests passed, 2 `mg-engagement` binary tests passed, doctests passed; clippy passed with `-D warnings`
 - `proxy-core`: 5 tests passed, doctests passed; clippy passed with `-D warnings`
 - `mg-proxy`: 3 tests passed; clippy passed with `-D warnings`
+- `request-corpus`: 6 tests passed, doctests passed; clippy passed with `-D warnings`
+- integration check: `browser-lab` 13 tests passed, `engagement` 46 lib tests + 2 binary tests passed, `request-corpus` 6 tests passed; clippy passed with `-D warnings`
 
 Latest known git status before this checklist was created:
 
@@ -417,7 +447,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 4.1: add request-corpus candidate model, using strict TDD and atomic commits.
+Continue with Task 4.2: add `mg-corpus` CLI, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
