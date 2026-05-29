@@ -24,6 +24,7 @@ members = [
     "session",
     "payload-engine",
     "proxy-core",
+    "request-corpus",
     "security-graph",
     "mg-recopilot",
     "mg-aifuzz",
