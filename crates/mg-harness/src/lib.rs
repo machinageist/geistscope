@@ -255,6 +255,7 @@ pub async fn dispatch(cfg: &HarnessConfig, invocation: Invocation) -> EndpointRe
         "recon.run" => handle_recon_run(cfg, &invocation).await,
         "session.set" => handle_session_set(cfg, &invocation).await,
         "session.get_headers" => handle_session_get_headers(cfg, &invocation).await,
+        "session.list" => handle_session_list(cfg, &invocation).await,
         "request.import" => handle_request_import(cfg, &invocation).await,
         "request.search" => handle_request_search(cfg, &invocation).await,
         "request.read" => handle_request_read(cfg, &invocation).await,
@@ -1528,6 +1529,44 @@ async fn handle_session_get_headers(
     invocation: &Invocation,
 ) -> Result<EndpointResult, HarnessError> {
     let eng = load_engagement(cfg, &invocation.engagement)?;
+    if let Some(profile_name) = optional_string_opt(&invocation.args, "profile")? {
+        let profile = session::require_active_session_profile(&eng, &profile_name)?;
+        let auth_ref_count = profile.auth_refs.len();
+        let mut redactions = BTreeMap::new();
+        redactions.insert("auth_refs".into(), auth_ref_count);
+        let _ = eng.audit(
+            "mg-harness",
+            &eng.meta.target,
+            Some(&format!(
+                "endpoint=session.get_headers profile={} auth_ref_count={}",
+                profile.name, auth_ref_count
+            )),
+        );
+
+        return Ok(EndpointResult {
+            endpoint: invocation.endpoint.clone(),
+            status: EndpointStatus::Ok,
+            risk: RiskClass::ReadOnly,
+            summary: Some(format!(
+                "resolved named session profile {} with {} redacted auth ref(s)",
+                profile.name, auth_ref_count
+            )),
+            output_files: Vec::new(),
+            evidence_refs: Vec::new(),
+            redactions,
+            data: Some(json!({
+                "configured": true,
+                "profile": profile.name,
+                "username_present": profile.username.is_some(),
+                "login_url_present": profile.login_url.is_some(),
+                "valid_until": profile.valid_until,
+                "auth_ref_count": auth_ref_count,
+            })),
+            reason: None,
+            policy: None,
+        });
+    }
+
     match session::load_session_config(&eng) {
         Ok(_) => {}
         Err(session::SessionError::NotConfigured) => {
@@ -1584,6 +1623,63 @@ async fn handle_session_get_headers(
             "headers": redacted_headers,
             "header_count": header_count,
         })),
+        reason: None,
+        policy: None,
+    })
+}
+
+// Handle session.list
+async fn handle_session_list(
+    cfg: &HarnessConfig,
+    invocation: &Invocation,
+) -> Result<EndpointResult, HarnessError> {
+    let eng = load_engagement(cfg, &invocation.engagement)?;
+    let sessions_dir = eng.root.join("sessions");
+    let mut profiles = Vec::new();
+    if sessions_dir.exists() {
+        for entry in fs::read_dir(&sessions_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            let profile = session::require_active_session_profile(&eng, stem)?;
+            profiles.push(json!({
+                "name": profile.name,
+                "username_present": profile.username.is_some(),
+                "login_url_present": profile.login_url.is_some(),
+                "valid_until": profile.valid_until,
+                "auth_ref_count": profile.auth_refs.len(),
+            }));
+        }
+    }
+    profiles.sort_by(|left, right| {
+        left["name"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["name"].as_str().unwrap_or_default())
+    });
+    let _ = eng.audit(
+        "mg-harness",
+        &eng.meta.target,
+        Some(&format!("endpoint=session.list count={}", profiles.len())),
+    );
+
+    Ok(EndpointResult {
+        endpoint: invocation.endpoint.clone(),
+        status: EndpointStatus::Ok,
+        risk: RiskClass::ReadOnly,
+        summary: Some(format!(
+            "listed {} redacted named session profile(s)",
+            profiles.len()
+        )),
+        output_files: Vec::new(),
+        evidence_refs: Vec::new(),
+        redactions: BTreeMap::new(),
+        data: Some(json!({ "profiles": profiles, "count": profiles.len() })),
         reason: None,
         policy: None,
     })
@@ -3782,6 +3878,62 @@ mod tests {
         assert_eq!(data["configured"], true);
         assert_eq!(data["headers"]["authorization"], "<redacted>");
         assert_eq!(data["header_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn session_list_returns_named_profiles_without_secret_refs() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        let profile = session::SessionProfile {
+            name: "attacker".into(),
+            username: Some("alice".into()),
+            login_url: Some("https://app.example.com/login".into()),
+            auth_refs: vec![session::SecretRef::env("bearer", "MG_ATTACKER_TOKEN")],
+            valid_until: None,
+        };
+        session::save_session_profile(&eng, &profile).unwrap();
+
+        let result = dispatch(&cfg, invocation("session.list")).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        assert_eq!(data["profiles"][0]["name"], "attacker");
+        assert_eq!(data["profiles"][0]["auth_ref_count"], 1);
+        assert_eq!(data["profiles"][0]["username_present"], true);
+        assert!(
+            !serde_json::to_string(&data)
+                .unwrap()
+                .contains("MG_ATTACKER_TOKEN")
+        );
+    }
+
+    #[tokio::test]
+    async fn session_get_headers_accepts_named_profile_without_exposing_secret_ref_names() {
+        let cfg = test_config();
+        let eng = Engagement::load_named(&cfg.engagements_dir, "acme").unwrap();
+        let profile = session::SessionProfile {
+            name: "victim".into(),
+            username: None,
+            login_url: None,
+            auth_refs: vec![session::SecretRef::env("cookie", "MG_VICTIM_COOKIE")],
+            valid_until: None,
+        };
+        session::save_session_profile(&eng, &profile).unwrap();
+        let mut inv = invocation("session.get_headers");
+        inv.args = json!({ "profile": "victim" });
+
+        let result = dispatch(&cfg, inv).await;
+
+        assert_eq!(result.status, EndpointStatus::Ok);
+        let data = result.data.unwrap();
+        assert_eq!(data["configured"], true);
+        assert_eq!(data["profile"], "victim");
+        assert_eq!(data["auth_ref_count"], 1);
+        assert!(
+            !serde_json::to_string(&data)
+                .unwrap()
+                .contains("MG_VICTIM_COOKIE")
+        );
     }
 
     #[tokio::test]
