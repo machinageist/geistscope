@@ -435,17 +435,43 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ### Phase 6: Harness, TUI, and assisted hunt loop
 
 - [x] Task 6.1: Add harness endpoint policy metadata
+  - Commit: `daac37f feat(harness): add endpoint policy metadata`
   - Added immutable endpoint policy metadata to every `mg-harness` `EndpointSpec`.
   - Added regression coverage that model-supplied arguments cannot alter endpoint policy metadata.
   - Mapped invalid model/tool arguments to typed `endpoint.invalid_args` results instead of generic endpoint errors.
   - Verified sensitive request headers remain absent from model-visible request output.
-- [ ] Task 6.2: Add autonomous endpoint families
-- [ ] Task 6.3: Add TUI panes
-- [ ] Task 6.4: Add `mg-hunt` assisted loop
+- [x] Task 6.2: Add autonomous endpoint families
+  - Commit: `3158f3d feat(harness): add autonomous endpoint wrappers`
+  - Added registered `hunt.*` assisted-loop endpoint wrappers for next test, status, approve, record, and stop actions.
+  - Added registered proxy/session/profile/lab/corpus/replay/diff/evidence endpoint families for the autonomous hunting surface.
+  - Safety gates:
+    - autonomous wrappers derive risk and policy metadata from Rust-owned static specs, not model arguments
+    - high-active autonomous endpoints still require explicit approval
+    - model-visible wrapper output is reference-only and redacts model-supplied args
+- [x] Task 6.3: Add TUI panes
+  - Commit: `540e38c feat(tui): add autonomous hunting panes`
+  - Added autonomous hunting tabs for proxy feed, session vault, browser profiles, lab matrix, corpus, replay plans, semantic diffs, evidence bundles, and AI next-safe-test.
+  - Added `ActiveActionPrompt` metadata for engagement, target, scope decision, session, risk, output path, and approval state.
+  - Safety gates:
+    - active-action prompt context keeps policy decisions visible to the operator
+    - panes show registered autonomous endpoints without exposing raw secrets
+- [x] Task 6.4: Add `mg-hunt` assisted loop
+  - Commit: `83e8aab feat(hunt): add assisted loop skeleton`
+  - Added `mg-hunt run <engagement>` dry-run planner with deterministic `max-tests`, `max-duration`, and `max-bytes` budgets.
+  - Added resume support using local tested plan hashes.
+  - Added 429, 5xx, and WAF-like safety stop reasons for execution feedback.
+  - Safety gates:
+    - dry-run planning selects only autonomous-safe read-only candidates
+    - state-changing and browser-only candidates are skipped by policy
+    - resume prevents duplicate plan hashes from being selected again
 
 ## Latest known commits for this work
 
 ```text
+83e8aab feat(hunt): add assisted loop skeleton
+540e38c feat(tui): add autonomous hunting panes
+3158f3d feat(harness): add autonomous endpoint wrappers
+daac37f feat(harness): add endpoint policy metadata
 0916e5b feat(evidence): add evidence bundle writer
 6169841 feat(replay): add semantic diff verdicts
 d755d9b feat(replay): add replay plan builder
@@ -496,6 +522,8 @@ cargo test -p evidence-core -p mg-evidence
 cargo clippy -p evidence-core -p mg-evidence -- -D warnings
 cargo test -p replay-engine -p evidence-core -p mg-evidence
 cargo clippy -p replay-engine -p evidence-core -p mg-evidence -- -D warnings
+cargo test -p mg-harness -p mg-tui -p mg-hunt -- --nocapture
+cargo clippy -p mg-harness -p mg-tui -p mg-hunt -- -D warnings
 cargo test -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine -p evidence-core -p mg-evidence
 cargo clippy -p browser-lab -p engagement -p request-corpus -p mg-corpus -p replay-engine -p evidence-core -p mg-evidence -- -D warnings
 ```
@@ -517,6 +545,10 @@ Observed results:
 - `evidence-core`: 3 tests passed, doctests passed; clippy passed with `-D warnings`
 - `mg-evidence`: 1 test passed; clippy passed with `-D warnings`
 - Phase 5 integration check: `replay-engine` 7 tests passed, `evidence-core` 3 tests passed, `mg-evidence` 1 test passed; clippy passed with `-D warnings`
+- `mg-harness`: 45 tests passed; clippy passed with `-D warnings`
+- `mg-tui`: 8 tests passed; clippy passed with `-D warnings`
+- `mg-hunt`: 6 tests passed; clippy passed with `-D warnings`
+- Phase 6 integration check: `mg-harness` 45 tests passed, `mg-tui` 8 tests passed, `mg-hunt` 6 tests passed; clippy passed with `-D warnings`
 - Phase 4/5 integration check: `browser-lab` 13 tests passed, `engagement` 46 lib tests + 2 binary tests passed, `request-corpus` 6 tests passed, `mg-corpus` 2 tests passed, `replay-engine` 7 tests passed, `evidence-core` 3 tests passed, `mg-evidence` 1 test passed; clippy passed with `-D warnings`
 
 Latest known git status before this checklist was created:
@@ -547,7 +579,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 6.1: add harness endpoint policy metadata, using strict TDD and atomic commits.
+Continue after Phase 6. Tasks 6.1-6.4 are complete and committed through `83e8aab feat(hunt): add assisted loop skeleton`; choose the next implementation slice from the Phase 7/8 roadmap before coding.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
