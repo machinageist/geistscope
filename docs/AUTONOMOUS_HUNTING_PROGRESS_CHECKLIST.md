@@ -275,21 +275,31 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - sensitive request/response headers are omitted from serialized records
     - internal `x-mg-*` label headers are extracted into metadata and not retained as forwarded/visible headers
 
-- [ ] Task 3.2: Add proxy-core capture library skeleton
-  - Next recommended task
+- [x] Task 3.2: Add proxy-core capture library skeleton
+  - Commit: `05748c1 feat(proxy): add proxy-core skeleton`
   - Files:
-    - create `crates/proxy-core/Cargo.toml`
-    - create `crates/proxy-core/src/lib.rs`
-    - modify `crates/Cargo.toml`
+    - `crates/proxy-core/Cargo.toml`
+    - `crates/proxy-core/src/lib.rs`
+    - `crates/Cargo.toml`
   - TDD from plan:
-    - [ ] default listener is loopback only
-    - [ ] non-loopback listen requires explicit approval flag
-    - [ ] `x-mg-*` label headers are stripped before upstream forwarding
-    - [ ] raw request/response artifacts are written under engagement root
-    - [ ] browser profile metadata is recorded locally but never forwarded upstream
+    - [x] default listener is loopback only
+    - [x] non-loopback listen requires explicit approval flag
+    - [x] `x-mg-*` label headers are stripped before upstream forwarding
+    - [x] raw request/response artifacts are written under engagement root
+    - [x] browser profile metadata is recorded locally but never forwarded upstream
+  - Implemented:
+    - `ProxyConfig` listener validation
+    - request/header/response/capture skeleton types
+    - `PreparedUpstreamRequest` split between upstream request and local metadata
+    - engagement-root raw artifact writes with SHA-256 and byte counts
+  - Safety gates:
+    - default bind is `127.0.0.1:8080`
+    - non-loopback bind fails without explicit approval flag
+    - internal `x-mg-*` label headers are never placed in the upstream request
+    - browser profile metadata remains local-only
 
 - [ ] Task 3.3: Add `mg-proxy` CLI skeleton
-  - Not started
+  - Next recommended task
   - Files:
     - create `crates/mg-proxy/Cargo.toml`
     - create `crates/mg-proxy/src/main.rs`
@@ -320,6 +330,7 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
 ## Latest known commits for this work
 
 ```text
+05748c1 feat(proxy): add proxy-core skeleton
 d887369 feat(engagement): add traffic schema v1
 ebafe91 feat(browser): add client-side observation model
 12e9fc3 feat(lab): add browser profile CLI
@@ -351,6 +362,8 @@ cargo test -p lab-model
 cargo test -p action-policy
 cargo test -p engagement
 cargo clippy -p engagement -- -D warnings
+cargo test -p proxy-core
+cargo clippy -p proxy-core -- -D warnings
 ```
 
 Observed results:
@@ -362,6 +375,7 @@ Observed results:
 - `lab-model`: 3 tests passed
 - `action-policy`: 7 tests passed
 - `engagement`: 46 lib tests passed, 2 `mg-engagement` binary tests passed, doctests passed; clippy passed with `-D warnings`
+- `proxy-core`: 5 tests passed, doctests passed; clippy passed with `-D warnings`
 
 Latest known git status before this checklist was created:
 
@@ -391,7 +405,7 @@ Paste this into a fresh context:
 We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
 Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue with Task 3.2: add proxy-core capture library skeleton, using strict TDD and atomic commits.
+Continue with Task 3.3: add `mg-proxy` CLI skeleton, using strict TDD and atomic commits.
 Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
 Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
 ```
