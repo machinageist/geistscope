@@ -8,11 +8,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use evidence_core::{EvidenceBundleRequest, EvidenceBundleWriter};
+use replay_engine::{
+    PlanBuilder, ReplayOutcome, ReplayPlanRequest, ScopeDecision, SemanticDiffEngine,
+    SemanticVerdictClass,
+};
 use request_corpus::{CandidateStateChange, CorpusCandidate};
 use serde::Serialize;
 
 const CANDIDATES_RELATIVE_PATH: &str = "corpus/candidates.jsonl";
 const RESUME_RELATIVE_PATH: &str = "hunt/tested-plan-hashes.txt";
+const REPLAY_OUTCOMES_RELATIVE_DIR: &str = "hunt/replay-outcomes";
 const DEFAULT_MAX_TESTS: usize = 20;
 const DEFAULT_MAX_DURATION_SECS: u64 = 300;
 const DEFAULT_MAX_BYTES: u64 = 1_048_576;
@@ -110,6 +116,8 @@ enum StopReason {
     ServerErrors,
     WafDetected,
     ApprovalRequired,
+    AuthExpired,
+    EvidenceWriteFailed,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -123,6 +131,8 @@ struct PlannedTest {
     candidate_id: String,
     plan_hash: String,
     summary: String,
+    #[serde(skip)]
+    candidate: CorpusCandidate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -130,7 +140,17 @@ struct HuntPlan {
     selected: Vec<PlannedTest>,
     skipped_by_policy: usize,
     skipped_by_resume: usize,
+    executed: Vec<ExecutedTest>,
     stop_reason: Option<StopReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ExecutedTest {
+    candidate_id: String,
+    plan_hash: String,
+    verdict_class: String,
+    boundary_violation: bool,
+    evidence_bundle: String,
 }
 
 impl HuntPlan {
@@ -265,9 +285,10 @@ fn plan_dry_run(
         }
 
         selected.push(PlannedTest {
-            candidate_id: candidate.id,
+            candidate_id: candidate.id.clone(),
             plan_hash,
-            summary: candidate.summary,
+            summary: candidate.summary.clone(),
+            candidate,
         });
         planned_duration += ESTIMATED_TEST_DURATION_SECS;
         planned_bytes += ESTIMATED_TEST_BYTES;
@@ -277,6 +298,7 @@ fn plan_dry_run(
         selected,
         skipped_by_policy,
         skipped_by_resume,
+        executed: Vec::new(),
         stop_reason,
     }
 }
@@ -315,6 +337,12 @@ fn apply_policy_gated_orchestration(
     }
     let mut existing = load_resume_state(&resume_path)?;
     for test in &plan.selected {
+        let (executed, stop_reason) = execute_read_only_test(engagement, test)?;
+        plan.executed.push(executed);
+        if let Some(stop_reason) = stop_reason {
+            plan.stop_reason = Some(stop_reason);
+            break;
+        }
         existing.tested_plan_hashes.insert(test.plan_hash.clone());
     }
     let mut serialized = existing
@@ -326,6 +354,85 @@ fn apply_policy_gated_orchestration(
     serialized.push('\n');
     std::fs::write(&resume_path, serialized).context("write tested plan hashes")?;
     Ok(())
+}
+
+// Execute one already-policy-filtered read-only test through local replay/evidence primitives
+fn execute_read_only_test(
+    engagement: &Path,
+    test: &PlannedTest,
+) -> Result<(ExecutedTest, Option<StopReason>)> {
+    let replay_plan = PlanBuilder
+        .build(
+            ReplayPlanRequest::new(test.candidate.clone(), ScopeDecision::InScope)
+                .with_sessions(["default"])
+                .with_expected_secure_result("authorization denial or no controlled target marker")
+                .with_stop_conditions([
+                    "rate_limited",
+                    "waf_detected",
+                    "server_error",
+                    "auth_expired",
+                    "scope_drift",
+                    "out_of_scope_redirect",
+                ])
+                .with_evidence_output_dir(format!("evidence/{}", test.candidate_id)),
+        )
+        .context("build read-only replay plan")?;
+    let outcome = load_replay_outcome(engagement, &test.candidate_id)?;
+    let verdict = SemanticDiffEngine.classify(&outcome);
+    let plan_json = serde_json::to_string_pretty(&replay_plan).context("serialize replay plan")?;
+    let semantic_diff_json = serde_json::to_string_pretty(&verdict).context("serialize verdict")?;
+    let run_id = format!("run-{}", test.plan_hash);
+    let bundle = EvidenceBundleWriter
+        .write(
+            EvidenceBundleRequest::new(engagement, &test.candidate_id, &run_id)
+                .with_plan_json(plan_json)
+                .with_approvals_json("[]")
+                .with_semantic_diff_json(semantic_diff_json)
+                .with_summary(format!(
+                    "candidate: {}\nplan: {}\nverdict: {:?}",
+                    test.candidate_id, test.plan_hash, verdict.classification
+                )),
+        )
+        .context("write evidence bundle")?;
+    let evidence_bundle = bundle
+        .bundle_dir
+        .strip_prefix(engagement)
+        .unwrap_or(&bundle.bundle_dir)
+        .display()
+        .to_string();
+    let verdict_class = serde_json::to_value(verdict.classification)
+        .context("serialize verdict class")?
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+
+    let stop_reason = match verdict.classification {
+        SemanticVerdictClass::InvalidTest => Some(StopReason::AuthExpired),
+        _ => None,
+    };
+
+    Ok((
+        ExecutedTest {
+            candidate_id: test.candidate_id.clone(),
+            plan_hash: test.plan_hash.clone(),
+            verdict_class,
+            boundary_violation: verdict.boundary_violation,
+            evidence_bundle,
+        },
+        stop_reason,
+    ))
+}
+
+// Load a local replay outcome fixture or return an inert placeholder until live replay lands
+fn load_replay_outcome(engagement: &Path, candidate_id: &str) -> Result<ReplayOutcome> {
+    let path = engagement
+        .join(REPLAY_OUTCOMES_RELATIVE_DIR)
+        .join(format!("{candidate_id}.json"));
+    if !path.exists() {
+        return Ok(ReplayOutcome::http(200, "{}"));
+    }
+    let raw = std::fs::read_to_string(path).context("read replay outcome")?;
+    serde_json::from_str(&raw).context("parse replay outcome")
 }
 
 // Load stable JSONL candidates
@@ -535,5 +642,67 @@ mod tests {
 
         let resume = load_resume_state(&tmp.path().join(RESUME_RELATIVE_PATH)).unwrap();
         assert!(resume.tested_plan_hashes.contains(&expected_hash));
+    }
+
+    #[test]
+    fn confirmed_orchestration_writes_redacted_evidence_for_each_executed_read_only_plan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut plan = plan_dry_run(
+            vec![candidate("one", CandidateStateChange::ReadOnly)],
+            HuntBudget::default(),
+            &ResumeState::default(),
+        );
+
+        apply_policy_gated_orchestration(tmp.path(), &mut plan, true).unwrap();
+
+        assert_eq!(plan.executed.len(), 1);
+        assert_eq!(plan.executed[0].candidate_id, "one");
+        assert_eq!(plan.executed[0].verdict_class, "interesting_diff");
+        assert!(
+            tmp.path()
+                .join(&plan.executed[0].evidence_bundle)
+                .join("plan.json")
+                .exists()
+        );
+        assert!(
+            tmp.path()
+                .join(&plan.executed[0].evidence_bundle)
+                .join("semantic_diff.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn confirmed_orchestration_stops_on_auth_expired_replay_outcome() {
+        let tmp = tempfile::tempdir().unwrap();
+        let outcome_dir = tmp.path().join(REPLAY_OUTCOMES_RELATIVE_DIR);
+        std::fs::create_dir_all(&outcome_dir).unwrap();
+        std::fs::write(
+            outcome_dir.join("one.json"),
+            r#"{
+                "status": 401,
+                "body": "{\"error\":\"token expired\"}",
+                "target_tenant_markers": [],
+                "auth_failure_shape": "expired_token",
+                "graphql_errors": false
+            }"#,
+        )
+        .unwrap();
+        let mut plan = plan_dry_run(
+            vec![candidate("one", CandidateStateChange::ReadOnly)],
+            HuntBudget::default(),
+            &ResumeState::default(),
+        );
+
+        apply_policy_gated_orchestration(tmp.path(), &mut plan, true).unwrap();
+
+        assert_eq!(plan.stop_reason, Some(StopReason::AuthExpired));
+        assert_eq!(plan.executed.len(), 1);
+        assert!(
+            !load_resume_state(&tmp.path().join(RESUME_RELATIVE_PATH))
+                .unwrap()
+                .tested_plan_hashes
+                .contains(&plan.selected[0].plan_hash)
+        );
     }
 }

@@ -2597,6 +2597,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "evidence-core",
+ "replay-engine",
  "request-corpus",
  "serde",
  "serde_json",

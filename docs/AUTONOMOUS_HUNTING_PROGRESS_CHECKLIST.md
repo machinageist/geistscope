@@ -507,6 +507,19 @@ Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
     - platform adapters remain behind the platform-neutral scope model
     - deny precedence and asset metadata continue through `ScopeDecision`
 
+## Phase 8 progress
+
+- [x] Task 8.1a: Start real read-only `mg-hunt` execution path
+  - Commit: pending
+  - `mg-hunt` confirmed orchestration now calls replay/evidence primitives for selected read-only candidates instead of only writing resume hashes.
+  - Writes one evidence bundle per executed read-only plan with `plan.json`, `semantic_diff.json`, `approvals.json`, and a redacted summary.
+  - Adds deterministic local replay outcome fixture support under `hunt/replay-outcomes/<candidate-id>.json` until live HTTP replay wiring lands.
+  - Safety gates:
+    - unconfirmed active orchestration still fails closed with `approval_required`
+    - state-changing/browser-only candidates are still filtered before execution
+    - auth-expired semantic verdicts stop the loop and do not mark the plan hash as tested
+    - evidence write failure aborts the run before resume state is advanced
+
 ## Latest known commits for this work
 
 ```text
