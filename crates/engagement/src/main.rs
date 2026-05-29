@@ -329,6 +329,9 @@ fn cmd_scope_import(
             }
         }
         "json" => engagement::Scope::from_program_json(platform, &engagement.meta.target, &raw)?,
+        "yaml" | "yml" => {
+            engagement::Scope::from_program_yaml(platform, &engagement.meta.target, &raw)?
+        }
         other => return Err(anyhow!("unsupported scope import format: {other}")),
     };
     engagement.save_scope(&scope)?;

@@ -63,7 +63,7 @@ pub enum Command {
         /// Input file path
         #[arg(long)]
         file: String,
-        /// Input format: csv|json
+        /// Input format: csv|json|yaml
         #[arg(long, default_value = "json")]
         format: String,
         /// Emit imported scope as JSON

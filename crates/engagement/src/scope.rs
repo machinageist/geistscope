@@ -200,6 +200,26 @@ impl Scope {
         raw: &str,
     ) -> Result<Self, EngagementError> {
         let value: Value = serde_json::from_str(raw)?;
+        Self::from_program_value(platform, target, value)
+    }
+
+    // Import generic YAML into platform-neutral scope assets
+    pub fn from_program_yaml(
+        platform: &str,
+        target: &str,
+        raw: &str,
+    ) -> Result<Self, EngagementError> {
+        let value: Value = serde_yaml::from_str(raw)
+            .map_err(|err| EngagementError::Invalid(format!("program YAML: {err}")))?;
+        Self::from_program_value(platform, target, value)
+    }
+
+    // Import structured program rows into platform-neutral scope assets
+    fn from_program_value(
+        platform: &str,
+        target: &str,
+        value: Value,
+    ) -> Result<Self, EngagementError> {
         let rows = if let Some(items) = value.as_array() {
             items.clone()
         } else if let Some(items) = value.get("assets").and_then(Value::as_array) {
@@ -301,8 +321,18 @@ fn asset_from_json(
     platform: &str,
     row: &serde_json::Map<String, Value>,
 ) -> Result<ProgramAsset, EngagementError> {
-    let identifier = json_string(row, &["identifier", "target", "asset_identifier", "asset"])
-        .ok_or_else(|| EngagementError::Invalid("program asset missing identifier".into()))?;
+    let identifier = json_string(
+        row,
+        &[
+            "identifier",
+            "target",
+            "asset_identifier",
+            "asset",
+            "endpoint",
+            "url",
+        ],
+    )
+    .ok_or_else(|| EngagementError::Invalid("program asset missing identifier".into()))?;
     let asset_type = json_string(row, &["asset_type", "type"]).unwrap_or_else(|| "unknown".into());
     let bounty_eligible = json_bool(row, &["eligible_for_bounty", "bounty_eligible"]);
     let submission_eligible = json_bool(
@@ -588,7 +618,7 @@ mod tests {
     fn imports_manual_json_without_platform_assumptions() {
         let raw = r#"{
             "assets": [
-                {"identifier":"api.private.test","asset_type":"api","in_scope":true,"submission_eligible":true,"instructions":"private program notes"}
+                {"identifier":"api.private.test","type":"api","in_scope":true,"notes":"read-only checks"}
             ]
         }"#;
 
@@ -597,12 +627,51 @@ mod tests {
         let decision = scope.explain("https://api.private.test/v1/me");
         assert_eq!(decision.decision, ScopeVerdict::InScope);
         assert_eq!(decision.asset_type.as_deref(), Some("api"));
-        assert_eq!(decision.submission_eligible, Some(true));
-        assert!(
-            decision
-                .notes
-                .iter()
-                .any(|note| note.contains("private program notes"))
+        assert_eq!(decision.notes, vec!["read-only checks"]);
+    }
+
+    #[test]
+    fn imports_intigriti_json_into_common_program_assets() {
+        let raw = r#"{
+            "assets": [
+                {"endpoint":"https://app.example.eu","asset_type":"web","eligible_for_bounty":true,"eligible_for_submission":true,"max_severity":"critical"},
+                {"endpoint":"legacy.example.eu","asset_type":"web","eligible_for_bounty":false,"eligible_for_submission":false}
+            ]
+        }"#;
+
+        let scope = Scope::from_program_json("intigriti", "example", raw).unwrap();
+
+        assert!(scope.in_scope.contains(&"https://app.example.eu".into()));
+        assert!(scope.out_of_scope.contains(&"legacy.example.eu".into()));
+        assert_eq!(scope.program_assets[0].platform, "intigriti");
+        assert_eq!(
+            scope.program_assets[0].max_severity.as_deref(),
+            Some("critical")
+        );
+    }
+
+    #[test]
+    fn imports_manual_yaml_scope_assets() {
+        let raw = r#"
+assets:
+  - identifier: "api.private.test"
+    type: "api"
+    in_scope: true
+    notes: "operator approved read-only API checks"
+  - identifier: "logout.private.test"
+    type: "web"
+    in_scope: false
+"#;
+
+        let scope = Scope::from_program_yaml("manual", "private", raw).unwrap();
+
+        assert!(scope.in_scope.contains(&"api.private.test".into()));
+        assert!(scope.out_of_scope.contains(&"logout.private.test".into()));
+        let decision = scope.explain("https://api.private.test/v1/me");
+        assert_eq!(decision.decision, ScopeVerdict::InScope);
+        assert_eq!(
+            decision.notes,
+            vec!["operator approved read-only API checks"]
         );
     }
 }
