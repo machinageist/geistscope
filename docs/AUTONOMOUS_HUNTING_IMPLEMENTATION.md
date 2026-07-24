@@ -1,5 +1,28 @@
 # GeistScope Autonomous Hunting Implementation Instructions
 
+## Status (2026-07-23)
+
+Superseded in scope by `.hermes/plans/2026-07-23_hunting-engine-restructure.md`. Phases 0
+through 8.1a below were actually implemented from this spec — see
+`AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md` for the real commit history — and most of that
+foundation (scope decisions, action policy, lab/session model, request-corpus, replay-plan
+hashing, semantic diff, evidence bundles, audit) is exactly what the 2026-07-23 decision log
+calls out as worth salvaging. Do not use this document to plan new work past that point.
+
+What no longer holds:
+- The objective below ("eliminate Burp," authorization hunting only) is narrower than the
+  current product scope: SSRF, broken access control/IDOR, and RCE/critical injection are now
+  the three priority classes, not authorization alone.
+- Shopify-specific framing throughout was already meant to be generic; the new decision log
+  makes the platform-neutral requirement explicit at the product level, not just the import
+  adapters.
+- No backwards compatibility is required going forward. Existing crates and endpoint names are
+  raw material, not a contract — rewrite freely where the interface blocks a coherent pipeline.
+- The AI/deterministic boundary, bounty-value scheduling, and "expand around success" finding
+  behavior described in the decision log are not covered here and should govern any new work.
+
+Derive a fresh `PLAN.md` from the decision log before starting the next implementation slice.
+
 ## Objective
 
 Eliminate Burp from the normal GeistScope hunting workflow.

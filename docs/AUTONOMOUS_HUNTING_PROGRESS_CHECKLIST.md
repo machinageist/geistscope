@@ -4,9 +4,22 @@ Use this as the restart point after clearing context.
 
 Workspace root for Rust commands: `/home/mgeist/geistscope/crates`
 Repo root: `/home/mgeist/geistscope`
-Primary plan: `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`
-Original spec: `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_IMPLEMENTATION.md`
+Primary plan: `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md` (superseded past Task
+8.1a — see status note below)
+Original spec: `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_IMPLEMENTATION.md` (superseded
+past Task 8.1a — see status note below)
+Current direction: `/home/mgeist/geistscope/.hermes/plans/2026-07-23_hunting-engine-restructure.md`
 Engineering guidelines: `~/.hermes/ai-engineering-best-practices.md`
+
+## Status (2026-07-23)
+
+Everything below through Task 8.1a is real, committed history and is exactly the foundation the
+2026-07-23 decision log recommends salvaging (scope, action policy, lab/session model,
+request-corpus, replay-plan hashing, semantic diff, evidence bundles, audit). Do not pick the
+next task from the old TDD plan's phase list — it predates the priority reset to SSRF / broken
+access control / RCE, bounty-value scheduling, "expand around success" finding behavior, and the
+explicit AI-vs-deterministic boundary. Use the decision log to scope the next slice and record it
+in a new dated `PLAN.md`.
 
 ## Current implementation status
 
@@ -642,12 +655,21 @@ clean working tree
 Paste this into a fresh context:
 
 ```text
-We are implementing GeistScope autonomous hunting from `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_TDD_PLAN.md`.
-Read `/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`, `~/.hermes/ai-engineering-best-practices.md`, and load the `geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
+We are continuing GeistScope hunting-engine work after Task 8.1a (`09fc6b0 feat(hunt): start
+read-only execution path`), the last verified slice under the old plan.
+Read `/home/mgeist/geistscope/.hermes/plans/2026-07-23_hunting-engine-restructure.md` for current
+product direction and priorities (SSRF / broken access control / RCE, bounty-value scheduling,
+expand-around-success finding behavior, the AI-vs-deterministic boundary). Read
+`/home/mgeist/geistscope/docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md` for what is already built
+and salvageable, `~/.hermes/ai-engineering-best-practices.md`, and load the
+`geistscope-ai-harness`, `test-driven-development`, and `rust-security-patterns` skills.
 Use `/home/mgeist/geistscope/crates` as the Rust workspace root.
-Continue after Phase 7. Tasks 7.1-7.5 are complete and committed through `0cec901 feat(engagement): add intigriti and yaml scope imports`; choose the next implementation slice from the Phase 8 roadmap before coding.
-Do not start proxy/replay/browser automation until the CLI/lab/session foundations are complete.
-Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to model-visible output, and commit each verified slice.
+The decision log's open item is choosing the first vertical slice under the new priorities (it
+leans SSRF-first) — resolve that and write a dated `PLAN.md` under `.hermes/plans/` before
+coding. No backwards compatibility is required; salvage proven logic, rewrite what blocks a
+coherent pipeline, delete what doesn't earn its place.
+Keep active actions gated by Rust policy, fail closed on ambiguous scope, never expose secrets to
+model-visible output, and commit each verified slice.
 ```
 
 ## Implementation rules to preserve

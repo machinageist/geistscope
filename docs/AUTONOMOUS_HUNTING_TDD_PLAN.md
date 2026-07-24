@@ -1,5 +1,17 @@
 # Autonomous Hunting Implementation Plan
 
+## Status (2026-07-23)
+
+Superseded past Phase 7/8.1a by `.hermes/plans/2026-07-23_hunting-engine-restructure.md`. Tasks
+through Phase 7 and Task 8.1a (see `AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md`) are real,
+committed work and remain an accurate build log — the salvage list in the decision log covers
+almost all of it. This plan's phase breakdown after that point (the remainder of Phase 6's
+`mg-hunt` loop and anything implied beyond it) predates the priority reset to SSRF / broken
+access control / RCE, the bounty-value scheduler, the "expand around success" finding behavior,
+and the explicit AI-vs-deterministic boundary. Do not continue task selection from this file's
+phase list. Write a new `PLAN.md` against the decision log's open item (choosing and scoping the
+first vertical slice) instead.
+
 > For Hermes: implement this plan task-by-task with strict TDD. Write the failing test first, run it, implement only enough production code to pass, then run targeted and full relevant tests.
 
 Goal: Build a program-agnostic autonomous authorization and client-side hunting foundation described in docs/AUTONOMOUS_HUNTING_IMPLEMENTATION.md without letting the model bypass Rust policy, scope, redaction, audit, container isolation, or approval gates. The system must work across HackerOne, Bugcrowd, Intigriti, private programs, and manually-defined engagements rather than assuming Shopify-specific traffic or GraphQL conventions.
