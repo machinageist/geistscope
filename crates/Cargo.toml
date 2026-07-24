@@ -30,6 +30,8 @@ members = [
     "proxy-core",
     "request-corpus",
     "replay-engine",
+    "replay-runner",
+    "oob-core",
     "security-graph",
     "mg-recopilot",
     "mg-aifuzz",
