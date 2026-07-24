@@ -16,11 +16,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use axum::Router;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::any;
-use axum::Router;
 use clap::Parser;
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -140,7 +140,9 @@ async fn handle_request(
     let body_bytes = axum::body::to_bytes(req.into_body(), BODY_TRUNCATE_BYTES * 2)
         .await
         .unwrap_or_default();
-    let body_preview = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(BODY_TRUNCATE_BYTES)]).into_owned();
+    let body_preview =
+        String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(BODY_TRUNCATE_BYTES)])
+            .into_owned();
 
     let cb = Callback {
         timestamp: ts,
@@ -191,7 +193,10 @@ async fn main() -> Result<()> {
     if !args.extra_tokens.is_empty() {
         println!("  extra tokens : {}", args.extra_tokens.join(", "));
     }
-    println!("  timeout      : {}s after last hit (0 = Ctrl-C only)", args.timeout);
+    println!(
+        "  timeout      : {}s after last hit (0 = Ctrl-C only)",
+        args.timeout
+    );
     println!("Waiting for callbacks…");
 
     let callbacks: Arc<Mutex<Vec<Callback>>> = Arc::new(Mutex::new(Vec::new()));

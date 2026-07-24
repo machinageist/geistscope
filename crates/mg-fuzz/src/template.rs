@@ -13,7 +13,7 @@
  *                  odd-indexed parts are marker names.
  *******************************************************************/
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 // One parsed HTTP request template
 #[derive(Debug, Clone)]
@@ -65,29 +65,50 @@ impl RequestTemplate {
             }
             // split header on first colon
             if let Some(colon) = line.find(':') {
-                headers.push((line[..colon].trim().to_string(), line[colon + 1..].trim().to_string()));
+                headers.push((
+                    line[..colon].trim().to_string(),
+                    line[colon + 1..].trim().to_string(),
+                ));
             }
         }
 
-        let body = if body_lines.is_empty() { None } else { Some(body_lines.join("\n")) };
+        let body = if body_lines.is_empty() {
+            None
+        } else {
+            Some(body_lines.join("\n"))
+        };
 
         // collect all unique marker names in order of first appearance
         let mut positions: Vec<String> = Vec::new();
         collect_markers(&path, &mut positions);
-        for (_, v) in &headers { collect_markers(v, &mut positions); }
-        if let Some(b) = &body { collect_markers(b, &mut positions); }
+        for (_, v) in &headers {
+            collect_markers(v, &mut positions);
+        }
+        if let Some(b) = &body {
+            collect_markers(b, &mut positions);
+        }
 
-        Ok(RequestTemplate { method, path, headers, body, positions })
+        Ok(RequestTemplate {
+            method,
+            path,
+            headers,
+            body,
+            positions,
+        })
     }
 
     // Substitute §markers§ with payloads; payloads index aligns with positions list
     pub fn inject(&self, payloads: &[&str]) -> InjectedRequest {
         let sub = |s: &str| substitute(s, &self.positions, payloads);
         InjectedRequest {
-            method:  self.method.clone(),
-            path:    sub(&self.path),
-            headers: self.headers.iter().map(|(k, v)| (k.clone(), sub(v))).collect(),
-            body:    self.body.as_deref().map(sub),
+            method: self.method.clone(),
+            path: sub(&self.path),
+            headers: self
+                .headers
+                .iter()
+                .map(|(k, v)| (k.clone(), sub(v)))
+                .collect(),
+            body: self.body.as_deref().map(sub),
         }
     }
 }
@@ -104,9 +125,13 @@ fn collect_markers(s: &str, out: &mut Vec<String>) {
             Some(n) if !n.is_empty() => n.to_string(),
             _ => break,
         };
-        if !out.contains(&name) { out.push(name); }
+        if !out.contains(&name) {
+            out.push(name);
+        }
         // skip the literal segment between the closing § and the next opening §
-        if parts.next().is_none() { break; }
+        if parts.next().is_none() {
+            break;
+        }
     }
 }
 
@@ -157,7 +182,7 @@ mod tests {
     #[test]
     fn inject_missing_payload_leaves_marker_name() {
         let t = make_tmpl();
-        let req = t.inject(&["42"]);  // token not provided
+        let req = t.inject(&["42"]); // token not provided
         assert!(req.headers[1].1.contains("token"));
     }
 

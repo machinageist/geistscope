@@ -76,7 +76,10 @@ struct ApkResults {
 
 // ── APK analysis ─────────────────────────────────────────────────────────────
 
-fn read_zip_entry(archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>, name: &str) -> Option<Vec<u8>> {
+fn read_zip_entry(
+    archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>,
+    name: &str,
+) -> Option<Vec<u8>> {
     let mut entry = archive.by_name(name).ok()?;
     let mut buf = Vec::new();
     entry.read_to_end(&mut buf).ok()?;
@@ -100,7 +103,8 @@ fn scan_manifest(bytes: &[u8]) -> Vec<ApkFinding> {
         findings.push(ApkFinding {
             severity: Severity::Medium,
             category: "allow_backup".to_string(),
-            detail: "android:allowBackup=\"true\" — app data can be extracted via adb backup".to_string(),
+            detail: "android:allowBackup=\"true\" — app data can be extracted via adb backup"
+                .to_string(),
             location: "AndroidManifest.xml".to_string(),
         });
     }
@@ -144,7 +148,12 @@ fn extract_component_name(window: &str) -> String {
     "(unknown)".to_string()
 }
 
-fn scan_binary_content(bytes: &[u8], location: &str, aws_re: &Regex, http_re: &Regex) -> Vec<ApkFinding> {
+fn scan_binary_content(
+    bytes: &[u8],
+    location: &str,
+    aws_re: &Regex,
+    http_re: &Regex,
+) -> Vec<ApkFinding> {
     let text = String::from_utf8_lossy(bytes);
     let mut findings = Vec::new();
     for m in aws_re.find_iter(&text) {

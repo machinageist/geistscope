@@ -191,10 +191,7 @@ fn extract_whois_server(iana_response: &str) -> Option<String> {
             }
         }
         // Some registrars use "Registrar WHOIS Server:"
-        if let Some(rest) = line
-            .to_lowercase()
-            .strip_prefix("registrar whois server:")
-        {
+        if let Some(rest) = line.to_lowercase().strip_prefix("registrar whois server:") {
             let server = rest.trim().to_string();
             if !server.is_empty() {
                 return Some(server);
@@ -271,10 +268,7 @@ fn extract_field(lower_line: &str, original_line: &str, lower_key: &str) -> Opti
 // ── ASN/BGP helpers ───────────────────────────────────────────────────────────
 
 // Query ipinfo.io for ASN and geo info for a domain or IP
-async fn fetch_asn_info(
-    client: &reqwest::Client,
-    target: &str,
-) -> Result<AsnInfo> {
+async fn fetch_asn_info(client: &reqwest::Client, target: &str) -> Result<AsnInfo> {
     let url = format!("{IPINFO_BASE}/{target}/json");
     let resp: IpInfoResponse = client
         .get(&url)
@@ -303,10 +297,7 @@ async fn fetch_asn_info(
 }
 
 // Query bgpview.io for prefix list associated with an ASN number
-async fn fetch_bgp_prefixes(
-    client: &reqwest::Client,
-    asn_str: &str,
-) -> Result<BgpInfo> {
+async fn fetch_bgp_prefixes(client: &reqwest::Client, asn_str: &str) -> Result<BgpInfo> {
     // Strip leading "AS" prefix so the API gets a bare number
     let asn_num = asn_str.trim_start_matches("AS");
     let url = format!("{BGPVIEW_BASE}/{asn_num}/prefixes");
@@ -376,9 +367,7 @@ async fn main() -> Result<()> {
 
     // ASN lookup via ipinfo.io
     eprintln!("  fetching ASN info from ipinfo.io...");
-    let asn_info = fetch_asn_info(&client, &target)
-        .await
-        .unwrap_or_default();
+    let asn_info = fetch_asn_info(&client, &target).await.unwrap_or_default();
 
     // BGP prefixes if we have an ASN
     let bgp_info = if let Some(asn) = &asn_info.asn {
@@ -470,7 +459,8 @@ mod tests {
 
     #[test]
     fn parse_whois_fields_extracts_registrar() {
-        let raw = "Domain Name: EXAMPLE.COM\nRegistrar: ACME Registrar Inc.\nCreation Date: 2000-01-01\n";
+        let raw =
+            "Domain Name: EXAMPLE.COM\nRegistrar: ACME Registrar Inc.\nCreation Date: 2000-01-01\n";
         let info = parse_whois_fields(raw);
         assert_eq!(info.registrar.as_deref(), Some("ACME Registrar Inc."));
     }
@@ -487,10 +477,7 @@ mod tests {
     fn parse_whois_fields_extracts_expiry() {
         let raw = "Registry Expiry Date: 2030-12-31T00:00:00Z\n";
         let info = parse_whois_fields(raw);
-        assert_eq!(
-            info.expiry_date.as_deref(),
-            Some("2030-12-31T00:00:00Z")
-        );
+        assert_eq!(info.expiry_date.as_deref(), Some("2030-12-31T00:00:00Z"));
     }
 
     #[test]
@@ -502,6 +489,8 @@ mod tests {
 
     #[test]
     fn extract_field_returns_none_for_no_match() {
-        assert!(extract_field("domain: example.com", "domain: example.com", "registrar:").is_none());
+        assert!(
+            extract_field("domain: example.com", "domain: example.com", "registrar:").is_none()
+        );
     }
 }

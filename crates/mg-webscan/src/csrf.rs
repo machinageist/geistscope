@@ -38,8 +38,8 @@ const ATTACKER_ORIGIN: &str = "https://attacker.com";
 
 // Static file extensions excluded from state-changing endpoint collection
 const STATIC_EXTENSIONS: &[&str] = &[
-    ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
-    ".woff", ".woff2", ".ttf", ".eot", ".map", ".webp", ".pdf",
+    ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf",
+    ".eot", ".map", ".webp", ".pdf",
 ];
 
 // CSRF token input name attributes we look for in form HTML
@@ -63,10 +63,7 @@ fn csrf_input_re() -> &'static Regex {
     CSRF_INPUT_PATTERN.get_or_init(|| {
         // Matches <input ... name="csrf|_token|authenticity_token|__RequestVerificationToken" ...>
         let names = CSRF_TOKEN_NAMES.join("|");
-        Regex::new(&format!(
-            r#"(?i)<input[^>]+name=["\'](?:{names})["\']"#
-        ))
-        .unwrap()
+        Regex::new(&format!(r#"(?i)<input[^>]+name=["\'](?:{names})["\']"#)).unwrap()
     })
 }
 
@@ -152,9 +149,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for filename use (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Return true if the URL path ends with a static file extension
@@ -166,14 +161,11 @@ fn is_static_path(path: &str) -> bool {
 
 // Return true if any Set-Cookie header includes SameSite
 fn has_samesite_cookie(headers: &reqwest::header::HeaderMap) -> bool {
-    headers
-        .get_all("set-cookie")
-        .iter()
-        .any(|v| {
-            v.to_str()
-                .map(|s| s.to_lowercase().contains("samesite"))
-                .unwrap_or(false)
-        })
+    headers.get_all("set-cookie").iter().any(|v| {
+        v.to_str()
+            .map(|s| s.to_lowercase().contains("samesite"))
+            .unwrap_or(false)
+    })
 }
 
 // Collect state-changing endpoints from crawl host directories
@@ -225,10 +217,7 @@ fn compute_severity(has_token: bool, has_samesite: bool) -> CsrfSeverity {
 }
 
 // Probe one state-changing endpoint; return a CsrfResult
-async fn probe_endpoint(
-    client: reqwest::Client,
-    endpoint: StateEndpoint,
-) -> CsrfResult {
+async fn probe_endpoint(client: reqwest::Client, endpoint: StateEndpoint) -> CsrfResult {
     // Step a: GET the same path to look for a CSRF token in the form HTML
     let has_csrf_token = match client.get(&endpoint.url).send().await {
         Ok(resp) => {
@@ -239,8 +228,8 @@ async fn probe_endpoint(
     };
 
     // Step b: send the state-changing request with attacker Origin and no token
-    let method = reqwest::Method::from_bytes(endpoint.method.as_bytes())
-        .unwrap_or(reqwest::Method::POST);
+    let method =
+        reqwest::Method::from_bytes(endpoint.method.as_bytes()).unwrap_or(reqwest::Method::POST);
 
     let probe_result = client
         .request(method, &endpoint.url)
@@ -342,7 +331,9 @@ pub async fn run(args: Args) -> Result<()> {
             "method={} csrf_token={} samesite_cookie={}",
             r.method, r.has_csrf_token, r.has_samesite
         ))
-        .recommendation("Issue a per-session CSRF token and set cookies with SameSite=Lax or Strict");
+        .recommendation(
+            "Issue a per-session CSRF token and set cookies with SameSite=Lax or Strict",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -470,6 +461,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 }

@@ -30,7 +30,12 @@ identifiers from the pseudocode verbatim when referring to them."#
 }
 
 // Build the RE-analysis user prompt
-pub fn analyze_user_prompt(binary: &str, function: &str, manifest: &str, pseudocode: &str) -> String {
+pub fn analyze_user_prompt(
+    binary: &str,
+    function: &str,
+    manifest: &str,
+    pseudocode: &str,
+) -> String {
     format!(
         "Analyze the function `{function}` from binary `{binary}`.\n\n\
          <manifest>\n{manifest}\n</manifest>\n\n\

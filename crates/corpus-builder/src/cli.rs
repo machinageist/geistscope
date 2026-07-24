@@ -5,7 +5,10 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "corpus-builder", about = "Build and query a subdomain/path corpus")]
+#[command(
+    name = "corpus-builder",
+    about = "Build and query a subdomain/path corpus"
+)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Command,

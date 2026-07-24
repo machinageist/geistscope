@@ -16,7 +16,7 @@ struct Selectors {
     anchor: Selector,
     script_src: Selector,
     form_action: Selector,
-    #[allow(dead_code)]  // reserved for stylesheet/canonical link extraction in v2
+    #[allow(dead_code)] // reserved for stylesheet/canonical link extraction in v2
     link_href: Selector,
 }
 
@@ -25,10 +25,10 @@ static SELECTORS: OnceLock<Selectors> = OnceLock::new();
 // Initialize selectors exactly once; panics on invalid CSS (caught at startup)
 fn selectors() -> &'static Selectors {
     SELECTORS.get_or_init(|| Selectors {
-        anchor:      Selector::parse("a[href]").unwrap(),
-        script_src:  Selector::parse("script[src]").unwrap(),
+        anchor: Selector::parse("a[href]").unwrap(),
+        script_src: Selector::parse("script[src]").unwrap(),
         form_action: Selector::parse("form[action]").unwrap(),
-        link_href:   Selector::parse("link[href]").unwrap(),
+        link_href: Selector::parse("link[href]").unwrap(),
     })
 }
 

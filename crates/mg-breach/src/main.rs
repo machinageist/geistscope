@@ -119,11 +119,7 @@ async fn fetch_breached_domain(
 }
 
 // Fetch breach detail and check if it contains password data
-async fn breach_has_passwords(
-    client: &reqwest::Client,
-    breach_name: &str,
-    api_key: &str,
-) -> bool {
+async fn breach_has_passwords(client: &reqwest::Client, breach_name: &str, api_key: &str) -> bool {
     let url = format!("{HIBP_BASE}/breach/{breach_name}");
     let resp = client
         .get(&url)
@@ -216,8 +212,15 @@ async fn main() -> Result<()> {
     println!("Total breached accounts: {total_accounts}");
     println!("Has password data:       {any_passwords}");
     for entry in &breach_entries {
-        let pw_marker = if entry.has_passwords { " [PASSWORDS]" } else { "" };
-        println!("  {} ({} accounts){}", entry.name, entry.email_count, pw_marker);
+        let pw_marker = if entry.has_passwords {
+            " [PASSWORDS]"
+        } else {
+            ""
+        };
+        println!(
+            "  {} ({} accounts){}",
+            entry.name, entry.email_count, pw_marker
+        );
     }
 
     // Write output
@@ -247,34 +250,50 @@ async fn main() -> Result<()> {
             .filter(|b| b.has_passwords)
             .map(|b| b.name.as_str())
             .collect();
-        let tf = ToolFinding::new("mg-breach", "Credentials Exposed in Data Breach", FindingSeverity::High)
-            .url(format!("https://haveibeenpwned.com/DomainSearch/{}", args.domain))
-            .evidence(format!(
-                "domain={} breaches_with_passwords=[{}] total_accounts={}",
-                args.domain,
-                breach_names.join(", "),
-                total_accounts
-            ))
-            .recommendation(
-                "Force a password reset for all affected accounts; \
+        let tf = ToolFinding::new(
+            "mg-breach",
+            "Credentials Exposed in Data Breach",
+            FindingSeverity::High,
+        )
+        .url(format!(
+            "https://haveibeenpwned.com/DomainSearch/{}",
+            args.domain
+        ))
+        .evidence(format!(
+            "domain={} breaches_with_passwords=[{}] total_accounts={}",
+            args.domain,
+            breach_names.join(", "),
+            total_accounts
+        ))
+        .recommendation(
+            "Force a password reset for all affected accounts; \
                  implement MFA; monitor for credential stuffing attacks; \
-                 notify impacted users per breach notification obligations"
-            );
+                 notify impacted users per breach notification obligations",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
     // MEDIUM finding listing total accounts breached regardless of password data
     if total_accounts > 0 {
-        let tf = ToolFinding::new("mg-breach", "Corporate Email Addresses Found in Breach Data", FindingSeverity::Medium)
-            .url(format!("https://haveibeenpwned.com/DomainSearch/{}", args.domain))
-            .evidence(format!(
-                "domain={} total_accounts={} total_breaches={}",
-                args.domain, total_accounts, results.breaches.len()
-            ))
-            .recommendation(
-                "Review breach details; enforce MFA across all corporate accounts; \
-                 monitor for credential reuse and unauthorized access"
-            );
+        let tf = ToolFinding::new(
+            "mg-breach",
+            "Corporate Email Addresses Found in Breach Data",
+            FindingSeverity::Medium,
+        )
+        .url(format!(
+            "https://haveibeenpwned.com/DomainSearch/{}",
+            args.domain
+        ))
+        .evidence(format!(
+            "domain={} total_accounts={} total_breaches={}",
+            args.domain,
+            total_accounts,
+            results.breaches.len()
+        ))
+        .recommendation(
+            "Review breach details; enforce MFA across all corporate accounts; \
+                 monitor for credential reuse and unauthorized access",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -294,10 +313,12 @@ mod tests {
         let detail = BreachDetail {
             data_classes: vec!["Emails".to_string(), "Passwords".to_string()],
         };
-        assert!(detail
-            .data_classes
-            .iter()
-            .any(|c| c == DATA_CLASS_PASSWORDS));
+        assert!(
+            detail
+                .data_classes
+                .iter()
+                .any(|c| c == DATA_CLASS_PASSWORDS)
+        );
     }
 
     #[test]
@@ -305,16 +326,21 @@ mod tests {
         let detail = BreachDetail {
             data_classes: vec!["Emails".to_string(), "Usernames".to_string()],
         };
-        assert!(!detail
-            .data_classes
-            .iter()
-            .any(|c| c == DATA_CLASS_PASSWORDS));
+        assert!(
+            !detail
+                .data_classes
+                .iter()
+                .any(|c| c == DATA_CLASS_PASSWORDS)
+        );
     }
 
     #[test]
     fn breach_email_count_aggregates_correctly() {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        map.insert("user1".to_string(), vec!["Adobe".to_string(), "LinkedIn".to_string()]);
+        map.insert(
+            "user1".to_string(),
+            vec!["Adobe".to_string(), "LinkedIn".to_string()],
+        );
         map.insert("user2".to_string(), vec!["Adobe".to_string()]);
 
         let mut counts: HashMap<String, usize> = HashMap::new();

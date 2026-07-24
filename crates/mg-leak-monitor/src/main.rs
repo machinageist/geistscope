@@ -11,8 +11,8 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -175,8 +175,7 @@ async fn main() -> Result<()> {
                 break;
             }
 
-            let new_items =
-                poll_query(&client, query, &mut state, &monitor_dir, &eng).await;
+            let new_items = poll_query(&client, query, &mut state, &monitor_dir, &eng).await;
 
             match new_items {
                 Ok(count) => {
@@ -222,7 +221,12 @@ async fn poll_query(
 ) -> Result<usize> {
     let resp = client
         .get(GITHUB_SEARCH_URL)
-        .query(&[("q", query), ("sort", "indexed"), ("order", "desc"), ("per_page", "30")])
+        .query(&[
+            ("q", query),
+            ("sort", "indexed"),
+            ("order", "desc"),
+            ("per_page", "30"),
+        ])
         .send()
         .await
         .with_context(|| format!("GET search for {query}"))?;
@@ -258,7 +262,11 @@ async fn poll_query(
     let search: SearchResponse = resp.json().await.context("parse search response")?;
 
     let last_seen_key = query.to_string();
-    let prev_last = state.last_seen.get(&last_seen_key).cloned().unwrap_or_default();
+    let prev_last = state
+        .last_seen
+        .get(&last_seen_key)
+        .cloned()
+        .unwrap_or_default();
 
     let mut new_count = 0;
     let mut newest_ts: Option<String> = None;
@@ -301,17 +309,21 @@ async fn poll_query(
         append_finding(&findings_path, &finding);
 
         // Emit HIGH tool finding per new leak hit
-        let tf = ToolFinding::new("mg-leak-monitor", "GitHub Secret Leak Detected", FindingSeverity::High)
-            .url(finding.url.clone())
-            .evidence(format!(
-                "query={} repo={} file={}",
-                finding.query, finding.repo, finding.file_path
-            ))
-            .recommendation(
-                "Rotate any exposed credentials immediately; \
+        let tf = ToolFinding::new(
+            "mg-leak-monitor",
+            "GitHub Secret Leak Detected",
+            FindingSeverity::High,
+        )
+        .url(finding.url.clone())
+        .evidence(format!(
+            "query={} repo={} file={}",
+            finding.query, finding.repo, finding.file_path
+        ))
+        .recommendation(
+            "Rotate any exposed credentials immediately; \
                  remove the secret from git history using git-filter-repo or BFG; \
-                 add pre-commit hooks (e.g. gitleaks) to prevent future leaks"
-            );
+                 add pre-commit hooks (e.g. gitleaks) to prevent future leaks",
+        );
         let _ = write_finding(eng, &tf);
 
         new_count += 1;
@@ -347,13 +359,10 @@ pub fn build_queries(org: &str, domain: Option<&str>) -> Vec<String> {
 // Build the reqwest client with GitHub auth and user-agent headers
 fn build_client(token: &str) -> Result<reqwest::Client> {
     let mut headers = HeaderMap::new();
-    let auth_value = HeaderValue::from_str(&format!("Bearer {token}"))
-        .context("build Authorization header")?;
+    let auth_value =
+        HeaderValue::from_str(&format!("Bearer {token}")).context("build Authorization header")?;
     headers.insert(AUTHORIZATION, auth_value);
-    headers.insert(
-        USER_AGENT,
-        HeaderValue::from_static("mg-leak-monitor/0.1"),
-    );
+    headers.insert(USER_AGENT, HeaderValue::from_static("mg-leak-monitor/0.1"));
     // Request modern GitHub API response format
     headers.insert(
         "Accept",

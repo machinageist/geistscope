@@ -147,9 +147,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons -> underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Derive the base URL for a host record, preferring HTTPS
@@ -178,11 +176,7 @@ fn has_cache_headers(resp: &reqwest::Response) -> bool {
 }
 
 // Check if a string value appears in a response body or Location header
-fn value_reflected(
-    body: &str,
-    location: Option<&str>,
-    value: &str,
-) -> bool {
+fn value_reflected(body: &str, location: Option<&str>, value: &str) -> bool {
     if body.contains(value) {
         return true;
     }
@@ -238,8 +232,7 @@ async fn probe_header(
         .map(|s| s.to_string());
     let body = clean_resp.text().await.unwrap_or_default();
 
-    let reflected = cacheable
-        && value_reflected(&body, location.as_deref(), REFLECTION_MARKER);
+    let reflected = cacheable && value_reflected(&body, location.as_deref(), REFLECTION_MARKER);
 
     // Check if status changed in a way suggesting path override (403 -> 200)
     let poison_status = match poison_req {
@@ -446,7 +439,9 @@ pub async fn run(args: Args) -> Result<()> {
 
     let confirmed_count = header_results
         .iter()
-        .filter(|r| r.verdict == PoisonVerdict::Confirmed || r.verdict == PoisonVerdict::StatusOverride)
+        .filter(|r| {
+            r.verdict == PoisonVerdict::Confirmed || r.verdict == PoisonVerdict::StatusOverride
+        })
         .count()
         + fat_get_results
             .iter()
@@ -493,7 +488,9 @@ pub async fn run(args: Args) -> Result<()> {
                 "clean_status={} fat_status={} body_differs=true",
                 r.clean_status, r.fat_status
             ))
-            .recommendation("Reject GET requests carrying a body, or include the body hash in the cache key");
+            .recommendation(
+                "Reject GET requests carrying a body, or include the body hash in the cache key",
+            );
             let _ = write_finding(&eng, &tf);
         }
     }
@@ -556,7 +553,11 @@ mod tests {
 
     #[test]
     fn value_reflected_detects_body_match() {
-        assert!(value_reflected("hello attacker.com world", None, "attacker.com"));
+        assert!(value_reflected(
+            "hello attacker.com world",
+            None,
+            "attacker.com"
+        ));
     }
 
     #[test]

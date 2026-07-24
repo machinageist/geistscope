@@ -221,7 +221,12 @@ async fn probe_origin(
 }
 
 // Build a CorsExploitFinding from a probe outcome
-fn make_finding(o: ProbeOutcome, check: &str, severity: &str, exploitable: bool) -> CorsExploitFinding {
+fn make_finding(
+    o: ProbeOutcome,
+    check: &str,
+    severity: &str,
+    exploitable: bool,
+) -> CorsExploitFinding {
     CorsExploitFinding {
         endpoint: o.endpoint,
         origin_sent: o.origin_sent,
@@ -247,8 +252,17 @@ async fn check_endpoint(
     {
         let exploitable = creds_allowed(&o.acac);
         // wildcard alone is not exploitable unless credentials are also allowed
-        let sev = if exploitable { SEVERITY_HIGH } else { SEVERITY_MEDIUM };
-        findings.push(make_finding(o, "arbitrary_origin_reflection", sev, exploitable));
+        let sev = if exploitable {
+            SEVERITY_HIGH
+        } else {
+            SEVERITY_MEDIUM
+        };
+        findings.push(make_finding(
+            o,
+            "arbitrary_origin_reflection",
+            sev,
+            exploitable,
+        ));
     }
 
     // Probe b: null origin
@@ -256,7 +270,12 @@ async fn check_endpoint(
         && o.acao == "null"
     {
         let exploitable = creds_allowed(&o.acac);
-        findings.push(make_finding(o, "null_origin_reflection", SEVERITY_HIGH, exploitable));
+        findings.push(make_finding(
+            o,
+            "null_origin_reflection",
+            SEVERITY_HIGH,
+            exploitable,
+        ));
     }
 
     // Probe c: evil.<target_domain> (subdomain of target)
@@ -265,7 +284,11 @@ async fn check_endpoint(
         && o.acao == evil_sub
     {
         let exploitable = creds_allowed(&o.acac);
-        let sev = if exploitable { SEVERITY_HIGH } else { SEVERITY_MEDIUM };
+        let sev = if exploitable {
+            SEVERITY_HIGH
+        } else {
+            SEVERITY_MEDIUM
+        };
         findings.push(make_finding(o, "subdomain_bypass", sev, exploitable));
     }
 
@@ -275,7 +298,11 @@ async fn check_endpoint(
         && o.acao == pre_domain
     {
         let exploitable = creds_allowed(&o.acac);
-        let sev = if exploitable { SEVERITY_HIGH } else { SEVERITY_MEDIUM };
+        let sev = if exploitable {
+            SEVERITY_HIGH
+        } else {
+            SEVERITY_MEDIUM
+        };
         findings.push(make_finding(o, "pre_domain_bypass", sev, exploitable));
     }
 
@@ -285,7 +312,11 @@ async fn check_endpoint(
         && o.acao == http_origin
     {
         let exploitable = creds_allowed(&o.acac);
-        let sev = if exploitable { SEVERITY_HIGH } else { SEVERITY_MEDIUM };
+        let sev = if exploitable {
+            SEVERITY_HIGH
+        } else {
+            SEVERITY_MEDIUM
+        };
         findings.push(make_finding(o, "http_downgrade", sev, exploitable));
     }
 
@@ -295,7 +326,12 @@ async fn check_endpoint(
         && o.acao == "*"
         && creds_allowed(&o.acac)
     {
-        findings.push(make_finding(o, "wildcard_with_credentials", SEVERITY_HIGH, true));
+        findings.push(make_finding(
+            o,
+            "wildcard_with_credentials",
+            SEVERITY_HIGH,
+            true,
+        ));
     }
 
     findings
@@ -329,8 +365,7 @@ pub async fn run(args: Args) -> Result<()> {
     }
 
     // Derive target domain for bypass probes
-    let target_domain = derive_target_domain(&eng)
-        .unwrap_or_else(|| eng.meta.target.clone());
+    let target_domain = derive_target_domain(&eng).unwrap_or_else(|| eng.meta.target.clone());
 
     eprintln!(
         "mg-cors-exploit: {} endpoint(s), target_domain={}",

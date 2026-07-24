@@ -20,7 +20,11 @@ pub struct ScanOutput {
 }
 
 // Build output struct; sorts subdomains alphabetically
-pub fn make_output(domain: &str, mut subdomains: Vec<SubdomainEntry>, elapsed: Duration) -> ScanOutput {
+pub fn make_output(
+    domain: &str,
+    mut subdomains: Vec<SubdomainEntry>,
+    elapsed: Duration,
+) -> ScanOutput {
     subdomains.sort_by(|a, b| a.name.cmp(&b.name));
     ScanOutput {
         domain: domain.to_string(),
@@ -54,9 +58,21 @@ mod tests {
     #[test]
     fn make_output_sorts_alphabetically() {
         let subs = vec![
-            SubdomainEntry { name: "z.example.com".into(), ips: vec![], source: "brute".into() },
-            SubdomainEntry { name: "a.example.com".into(), ips: vec![], source: "ct_log".into() },
-            SubdomainEntry { name: "m.example.com".into(), ips: vec![], source: "brute".into() },
+            SubdomainEntry {
+                name: "z.example.com".into(),
+                ips: vec![],
+                source: "brute".into(),
+            },
+            SubdomainEntry {
+                name: "a.example.com".into(),
+                ips: vec![],
+                source: "ct_log".into(),
+            },
+            SubdomainEntry {
+                name: "m.example.com".into(),
+                ips: vec![],
+                source: "brute".into(),
+            },
         ];
         let out = make_output("example.com", subs, Duration::from_secs(1));
         assert_eq!(out.subdomains[0].name, "a.example.com");

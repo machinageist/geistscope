@@ -88,8 +88,8 @@ struct HostRecord {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Confidence {
-    Confirmed,  // CNAME match + body signature present
-    Potential,  // CNAME match but HTTP probe failed or no body sig
+    Confirmed, // CNAME match + body signature present
+    Potential, // CNAME match but HTTP probe failed or no body sig
 }
 
 // One takeover finding entry
@@ -116,10 +116,7 @@ struct TakeoverOutput {
 // ── DNS helpers ───────────────────────────────────────────────────────────────
 
 // Resolve CNAME chain for a hostname; return (chain, final_target)
-async fn resolve_cname_chain(
-    resolver: &TokioResolver,
-    hostname: &str,
-) -> (Vec<String>, String) {
+async fn resolve_cname_chain(resolver: &TokioResolver, hostname: &str) -> (Vec<String>, String) {
     let mut chain: Vec<String> = Vec::new();
     let mut current = hostname.trim_end_matches('.').to_string();
 
@@ -252,8 +249,7 @@ fn load_subdomains(recon_dir: &Path) -> Result<Vec<String>> {
     let summary_path = recon_dir.join("summary.json");
     if summary_path.exists() {
         let raw = std::fs::read_to_string(&summary_path).context("read summary.json")?;
-        let summary: ReconSummary =
-            serde_json::from_str(&raw).context("parse summary.json")?;
+        let summary: ReconSummary = serde_json::from_str(&raw).context("parse summary.json")?;
         return Ok(summary.hosts.into_iter().map(|h| h.hostname).collect());
     }
 
@@ -271,8 +267,7 @@ async fn main() -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
-    let subdomains = load_subdomains(&eng.recon_dir())
-        .context("load subdomain list")?;
+    let subdomains = load_subdomains(&eng.recon_dir()).context("load subdomain list")?;
 
     eprintln!(
         "mg-takeover: {} subdomains to check (concurrency={})",
@@ -282,12 +277,9 @@ async fn main() -> Result<()> {
 
     // build shared DNS resolver with system defaults
     let resolver = Arc::new(
-        Resolver::builder_with_config(
-            ResolverConfig::default(),
-            TokioRuntimeProvider::default(),
-        )
-        .with_options(ResolverOpts::default())
-        .build()?,
+        Resolver::builder_with_config(ResolverConfig::default(), TokioRuntimeProvider::default())
+            .with_options(ResolverOpts::default())
+            .build()?,
     );
 
     // build shared HTTP client — short timeout, follow no redirects for body check

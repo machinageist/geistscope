@@ -43,7 +43,11 @@ fn render_host_list(f: &mut Frame, app: &App, area: Rect) {
     state.select(Some(app.host_cursor));
 
     let list = List::new(items)
-        .block(Block::default().title(" Hosts  Enter browse ").borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(" Hosts  Enter browse ")
+                .borders(Borders::ALL),
+        )
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
         .highlight_symbol("▶ ");
 
@@ -72,7 +76,13 @@ fn render_host_detail(f: &mut Frame, app: &App, area: Rect) {
 
     // HTTP status
     if let Some(code) = host.status_code {
-        let color = if code < 300 { Color::Green } else if code < 400 { Color::Yellow } else { Color::Red };
+        let color = if code < 300 {
+            Color::Green
+        } else if code < 400 {
+            Color::Yellow
+        } else {
+            Color::Red
+        };
         lines.push(Line::from(vec![
             Span::styled("HTTP:  ", Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(code.to_string(), Style::default().fg(color)),
@@ -90,18 +100,29 @@ fn render_host_detail(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::raw(""));
 
     // Open ports
-    lines.push(Line::from(Span::styled("Open ports:", Style::default().add_modifier(Modifier::BOLD))));
+    lines.push(Line::from(Span::styled(
+        "Open ports:",
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
     if host.open_ports.is_empty() {
         lines.push(Line::raw("  (none found)"));
     } else {
-        let port_str = host.open_ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ");
+        let port_str = host
+            .open_ports
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         lines.push(Line::raw(format!("  {port_str}")));
     }
 
     lines.push(Line::raw(""));
 
     // Tech stack
-    lines.push(Line::from(Span::styled("Tech stack:", Style::default().add_modifier(Modifier::BOLD))));
+    lines.push(Line::from(Span::styled(
+        "Tech stack:",
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
     if host.tech_stack.is_empty() {
         lines.push(Line::raw("  (none detected)"));
     } else {
@@ -110,7 +131,10 @@ fn render_host_detail(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let p = Paragraph::new(lines)
-        .block(Block::default().title(" Host Detail ").borders(Borders::ALL));
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Host Detail ")
+            .borders(Borders::ALL),
+    );
     f.render_widget(p, area);
 }

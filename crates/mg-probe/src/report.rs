@@ -64,7 +64,8 @@ pub fn write_report(
         let first = group[0];
 
         // collect all evidence lines from the group into the finding body
-        let evidence_block = group.iter()
+        let evidence_block = group
+            .iter()
             .map(|i| format!("```\n{}\n```", i.evidence))
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -93,7 +94,6 @@ pub fn write_report(
             Ok(p) => eprintln!("  [finding] {}", p.display()),
             Err(e) => eprintln!("  [finding err] {}: {e}", first.title),
         }
-
     }
 
     Ok(())
@@ -107,11 +107,11 @@ mod tests {
     // Build a minimal ProbeIssue for testing
     fn make_issue(check: &str, host: &str, sev: &str, title: &str) -> ProbeIssue {
         ProbeIssue {
-            check:    check.into(),
-            host:     host.into(),
+            check: check.into(),
+            host: host.into(),
             severity: sev.into(),
-            title:    title.into(),
-            detail:   "test detail".into(),
+            title: title.into(),
+            detail: "test detail".into(),
             evidence: "GET / → 200".into(),
         }
     }
@@ -124,7 +124,12 @@ mod tests {
         std::fs::create_dir_all(&findings).unwrap();
         std::fs::create_dir_all(&recon).unwrap();
 
-        let issues = vec![make_issue("cors", "api.example.com", "high", "CORS misconfiguration")];
+        let issues = vec![make_issue(
+            "cors",
+            "api.example.com",
+            "high",
+            "CORS misconfiguration",
+        )];
         write_report(&issues, &findings, &recon, "test-eng").unwrap();
 
         assert!(recon.join("probe-report.json").exists());
@@ -142,8 +147,18 @@ mod tests {
         std::fs::create_dir_all(&recon).unwrap();
 
         let issues = vec![
-            make_issue("cookies", "api.x.com", "medium", "Cookie 'session' missing HttpOnly"),
-            make_issue("cookies", "api.x.com", "medium", "Cookie 'session' missing HttpOnly"),
+            make_issue(
+                "cookies",
+                "api.x.com",
+                "medium",
+                "Cookie 'session' missing HttpOnly",
+            ),
+            make_issue(
+                "cookies",
+                "api.x.com",
+                "medium",
+                "Cookie 'session' missing HttpOnly",
+            ),
         ];
         write_report(&issues, &findings, &recon, "test-eng").unwrap();
 

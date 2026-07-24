@@ -35,7 +35,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .filter(|f| filter.is_empty() || f.severity.eq_ignore_ascii_case(filter))
         .collect();
 
-    let filter_label = if filter.is_empty() { "all".to_string() } else { filter.clone() };
+    let filter_label = if filter.is_empty() {
+        "all".to_string()
+    } else {
+        filter.clone()
+    };
     let title = format!(" Findings — filter: {filter_label}  (f to cycle) ");
 
     let header = Row::new(vec![

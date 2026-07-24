@@ -33,8 +33,7 @@ const AUDIT_TOOL: &str = "mg-grpc";
 const GRPC_PROBE_PORTS: &[u16] = &[443, 8443, 50051, 9090];
 
 // gRPC reflection service path
-const REFLECTION_PATH: &str =
-    "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo";
+const REFLECTION_PATH: &str = "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo";
 
 // Content-Type header value that identifies a gRPC server
 const GRPC_CONTENT_TYPE: &str = "application/grpc";
@@ -130,9 +129,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for filename use (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Extract length-delimited strings from a protobuf byte slice (best-effort)
@@ -170,11 +167,7 @@ fn build_empty_grpc_frame() -> Vec<u8> {
 }
 
 // Probe one host:port for gRPC and enumerate services
-async fn probe_host_port(
-    host: String,
-    port: u16,
-    timeout: Duration,
-) -> ProbeResult {
+async fn probe_host_port(host: String, port: u16, timeout: Duration) -> ProbeResult {
     // Use HTTPS for ports 443/8443, plain HTTP/2 for 50051/9090
     let (scheme, use_tls) = match port {
         443 | 8443 => ("https", true),
@@ -234,7 +227,11 @@ async fn probe_host_port(
     let body = resp.bytes().await.unwrap_or_default();
 
     // Skip the 5-byte gRPC frame header before parsing protobuf
-    let proto_bytes = if body.len() > 5 { &body[5..] } else { &body[..] };
+    let proto_bytes = if body.len() > 5 {
+        &body[5..]
+    } else {
+        &body[..]
+    };
     let service_names = extract_service_names(proto_bytes);
 
     // For each discovered service, probe with an empty body to test unauth access
@@ -347,21 +344,25 @@ async fn main() -> Result<()> {
                 )
                 .url(r.endpoint.clone())
                 .discriminator(svc.name.clone())
-                .evidence(format!("Service {} accepts calls without authentication", svc.name))
-                .recommendation("Require client credentials or auth interceptor on the gRPC server");
+                .evidence(format!(
+                    "Service {} accepts calls without authentication",
+                    svc.name
+                ))
+                .recommendation(
+                    "Require client credentials or auth interceptor on the gRPC server",
+                );
                 let _ = write_finding(&eng, &tf);
             }
         }
         // Reflection-exposed services are themselves Info, not necessarily vulnerable
         if !r.services.is_empty() {
-            let tf = ToolFinding::new(
-                AUDIT_TOOL,
-                "gRPC reflection enabled",
-                FindingSeverity::Info,
-            )
-            .url(r.endpoint.clone())
-            .evidence(format!("{} services enumerated via reflection", r.services.len()))
-            .recommendation("Disable reflection in production gRPC servers");
+            let tf = ToolFinding::new(AUDIT_TOOL, "gRPC reflection enabled", FindingSeverity::Info)
+                .url(r.endpoint.clone())
+                .evidence(format!(
+                    "{} services enumerated via reflection",
+                    r.services.len()
+                ))
+                .recommendation("Disable reflection in production gRPC servers");
             let _ = write_finding(&eng, &tf);
         }
     }
@@ -412,7 +413,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T10:00:00Z"), "2026-05-18T10_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T10:00:00Z"),
+            "2026-05-18T10_00_00Z"
+        );
     }
 
     #[test]

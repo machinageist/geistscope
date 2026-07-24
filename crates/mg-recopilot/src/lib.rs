@@ -78,14 +78,14 @@ pub struct AnalysisReadOutput {
 }
 
 // Analyze one pseudocode function and write Markdown + JSON results
-pub async fn analyze_function(
-    config: &AnalyzeConfig,
-) -> Result<AnalyzeOutput, RecopilotError> {
+pub async fn analyze_function(config: &AnalyzeConfig) -> Result<AnalyzeOutput, RecopilotError> {
     validate_path_component(&config.binary, "binary")?;
     validate_path_component(&config.function, "function")?;
     let eng = Engagement::load_named(&config.engagements_dir, &config.engagement)?;
     let binary_dir = eng.re_dir().join(&config.binary);
-    let raw_path = binary_dir.join("raw").join(format!("{}.c", &config.function));
+    let raw_path = binary_dir
+        .join("raw")
+        .join(format!("{}.c", &config.function));
     if !raw_path.exists() {
         return Err(RecopilotError::MissingInput(format!(
             "pseudocode file not found at {}",
@@ -110,8 +110,8 @@ pub async fn analyze_function(
     let pseudocode_raw = fs::read_to_string(&raw_path)?;
     let pseudocode = bounded_text(&pseudocode_raw, PSEUDOCODE_MAX_BYTES);
     let manifest_path = binary_dir.join("manifest.json");
-    let manifest_json = read_optional_bounded(&manifest_path, MANIFEST_MAX_BYTES)?
-        .unwrap_or_else(|| "{}".into());
+    let manifest_json =
+        read_optional_bounded(&manifest_path, MANIFEST_MAX_BYTES)?.unwrap_or_else(|| "{}".into());
 
     let body = if config.offline {
         fallback_analysis_body(&config.binary, &config.function, &manifest_json)
@@ -128,7 +128,10 @@ pub async fn analyze_function(
         !config.offline,
     )?;
 
-    fs::write(&markdown_path, render_markdown(&config.binary, &config.function, &bounded_body))?;
+    fs::write(
+        &markdown_path,
+        render_markdown(&config.binary, &config.function, &bounded_body),
+    )?;
     fs::write(&json_path, serde_json::to_string_pretty(&json_doc)?)?;
 
     let _ = eng.audit(
@@ -189,7 +192,8 @@ async fn run_model_analysis(
 ) -> Result<String, RecopilotError> {
     let client = build_client(config)?;
     let system = prompt::analyze_system_prompt();
-    let user = prompt::analyze_user_prompt(&config.binary, &config.function, manifest_json, pseudocode);
+    let user =
+        prompt::analyze_user_prompt(&config.binary, &config.function, manifest_json, pseudocode);
     Ok(client.complete(system, &user).await?)
 }
 
@@ -203,7 +207,10 @@ fn build_client(config: &AnalyzeConfig) -> Result<LlmClient, RecopilotError> {
 
 // Render the markdown document for a function analysis
 fn render_markdown(binary: &str, function: &str, body: &str) -> String {
-    format!("# RE Analysis — {binary} :: {function}\n\n{}\n", body.trim())
+    format!(
+        "# RE Analysis — {binary} :: {function}\n\n{}\n",
+        body.trim()
+    )
 }
 
 // Build the JSON sidecar from the parsed markdown sections
@@ -269,7 +276,9 @@ fn fallback_analysis_body(binary: &str, function: &str, manifest_json: &str) -> 
 // Reject path components that would escape the engagement workspace
 fn validate_path_component(value: &str, label: &str) -> Result<(), RecopilotError> {
     if value.is_empty() {
-        return Err(RecopilotError::InvalidArgs(format!("{label} must not be empty")));
+        return Err(RecopilotError::InvalidArgs(format!(
+            "{label} must not be empty"
+        )));
     }
     if value.contains('/')
         || value.contains('\\')
@@ -350,7 +359,11 @@ mod tests {
 
     #[tokio::test]
     async fn analyze_offline_writes_markdown_and_json() {
-        let parent = fixture("libfoo", "parse_header", Some(r#"{"binary_name":"libfoo","arch":"x86_64","mitigations":["NX","ASLR"]}"#));
+        let parent = fixture(
+            "libfoo",
+            "parse_header",
+            Some(r#"{"binary_name":"libfoo","arch":"x86_64","mitigations":["NX","ASLR"]}"#),
+        );
         let config = AnalyzeConfig {
             engagements_dir: parent,
             engagement: "acme".into(),

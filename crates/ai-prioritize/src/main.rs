@@ -303,10 +303,7 @@ fn findings_context_block(findings: &[serde_json::Value]) -> String {
             .get("title")
             .and_then(|v| v.as_str())
             .unwrap_or("(no title)");
-        let severity = f
-            .get("severity")
-            .and_then(|v| v.as_str())
-            .unwrap_or("-");
+        let severity = f.get("severity").and_then(|v| v.as_str()).unwrap_or("-");
         let tool = f.get("tool").and_then(|v| v.as_str()).unwrap_or("-");
         let url = f.get("url").and_then(|v| v.as_str()).unwrap_or("-");
         out.push_str(&format!(
@@ -594,7 +591,10 @@ mod tests {
         assert_eq!(findings.len(), 55);
         let block = findings_context_block(&findings);
         // MAX_FINDINGS_IN_CONTEXT rows plus header rows should be present
-        let rows = block.lines().filter(|l| l.starts_with('|') && l.contains('|')).count();
+        let rows = block
+            .lines()
+            .filter(|l| l.starts_with('|') && l.contains('|'))
+            .count();
         // header + separator + 50 data rows = 52
         assert_eq!(rows, 52);
     }

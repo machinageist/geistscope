@@ -98,7 +98,11 @@ fn main() -> Result<()> {
         .context("format timestamp")?;
 
     let out_path = match &args.output_dir {
-        Some(p) => format!("{}/privesc-linux-{}.json", p.trim_end_matches('/'), &ts[..19].replace(':', "-")),
+        Some(p) => format!(
+            "{}/privesc-linux-{}.json",
+            p.trim_end_matches('/'),
+            &ts[..19].replace(':', "-")
+        ),
         None => format!("./privesc-linux-{}.json", &ts[..19].replace(':', "-")),
     };
 
@@ -165,7 +169,7 @@ fn main() -> Result<()> {
 // Check for SUID/SGID binaries not in the known-safe whitelist
 fn check_suid() -> Vec<Finding> {
     let output = Command::new("find")
-        .args(["/" , "-perm", "-4000", "-o", "-perm", "-2000"])
+        .args(["/", "-perm", "-4000", "-o", "-perm", "-2000"])
         .stderr(std::process::Stdio::null())
         .output();
 
@@ -370,7 +374,9 @@ fn parse_kernel_version(proc_version: &str) -> Vec<Finding> {
         vec![Finding {
             check: "OLD_KERNEL".into(),
             severity: Severity::Medium,
-            detail: format!("kernel version {version_str} is older than 5.x — may have known exploits"),
+            detail: format!(
+                "kernel version {version_str} is older than 5.x — may have known exploits"
+            ),
         }]
     } else {
         Vec::new()
@@ -409,7 +415,9 @@ fn parse_docker_group(groups_content: &str, username: &str) -> Vec<Finding> {
                 return vec![Finding {
                     check: "DOCKER_GROUP_MEMBERSHIP".into(),
                     severity: Severity::High,
-                    detail: format!("user '{username}' is in the docker group — trivial root escape via `docker run`"),
+                    detail: format!(
+                        "user '{username}' is in the docker group — trivial root escape via `docker run`"
+                    ),
                 }];
             }
         }

@@ -55,7 +55,11 @@ impl AnthropicClient {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .build()?;
-        Ok(Self { api_key: api_key.into(), model: model.into(), http })
+        Ok(Self {
+            api_key: api_key.into(),
+            model: model.into(),
+            http,
+        })
     }
 
     // Send system + user messages and return the first text content block from the response
@@ -64,7 +68,10 @@ impl AnthropicClient {
             model: &self.model,
             max_tokens: MAX_TOKENS,
             system,
-            messages: vec![UserMessage { role: "user", content: user }],
+            messages: vec![UserMessage {
+                role: "user",
+                content: user,
+            }],
         };
 
         let resp: Response = self
@@ -98,7 +105,10 @@ mod tests {
             model: "claude-sonnet-4-6",
             max_tokens: MAX_TOKENS,
             system: "sys",
-            messages: vec![UserMessage { role: "user", content: "usr" }],
+            messages: vec![UserMessage {
+                role: "user",
+                content: "usr",
+            }],
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["model"], "claude-sonnet-4-6");

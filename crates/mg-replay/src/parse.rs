@@ -11,7 +11,7 @@
  *                  Multi-line curl commands joined with backslash-newline are supported.
  *******************************************************************/
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 // One parsed curl invocation
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ pub struct CurlRequest {
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
     pub insecure: bool,
-    #[allow(dead_code)]  // respected by client builder in main.rs v2; stored for now
+    #[allow(dead_code)] // respected by client builder in main.rs v2; stored for now
     pub follow_redirects: bool,
 }
 
@@ -44,7 +44,9 @@ pub fn extract_curl_commands(markdown: &str) -> Vec<String> {
             continue;
         }
 
-        if !in_evidence { continue; }
+        if !in_evidence {
+            continue;
+        }
 
         // detect fenced code block open/close (``` with optional language tag)
         if line.trim_start().starts_with("```") {
@@ -150,7 +152,9 @@ pub fn parse_curl(cmd: &str) -> Result<CurlRequest> {
             }
             // positional argument: the URL
             t => {
-                if url.is_none() { url = Some(t.to_string()); }
+                if url.is_none() {
+                    url = Some(t.to_string());
+                }
             }
         }
         i += 1;
@@ -160,10 +164,21 @@ pub fn parse_curl(cmd: &str) -> Result<CurlRequest> {
 
     // infer method from presence of body
     let method = method.unwrap_or_else(|| {
-        if body.is_some() { "POST".into() } else { "GET".into() }
+        if body.is_some() {
+            "POST".into()
+        } else {
+            "GET".into()
+        }
     });
 
-    Ok(CurlRequest { url, method, headers, body, insecure, follow_redirects })
+    Ok(CurlRequest {
+        url,
+        method,
+        headers,
+        body,
+        insecure,
+        follow_redirects,
+    })
 }
 
 // Naive shell tokenizer: splits on whitespace, respects 'single' and "double" quotes
@@ -177,7 +192,7 @@ fn tokenize(s: &str) -> Vec<String> {
     while let Some(c) = chars.next() {
         match c {
             '\'' if !in_double => in_single = !in_single,
-            '"'  if !in_single => in_double = !in_double,
+            '"' if !in_single => in_double = !in_double,
             ' ' | '\t' if !in_single && !in_double => {
                 if !cur.is_empty() {
                     tokens.push(cur.clone());
@@ -186,12 +201,16 @@ fn tokenize(s: &str) -> Vec<String> {
             }
             '\\' if !in_single => {
                 // escaped character: include the next char literally
-                if let Some(next) = chars.next() { cur.push(next); }
+                if let Some(next) = chars.next() {
+                    cur.push(next);
+                }
             }
             _ => cur.push(c),
         }
     }
-    if !cur.is_empty() { tokens.push(cur); }
+    if !cur.is_empty() {
+        tokens.push(cur);
+    }
     tokens
 }
 
@@ -202,12 +221,28 @@ fn base64_encode(input: &[u8]) -> String {
     let mut i = 0;
     while i < input.len() {
         let b0 = input[i] as u32;
-        let b1 = if i + 1 < input.len() { input[i + 1] as u32 } else { 0 };
-        let b2 = if i + 2 < input.len() { input[i + 2] as u32 } else { 0 };
+        let b1 = if i + 1 < input.len() {
+            input[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < input.len() {
+            input[i + 2] as u32
+        } else {
+            0
+        };
         out.push(ALPHABET[((b0 >> 2) & 0x3F) as usize] as char);
         out.push(ALPHABET[(((b0 & 3) << 4) | (b1 >> 4)) as usize] as char);
-        out.push(if i + 1 < input.len() { ALPHABET[(((b1 & 0xF) << 2) | (b2 >> 6)) as usize] as char } else { '=' });
-        out.push(if i + 2 < input.len() { ALPHABET[(b2 & 0x3F) as usize] as char } else { '=' });
+        out.push(if i + 1 < input.len() {
+            ALPHABET[(((b1 & 0xF) << 2) | (b2 >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if i + 2 < input.len() {
+            ALPHABET[(b2 & 0x3F) as usize] as char
+        } else {
+            '='
+        });
         i += 3;
     }
     out
@@ -241,7 +276,9 @@ mod tests {
 
     #[test]
     fn parse_curl_get_with_header() {
-        let req = parse_curl("curl -X GET https://api.x.com/v1/users -H 'Authorization: Bearer TOKEN'").unwrap();
+        let req =
+            parse_curl("curl -X GET https://api.x.com/v1/users -H 'Authorization: Bearer TOKEN'")
+                .unwrap();
         assert_eq!(req.method, "GET");
         assert_eq!(req.url, "https://api.x.com/v1/users");
         assert!(req.headers.iter().any(|(k, _)| k == "Authorization"));
@@ -249,7 +286,8 @@ mod tests {
 
     #[test]
     fn parse_curl_infers_post_from_data() {
-        let req = parse_curl(r#"curl https://api.x.com/login -d '{"user":"a","pass":"b"}'"#).unwrap();
+        let req =
+            parse_curl(r#"curl https://api.x.com/login -d '{"user":"a","pass":"b"}'"#).unwrap();
         assert_eq!(req.method, "POST");
         assert!(req.body.is_some());
     }

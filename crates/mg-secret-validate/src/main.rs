@@ -17,9 +17,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use std::sync::OnceLock;
 use regex::Regex;
 use serde::Serialize;
+use std::sync::OnceLock;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -33,8 +33,7 @@ const MASK_LEN: usize = 8;
 
 // AWS STS validation endpoint
 const AWS_STS_URL: &str = "https://sts.amazonaws.com/";
-const AWS_STS_BODY: &str =
-    "Action=GetCallerIdentity&Version=2011-06-15&AWSAccessKeyId=";
+const AWS_STS_BODY: &str = "Action=GetCallerIdentity&Version=2011-06-15&AWSAccessKeyId=";
 const AWS_AUTH_FAILURE: &str = "AuthFailure";
 const AWS_INVALID_TOKEN: &str = "InvalidClientTokenId";
 
@@ -158,9 +157,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for use in filename
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Mask a secret to its first MASK_LEN chars followed by ...
@@ -219,11 +216,17 @@ async fn validate_aws(client: &reqwest::Client, key: &str) -> (Validity, String)
         Ok(r) => {
             let text = r.text().await.unwrap_or_default();
             if text.contains(AWS_AUTH_FAILURE) {
-                (Validity::Valid, "STS AuthFailure — key exists, insufficient perms".into())
+                (
+                    Validity::Valid,
+                    "STS AuthFailure — key exists, insufficient perms".into(),
+                )
             } else if text.contains(AWS_INVALID_TOKEN) {
                 (Validity::Invalid, "STS InvalidClientTokenId".into())
             } else {
-                (Validity::Error, format!("unexpected STS response: {}", &text[..text.len().min(80)]))
+                (
+                    Validity::Error,
+                    format!("unexpected STS response: {}", &text[..text.len().min(80)]),
+                )
             }
         }
         Err(e) => (Validity::Error, e.to_string()),
@@ -297,7 +300,10 @@ async fn validate(client: &reqwest::Client, kind: &SecretKind, secret: &str) -> 
         SecretKind::GitHubToken => validate_github(client, secret).await,
         SecretKind::StripeKey => validate_stripe(client, secret).await,
         SecretKind::SlackToken => validate_slack(client, secret).await,
-        SecretKind::Unknown => (Validity::Skipped, "unknown kind — skipping live validation".into()),
+        SecretKind::Unknown => (
+            Validity::Skipped,
+            "unknown kind — skipping live validation".into(),
+        ),
     }
 }
 
@@ -321,7 +327,10 @@ async fn main() -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     all_secrets.retain(|s| seen.insert(s.clone()));
 
-    eprintln!("mg-secret-validate: {} unique secrets to process", all_secrets.len());
+    eprintln!(
+        "mg-secret-validate: {} unique secrets to process",
+        all_secrets.len()
+    );
 
     if all_secrets.is_empty() {
         eprintln!("mg-secret-validate: no secrets found — pass --secret or run mg-crawl first");
@@ -356,7 +365,10 @@ async fn main() -> Result<()> {
         });
     }
 
-    let valid_count = results.iter().filter(|r| r.validity == Validity::Valid).count();
+    let valid_count = results
+        .iter()
+        .filter(|r| r.validity == Validity::Valid)
+        .count();
     let ts = now_rfc3339();
     let ts_file = ts_for_filename(&ts);
 
@@ -386,10 +398,21 @@ async fn main() -> Result<()> {
     );
 
     // Write finding for each valid (live) secret
-    for r in output.results.iter().filter(|r| r.validity == Validity::Valid) {
-        let tf = ToolFinding::new("mg-secret-validate", "Valid Leaked Secret Confirmed", FindingSeverity::High)
-            .evidence(format!("kind={:?} masked={} detail={}", r.kind, r.masked, r.detail))
-            .recommendation("Revoke and rotate the secret immediately; audit where it was exposed");
+    for r in output
+        .results
+        .iter()
+        .filter(|r| r.validity == Validity::Valid)
+    {
+        let tf = ToolFinding::new(
+            "mg-secret-validate",
+            "Valid Leaked Secret Confirmed",
+            FindingSeverity::High,
+        )
+        .evidence(format!(
+            "kind={:?} masked={} detail={}",
+            r.kind, r.masked, r.detail
+        ))
+        .recommendation("Revoke and rotate the secret immediately; audit where it was exposed");
         let _ = write_finding(&eng, &tf);
     }
 
@@ -464,7 +487,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T10:00:00Z"), "2026-05-17T10_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T10:00:00Z"),
+            "2026-05-17T10_00_00Z"
+        );
     }
 
     #[test]

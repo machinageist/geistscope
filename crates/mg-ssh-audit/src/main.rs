@@ -52,10 +52,7 @@ const CLIENT_BANNER: &[u8] = b"SSH-2.0-mg-ssh-audit_0.1\r\n";
 
 // ── Deprecated algorithm lists ───────────────────────────────────────────────
 
-const WEAK_KEX: &[&str] = &[
-    "diffie-hellman-group1-sha1",
-    "diffie-hellman-group14-sha1",
-];
+const WEAK_KEX: &[&str] = &["diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"];
 
 const WEAK_CIPHERS: &[&str] = &[
     "arcfour",
@@ -172,7 +169,12 @@ fn read_name_list(buf: &[u8], offset: &mut usize) -> Option<Vec<String>> {
     }
     let s = std::str::from_utf8(&buf[*offset..*offset + len]).ok()?;
     *offset += len;
-    Some(s.split(',').map(|a| a.to_string()).filter(|a| !a.is_empty()).collect())
+    Some(
+        s.split(',')
+            .map(|a| a.to_string())
+            .filter(|a| !a.is_empty())
+            .collect(),
+    )
 }
 
 // Parse a server KEXINIT payload starting after the SSH binary packet framing
@@ -312,12 +314,7 @@ async fn audit_host(host: String, port: u16, timeout_secs: u64) -> HostAudit {
 
     // read server banner (first \n-terminated line)
     let mut raw = vec![0u8; READ_BUF_LEN];
-    let n = match timeout(
-        Duration::from_secs(timeout_secs),
-        stream.read(&mut raw),
-    )
-    .await
-    {
+    let n = match timeout(Duration::from_secs(timeout_secs), stream.read(&mut raw)).await {
         Ok(Ok(n)) => n,
         _ => {
             return HostAudit {
@@ -334,10 +331,11 @@ async fn audit_host(host: String, port: u16, timeout_secs: u64) -> HostAudit {
     raw.truncate(n);
 
     // extract banner: first line of the raw buffer
-    let banner_line = raw
-        .split(|&b| b == b'\n')
-        .next()
-        .map(|l| String::from_utf8_lossy(l).trim_end_matches('\r').to_string());
+    let banner_line = raw.split(|&b| b == b'\n').next().map(|l| {
+        String::from_utf8_lossy(l)
+            .trim_end_matches('\r')
+            .to_string()
+    });
 
     let ssh_version = banner_line
         .as_deref()
@@ -364,12 +362,7 @@ async fn audit_host(host: String, port: u16, timeout_secs: u64) -> HostAudit {
 
     // read server KEXINIT — may arrive in the same buffer or require another read
     let mut kexinit_buf = raw.clone();
-    match timeout(
-        Duration::from_secs(timeout_secs),
-        stream.read(&mut raw),
-    )
-    .await
-    {
+    match timeout(Duration::from_secs(timeout_secs), stream.read(&mut raw)).await {
         Ok(Ok(n2)) if n2 > 0 => kexinit_buf.extend_from_slice(&raw[..n2]),
         _ => {}
     }
@@ -441,7 +434,10 @@ async fn main() -> Result<()> {
                 "  {} — {} flags{}",
                 r.host,
                 r.flags.len(),
-                r.error.as_deref().map(|e| format!(" (err: {e})")).unwrap_or_default()
+                r.error
+                    .as_deref()
+                    .map(|e| format!(" (err: {e})"))
+                    .unwrap_or_default()
             );
             results.push(r);
         }
@@ -453,13 +449,20 @@ async fn main() -> Result<()> {
             "  {} — {} flags{}",
             r.host,
             r.flags.len(),
-            r.error.as_deref().map(|e| format!(" (err: {e})")).unwrap_or_default()
+            r.error
+                .as_deref()
+                .map(|e| format!(" (err: {e})"))
+                .unwrap_or_default()
         );
         results.push(r);
     }
 
     let total_flags: usize = results.iter().map(|r| r.flags.len()).sum();
-    eprintln!("mg-ssh-audit: {} total flags across {} hosts", total_flags, results.len());
+    eprintln!(
+        "mg-ssh-audit: {} total flags across {} hosts",
+        total_flags,
+        results.len()
+    );
 
     // write output
     let out_dir = eng.root.join(OUTPUT_SUBDIR);

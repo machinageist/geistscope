@@ -111,7 +111,9 @@ struct CrawlEntry {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "unknown".into())
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".into())
 }
 
 fn ts_for_filename(ts: &str) -> String {
@@ -235,7 +237,10 @@ pub async fn run(args: Args) -> Result<()> {
 
     let crawl_dir = eng.crawl_dir();
     if !crawl_dir.exists() {
-        anyhow::bail!("crawl directory not found — run `mg-crawl {}` first", args.engagement);
+        anyhow::bail!(
+            "crawl directory not found — run `mg-crawl {}` first",
+            args.engagement
+        );
     }
 
     let scan_files = collect_files(&crawl_dir, &["html", "js", "json"]);
@@ -277,7 +282,11 @@ pub async fn run(args: Args) -> Result<()> {
     scan_index_headers(&crawl_dir, &mut index_findings);
     all_findings.extend(index_findings);
 
-    eprintln!("mg-apikey: {} files scanned, {} findings", files_scanned, all_findings.len());
+    eprintln!(
+        "mg-apikey: {} files scanned, {} findings",
+        files_scanned,
+        all_findings.len()
+    );
     for f in &all_findings {
         eprintln!("  [{}] {} — {}", f.key_type, f.masked_value, f.source_file);
     }
@@ -296,15 +305,25 @@ pub async fn run(args: Args) -> Result<()> {
     let output_dir = eng.root.join(OUTPUT_SUBDIR);
     fs::create_dir_all(&output_dir).context("create apikey output dir")?;
     let results_path = output_dir.join(format!("results-{ts_file}.json"));
-    fs::write(&results_path, serde_json::to_string_pretty(&output).unwrap_or_default())
-        .context("write apikey results")?;
+    fs::write(
+        &results_path,
+        serde_json::to_string_pretty(&output).unwrap_or_default(),
+    )
+    .context("write apikey results")?;
 
-    eprintln!("mg-apikey: findings={} — {}", output.findings_count, results_path.display());
+    eprintln!(
+        "mg-apikey: findings={} — {}",
+        output.findings_count,
+        results_path.display()
+    );
 
     let _ = eng.audit(
         AUDIT_TOOL,
         &eng.meta.target,
-        Some(&format!("files={} findings={} ts={ts}", output.files_scanned, output.findings_count)),
+        Some(&format!(
+            "files={} findings={} ts={ts}",
+            output.files_scanned, output.findings_count
+        )),
     );
 
     Ok(())
@@ -326,7 +345,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T09:15:00Z"), "2026-05-18T09_15_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T09:15:00Z"),
+            "2026-05-18T09_15_00Z"
+        );
     }
 
     #[test]

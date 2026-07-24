@@ -43,8 +43,7 @@ const H2C_SETTINGS_VALUE: &str = "AAMAAABkAAQAAP__";
 const HPACK_HEADER_COUNT: usize = 100;
 const HPACK_HEADER_NAME_PREFIX: &str = "x-geist-hpack-probe-";
 // 100-byte value to exercise HPACK table
-const HPACK_HEADER_VALUE: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HPACK_HEADER_VALUE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 // Known vulnerable server substrings for rapid reset heuristic
 // nginx < 1.25.3 and Apache < 2.4.58 are unpatched
@@ -161,7 +160,11 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     let maj = parts[0].parse().ok()?;
     let min = parts[1].parse().ok()?;
     // patch may have trailing characters like "-ubuntu"
-    let patch: u32 = parts[2].split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()?;
+    let patch: u32 = parts[2]
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()?;
     Some((maj, min, patch))
 }
 
@@ -282,11 +285,7 @@ async fn probe_hpack(client: &reqwest::Client, url: &str) -> bool {
 }
 
 // Run all checks for one host
-async fn probe_host(
-    host: String,
-    open_ports: Vec<u16>,
-    timeout_secs: u64,
-) -> Http2Result {
+async fn probe_host(host: String, open_ports: Vec<u16>, timeout_secs: u64) -> Http2Result {
     let url = base_url(&host, &open_ports);
 
     let h1_client = match build_http1_client(timeout_secs) {
@@ -440,7 +439,10 @@ async fn main() -> Result<()> {
             eprintln!("  [INFO] {} — {}", r.host, r.rapid_reset_note);
         }
         if r.hpack_large_headers_accepted {
-            eprintln!("  [LOW] {} — HPACK large headers accepted (100 x 100-byte headers)", r.host);
+            eprintln!(
+                "  [LOW] {} — HPACK large headers accepted (100 x 100-byte headers)",
+                r.host
+            );
         }
         if r.http2_tls_supported {
             eprintln!("  [INFO] {} — HTTP/2 over TLS supported", r.host);
@@ -472,32 +474,40 @@ async fn main() -> Result<()> {
     // Emit findings for confirmed HTTP/2 issues
     for r in &output.results {
         if r.h2c_upgrade_accepted {
-            let tf = ToolFinding::new("mg-http2", "h2c Cleartext Upgrade Accepted", FindingSeverity::Medium)
-                .url(r.base_url.clone())
-                .evidence(format!(
-                    "host={} responded 101 Switching Protocols to h2c Upgrade request — \
+            let tf = ToolFinding::new(
+                "mg-http2",
+                "h2c Cleartext Upgrade Accepted",
+                FindingSeverity::Medium,
+            )
+            .url(r.base_url.clone())
+            .evidence(format!(
+                "host={} responded 101 Switching Protocols to h2c Upgrade request — \
                      plaintext HTTP/2 negotiation accepted; traffic is unencrypted",
-                    r.host
-                ))
-                .recommendation(
-                    "Disable h2c cleartext upgrade; enforce TLS for all HTTP/2 traffic; \
-                     configure server to reject Upgrade: h2c headers"
-                );
+                r.host
+            ))
+            .recommendation(
+                "Disable h2c cleartext upgrade; enforce TLS for all HTTP/2 traffic; \
+                     configure server to reject Upgrade: h2c headers",
+            );
             let _ = write_finding(&eng, &tf);
         }
         if r.rapid_reset_risk {
-            let tf = ToolFinding::new("mg-http2", "HTTP/2 Rapid Reset Vulnerable Version Detected", FindingSeverity::Medium)
-                .url(r.base_url.clone())
-                .evidence(format!(
-                    "host={} server={} — {}",
-                    r.host,
-                    r.server_header.as_deref().unwrap_or("unknown"),
-                    r.rapid_reset_note
-                ))
-                .recommendation(
-                    "Upgrade nginx to >= 1.25.3 or Apache to >= 2.4.58 to patch CVE-2023-44487; \
-                     verify patch status with HTTP/2 rapid reset PoC tooling"
-                );
+            let tf = ToolFinding::new(
+                "mg-http2",
+                "HTTP/2 Rapid Reset Vulnerable Version Detected",
+                FindingSeverity::Medium,
+            )
+            .url(r.base_url.clone())
+            .evidence(format!(
+                "host={} server={} — {}",
+                r.host,
+                r.server_header.as_deref().unwrap_or("unknown"),
+                r.rapid_reset_note
+            ))
+            .recommendation(
+                "Upgrade nginx to >= 1.25.3 or Apache to >= 2.4.58 to patch CVE-2023-44487; \
+                     verify patch status with HTTP/2 rapid reset PoC tooling",
+            );
             let _ = write_finding(&eng, &tf);
         }
     }
@@ -584,6 +594,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T10:30:00Z"), "2026-05-18T10_30_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T10:30:00Z"),
+            "2026-05-18T10_30_00Z"
+        );
     }
 }

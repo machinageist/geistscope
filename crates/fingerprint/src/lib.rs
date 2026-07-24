@@ -5,5 +5,5 @@
 pub mod detect;
 pub mod wordlists;
 
-pub use detect::{fingerprint_url, Fingerprint};
+pub use detect::{Fingerprint, fingerprint_url};
 pub use wordlists::tech_wordlist;

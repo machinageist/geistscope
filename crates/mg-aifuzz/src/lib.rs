@@ -99,7 +99,9 @@ pub fn record_consent(engagements_dir: &Path, engagement: &str) -> Result<PathBu
     let aifuzz_dir = eng.root.join("aifuzz");
     fs::create_dir_all(&aifuzz_dir)?;
     let path = aifuzz_dir.join(CONSENT_FILENAME);
-    let ts = OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_default();
+    let ts = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_default();
     fs::write(
         &path,
         format!(
@@ -174,8 +176,19 @@ pub async fn run(config: &FuzzConfig) -> Result<FuzzOutput, AiFuzzError> {
         if signal.is_some() {
             hits += 1;
         }
-        let row = build_row(&payload, &request, &url, &body_bytes, &response_text, &signal);
-        writeln!(output, "{}", serde_json::to_string(&row).unwrap_or_default())?;
+        let row = build_row(
+            &payload,
+            &request,
+            &url,
+            &body_bytes,
+            &response_text,
+            &signal,
+        );
+        writeln!(
+            output,
+            "{}",
+            serde_json::to_string(&row).unwrap_or_default()
+        )?;
         attempts += 1;
 
         if config.rate_ms > 0 {

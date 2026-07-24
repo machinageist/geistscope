@@ -129,9 +129,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Parse rate-limit headers from a reqwest response
@@ -150,7 +148,10 @@ fn parse_rate_limit(resp: &reqwest::Response) -> Option<RateLimit> {
         .ok()?
         .parse::<u64>()
         .ok()?;
-    Some(RateLimit { remaining, reset_unix })
+    Some(RateLimit {
+        remaining,
+        reset_unix,
+    })
 }
 
 // Wait until the GitHub rate-limit reset timestamp if quota is zero
@@ -172,7 +173,11 @@ async fn run_query(
     query: &str,
     seen_urls: &mut HashSet<String>,
 ) -> Result<Vec<GithubFinding>> {
-    let url = format!("{}?q={}&per_page=100", GITHUB_SEARCH_URL, urlencoding_simple(query));
+    let url = format!(
+        "{}?q={}&per_page=100",
+        GITHUB_SEARCH_URL,
+        urlencoding_simple(query)
+    );
     let resp = client
         .get(&url)
         .send()
@@ -184,7 +189,11 @@ async fn run_query(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        eprintln!("  query failed status={} body={}", status, &body[..body.len().min(200)]);
+        eprintln!(
+            "  query failed status={} body={}",
+            status,
+            &body[..body.len().min(200)]
+        );
         return Ok(Vec::new());
     }
 
@@ -359,9 +368,7 @@ async fn main() -> Result<()> {
         &eng.meta.target,
         Some(&format!(
             "org={} queries={} findings={} ts={ts}",
-            args.org,
-            output.total_queries,
-            output.total_findings
+            args.org, output.total_queries, output.total_findings
         )),
     );
 
@@ -395,6 +402,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 }

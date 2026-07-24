@@ -135,9 +135,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Generate a stable 8-char hex marker from a (url, param) pair without rand
@@ -325,9 +323,7 @@ pub async fn run(args: Args) -> Result<()> {
     if let Some(oob) = &args.oob_url {
         // Generate a unique token for OOB correlation
         let token = format!("{:08x}", std::process::id());
-        payloads.push(format!(
-            "<script src=\"{oob}/xss-{token}\"></script>"
-        ));
+        payloads.push(format!("<script src=\"{oob}/xss-{token}\"></script>"));
     }
 
     let mut join_set: JoinSet<XssResult> = JoinSet::new();
@@ -377,7 +373,10 @@ pub async fn run(args: Args) -> Result<()> {
     // Print confirmed and potential hits
     for r in &all_results {
         match r.verdict {
-            Verdict::Reflected => eprintln!("  [REFLECTED] {} param={} payload={}", r.url, r.param, r.payload),
+            Verdict::Reflected => eprintln!(
+                "  [REFLECTED] {} param={} payload={}",
+                r.url, r.param, r.payload
+            ),
             Verdict::Potential => eprintln!("  [potential] {} param={}", r.url, r.param),
             Verdict::Miss => {}
         }
@@ -414,7 +413,11 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Write finding for each confirmed reflected XSS result
-    for r in output.results.iter().filter(|r| r.verdict == Verdict::Reflected) {
+    for r in output
+        .results
+        .iter()
+        .filter(|r| r.verdict == Verdict::Reflected)
+    {
         let tf = ToolFinding::new("mg-xss", "Reflected XSS", FindingSeverity::High)
             .url(r.url.clone())
             .parameter(r.param.clone())

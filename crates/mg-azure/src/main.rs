@@ -274,7 +274,11 @@ async fn main() -> Result<()> {
     };
     eprintln!(
         "  token: {}",
-        if access_token_masked.is_some() { "obtained" } else { "none" }
+        if access_token_masked.is_some() {
+            "obtained"
+        } else {
+            "none"
+        }
     );
 
     // Step c: subscription ID as plain text (redundant but explicit)
@@ -294,7 +298,10 @@ async fn main() -> Result<()> {
     // Print summary
     println!("\n=== Azure IMDS Chain via SSRF ===");
     println!("SSRF endpoint:  {}", args.ssrf_url);
-    println!("SSRF confirmed: {}", if confirmed_ssrf { "YES" } else { "NO" });
+    println!(
+        "SSRF confirmed: {}",
+        if confirmed_ssrf { "YES" } else { "NO" }
+    );
     if let Some(ref sid) = subscription_id {
         println!("Subscription ID:   {sid}");
     }

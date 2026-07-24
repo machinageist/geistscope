@@ -32,15 +32,25 @@ const AUDIT_TOOL: &str = "mg-cloud-enum";
 const USER_AGENT: &str = "mg-cloud-enum/0.1 (geistscope security scanner)";
 // Suffixes appended to the base target name
 const SUFFIXES: &[&str] = &[
-    "-dev", "-staging", "-prod", "-backup", "-data", "-assets",
-    "-static", "-files", "-uploads", "-public", "-private",
-    "-internal", "-logs", "-archive", "-store",
+    "-dev",
+    "-staging",
+    "-prod",
+    "-backup",
+    "-data",
+    "-assets",
+    "-static",
+    "-files",
+    "-uploads",
+    "-public",
+    "-private",
+    "-internal",
+    "-logs",
+    "-archive",
+    "-store",
 ];
 
 // Prefixes prepended to the base target name
-const PREFIXES: &[&str] = &[
-    "dev-", "staging-", "prod-", "backup-", "data-", "assets-",
-];
+const PREFIXES: &[&str] = &["dev-", "staging-", "prod-", "backup-", "data-", "assets-"];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -114,9 +124,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Generate all candidate bucket names from the base target name
@@ -209,9 +217,8 @@ async fn check_gcs(client: Arc<reqwest::Client>, bucket: String) -> BucketResult
 
 // Check one Azure Blob container by name
 async fn check_azure(client: Arc<reqwest::Client>, bucket: String) -> BucketResult {
-    let url = format!(
-        "https://{bucket}.blob.core.windows.net/{bucket}?restype=container&comp=list"
-    );
+    let url =
+        format!("https://{bucket}.blob.core.windows.net/{bucket}?restype=container&comp=list");
     let status = match client.get(&url).send().await {
         Ok(resp) => {
             let http_status = resp.status().as_u16();
@@ -344,11 +351,24 @@ async fn main() -> Result<()> {
     );
 
     // Write finding for each publicly-listable bucket
-    for r in output.results.iter().filter(|r| r.status == BucketStatus::PublicListing) {
-        let tf = ToolFinding::new("mg-cloud-enum", "Cloud Storage Bucket Public Listing", FindingSeverity::High)
-            .url(r.url.clone())
-            .evidence(format!("provider={} bucket={} http_status={}", r.provider, r.bucket, r.http_status))
-            .recommendation("Set bucket ACL to private; remove public-read permissions; enable access logging");
+    for r in output
+        .results
+        .iter()
+        .filter(|r| r.status == BucketStatus::PublicListing)
+    {
+        let tf = ToolFinding::new(
+            "mg-cloud-enum",
+            "Cloud Storage Bucket Public Listing",
+            FindingSeverity::High,
+        )
+        .url(r.url.clone())
+        .evidence(format!(
+            "provider={} bucket={} http_status={}",
+            r.provider, r.bucket, r.http_status
+        ))
+        .recommendation(
+            "Set bucket ACL to private; remove public-read permissions; enable access logging",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -357,10 +377,7 @@ async fn main() -> Result<()> {
         &eng.meta.target,
         Some(&format!(
             "target={} candidates={} public={} private={} ts={ts}",
-            args.target,
-            output.candidates_checked,
-            public_count,
-            private_count
+            args.target, output.candidates_checked, public_count, private_count
         )),
     );
 
@@ -412,6 +429,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 }

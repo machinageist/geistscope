@@ -374,7 +374,9 @@ pub async fn run(args: Args) -> Result<()> {
     map_urls.retain(|u| seen.insert(u.clone()));
 
     if map_urls.is_empty() {
-        eprintln!("mg-sourcemap: no source map URLs found — run mg-crawl / mg-artifact-audit js first");
+        eprintln!(
+            "mg-sourcemap: no source map URLs found — run mg-crawl / mg-artifact-audit js first"
+        );
         return Ok(());
     }
 
@@ -414,7 +416,12 @@ pub async fn run(args: Args) -> Result<()> {
 
     for r in &all_results {
         if !r.secrets.is_empty() || !r.internal_paths.is_empty() {
-            eprintln!("  [{}] secrets={} internal={}", r.map_url, r.secrets.len(), r.internal_paths.len());
+            eprintln!(
+                "  [{}] secrets={} internal={}",
+                r.map_url,
+                r.secrets.len(),
+                r.internal_paths.len()
+            );
         }
     }
 
@@ -428,8 +435,11 @@ pub async fn run(args: Args) -> Result<()> {
     };
 
     let out_path = output_dir.join(format!("results-{ts_file}.json"));
-    fs::write(&out_path, serde_json::to_string_pretty(&output).unwrap_or_default())
-        .context("write results JSON")?;
+    fs::write(
+        &out_path,
+        serde_json::to_string_pretty(&output).unwrap_or_default(),
+    )
+    .context("write results JSON")?;
 
     eprintln!(
         "mg-sourcemap: {} maps, {} secrets, {} internal paths — {}",
@@ -457,13 +467,22 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T10:00:00Z"), "2026-05-18T10_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T10:00:00Z"),
+            "2026-05-18T10_00_00Z"
+        );
     }
 
     #[test]
     fn sanitize_source_path_replaces_separators() {
-        assert_eq!(sanitize_source_path("src/internal/config.ts"), "src_internal_config.ts");
-        assert_eq!(sanitize_source_path("C:\\Users\\secret\\file.ts"), "C__Users_secret_file.ts");
+        assert_eq!(
+            sanitize_source_path("src/internal/config.ts"),
+            "src_internal_config.ts"
+        );
+        assert_eq!(
+            sanitize_source_path("C:\\Users\\secret\\file.ts"),
+            "C__Users_secret_file.ts"
+        );
     }
 
     #[test]
@@ -475,7 +494,10 @@ mod tests {
     #[test]
     fn flag_internal_paths_matches_keywords() {
         let findings = flag_internal_paths("src/internal/auth/config.ts");
-        let keywords: Vec<_> = findings.iter().map(|f| f.matched_keyword.as_str()).collect();
+        let keywords: Vec<_> = findings
+            .iter()
+            .map(|f| f.matched_keyword.as_str())
+            .collect();
         assert!(keywords.contains(&"internal"));
         assert!(keywords.contains(&"auth"));
         assert!(keywords.contains(&"config"));

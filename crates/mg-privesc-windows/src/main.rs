@@ -14,9 +14,9 @@ use std::fs;
 #[cfg(target_os = "windows")]
 use std::process::Command;
 
-use anyhow::Result;
 #[cfg(target_os = "windows")]
 use anyhow::Context;
+use anyhow::Result;
 use clap::Parser;
 use serde::Serialize;
 #[cfg(target_os = "windows")]
@@ -102,7 +102,11 @@ fn run_checks() -> Result<()> {
 
     let safe_ts = &ts[..19].replace(':', "-");
     let out_path = match &args.output_dir {
-        Some(p) => format!("{}\\privesc-windows-{}.json", p.trim_end_matches('\\'), safe_ts),
+        Some(p) => format!(
+            "{}\\privesc-windows-{}.json",
+            p.trim_end_matches('\\'),
+            safe_ts
+        ),
         None => format!(".\\privesc-windows-{}.json", safe_ts),
     };
 
@@ -418,7 +422,8 @@ fn parse_stored_credentials(stdout: &str) -> Vec<Finding> {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn parse_autologon_credentials(username: Option<&str>, password: Option<&str>) -> Vec<Finding> {
     if let (Some(user), Some(pass)) = (username, password)
-        && !user.is_empty() && !pass.is_empty()
+        && !user.is_empty()
+        && !pass.is_empty()
     {
         return vec![Finding {
             check: "AUTOLOGON_CREDENTIALS".into(),
@@ -437,7 +442,9 @@ fn parse_scheduled_tasks(stdout: &str) -> Vec<Finding> {
     for line in stdout.lines().skip(1) {
         let lower = line.to_lowercase();
         // Flag tasks running as SYSTEM that reference a script file
-        if lower.contains("system") && (lower.contains(".bat") || lower.contains(".ps1") || lower.contains(".vbs")) {
+        if lower.contains("system")
+            && (lower.contains(".bat") || lower.contains(".ps1") || lower.contains(".vbs"))
+        {
             findings.push(Finding {
                 check: "SCHEDULED_TASK_SYSTEM".into(),
                 severity: Severity::Medium,

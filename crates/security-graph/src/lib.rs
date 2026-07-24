@@ -539,29 +539,22 @@ pub fn ingest_tool_findings(
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        let evidence_uri = format!(
-            "evidence://{}/tool-finding/{}",
-            engagement.meta.name, id
-        );
+        let evidence_uri = format!("evidence://{}/tool-finding/{}", engagement.meta.name, id);
         let evidence_ref = EvidenceRef::new(&evidence_uri, Some(path));
         let finding_key = format!("tool:{id}");
         let finding_id = node_id(NodeKind::Finding, &finding_key);
 
         // build finding node from all standard ToolFinding fields
-        let mut node =
-            SecurityNode::new(NodeKind::Finding, &finding_key, &title, &timestamp)
-                .property("source", json!(tool.as_str()))
-                .property("tool", clone_or_null(value.get("tool")))
-                .property("severity", clone_or_null(value.get("severity")))
-                .property("url", clone_or_null(value.get("url")))
-                .property("parameter", clone_or_null(value.get("parameter")))
-                .property("evidence", clone_or_null(value.get("evidence")))
-                .property(
-                    "recommendation",
-                    clone_or_null(value.get("recommendation")),
-                )
-                .property("timestamp", clone_or_null(value.get("timestamp")))
-                .evidence(evidence_ref.clone());
+        let mut node = SecurityNode::new(NodeKind::Finding, &finding_key, &title, &timestamp)
+            .property("source", json!(tool.as_str()))
+            .property("tool", clone_or_null(value.get("tool")))
+            .property("severity", clone_or_null(value.get("severity")))
+            .property("url", clone_or_null(value.get("url")))
+            .property("parameter", clone_or_null(value.get("parameter")))
+            .property("evidence", clone_or_null(value.get("evidence")))
+            .property("recommendation", clone_or_null(value.get("recommendation")))
+            .property("timestamp", clone_or_null(value.get("timestamp")))
+            .evidence(evidence_ref.clone());
         // attach the full raw JSON as metadata for harness callers
         node.properties.insert("raw".into(), value.clone());
         store.upsert_node(node)?;
@@ -1589,7 +1582,10 @@ mod tests {
 
         // URL node should also have been created
         let url_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == NodeKind::Url).collect();
-        assert!(!url_nodes.is_empty(), "expected a url node from the finding");
+        assert!(
+            !url_nodes.is_empty(),
+            "expected a url node from the finding"
+        );
     }
 
     #[test]

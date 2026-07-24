@@ -33,7 +33,13 @@ const AUDIT_TOOL: &str = "mg-openapi";
 const NUMERIC_PARAM_SUBSTITUTE: &str = "1";
 const STRING_PARAM_SUBSTITUTE: &str = "test";
 const SENSITIVE_KEYWORDS: &[&str] = &[
-    "password", "token", "secret", "key", "ssn", "dob", "credit_card",
+    "password",
+    "token",
+    "secret",
+    "key",
+    "ssn",
+    "dob",
+    "credit_card",
 ];
 const SLOW_THRESHOLD_MS: u128 = 5000;
 const NUMERIC_PARAM_NAMES: &[&str] = &["id", "user_id", "item_id", "account_id", "order_id"];
@@ -154,9 +160,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for use in filename
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Fetch spec from URL or read from filesystem
@@ -481,7 +485,10 @@ async fn main() -> Result<()> {
 
     // Print findings
     for f in &all_findings {
-        eprintln!("  [{:?}] {} {} — {}", f.kind, f.method, f.endpoint, f.detail);
+        eprintln!(
+            "  [{:?}] {} {} — {}",
+            f.kind, f.method, f.endpoint, f.detail
+        );
     }
 
     let ts = now_rfc3339();
@@ -643,6 +650,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T08:00:00Z"), "2026-05-17T08_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T08:00:00Z"),
+            "2026-05-17T08_00_00Z"
+        );
     }
 }

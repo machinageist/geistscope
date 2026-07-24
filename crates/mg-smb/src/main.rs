@@ -55,37 +55,35 @@ const MIN_NEGOTIATE_RESPONSE_BYTES: usize = 72;
 // Hardcoded per spec; see MS-SMB2 2.2.3
 const SMB2_NEGOTIATE: &[u8] = &[
     // NetBIOS session header — 4 bytes (length = 0x7a = 122)
-    0x00, 0x00, 0x00, 0x7a,
-    // SMB2 header — 64 bytes
+    0x00, 0x00, 0x00, 0x7a, // SMB2 header — 64 bytes
     0xfe, 0x53, 0x4d, 0x42, // ProtocolId "\xfeSMB"
-    0x40, 0x00,             // StructureSize = 64
-    0x00, 0x00,             // CreditCharge
-    0x00, 0x00,             // ChannelSequence
-    0x00, 0x00,             // Reserved
-    0x00, 0x00,             // Command: NEGOTIATE = 0
-    0x1f, 0x00,             // CreditRequest
+    0x40, 0x00, // StructureSize = 64
+    0x00, 0x00, // CreditCharge
+    0x00, 0x00, // ChannelSequence
+    0x00, 0x00, // Reserved
+    0x00, 0x00, // Command: NEGOTIATE = 0
+    0x1f, 0x00, // CreditRequest
     0x00, 0x00, 0x00, 0x00, // Flags
     0x00, 0x00, 0x00, 0x00, // NextCommand
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // MessageId
     0x00, 0x00, 0x00, 0x00, // Reserved
     0x00, 0x00, 0x00, 0x00, // TreeId
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // SessionId
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     // NEGOTIATE body
-    0x24, 0x00,             // StructureSize = 36
-    0x05, 0x00,             // DialectCount = 5
-    0x7f, 0x00,             // SecurityMode (client capabilities)
-    0x00, 0x00,             // Reserved
+    0x24, 0x00, // StructureSize = 36
+    0x05, 0x00, // DialectCount = 5
+    0x7f, 0x00, // SecurityMode (client capabilities)
+    0x00, 0x00, // Reserved
     0x00, 0x00, 0x00, 0x00, // Capabilities
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ClientGuid
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, // ClientGuid
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // NegotiateContextOffset/Count
-    0x02, 0x02,             // SMB 2.0.2
-    0x10, 0x02,             // SMB 2.1.0
-    0x00, 0x03,             // SMB 3.0.0
-    0x02, 0x03,             // SMB 3.0.2
-    0x11, 0x03,             // SMB 3.1.1
+    0x02, 0x02, // SMB 2.0.2
+    0x10, 0x02, // SMB 2.1.0
+    0x00, 0x03, // SMB 3.0.0
+    0x02, 0x03, // SMB 3.0.2
+    0x11, 0x03, // SMB 3.1.1
 ];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -288,8 +286,7 @@ async fn probe_host(host: String, timeout_secs: u64) -> SmbResult {
     buf.truncate(n);
 
     // check for SMB magic
-    let smb_detected = n >= 8
-        && (&buf[4..8] == SMB2_MAGIC || &buf[4..8] == SMB1_MAGIC);
+    let smb_detected = n >= 8 && (&buf[4..8] == SMB2_MAGIC || &buf[4..8] == SMB1_MAGIC);
 
     if !smb_detected {
         return SmbResult {
@@ -416,7 +413,10 @@ async fn main() -> Result<()> {
                 r.host, r.dialect, r.signing_required, r.null_session
             );
             if !r.signing_required {
-                eprintln!("  [MEDIUM] {} — signing not required (relay attack risk)", r.host);
+                eprintln!(
+                    "  [MEDIUM] {} — signing not required (relay attack risk)",
+                    r.host
+                );
             }
             if r.null_session {
                 eprintln!("  [HIGH] {} — null session accepted", r.host);
@@ -465,16 +465,20 @@ async fn main() -> Result<()> {
             let _ = write_finding(&eng, &tf);
         }
         if !r.signing_required {
-            let tf = ToolFinding::new("mg-smb", "SMB Signing Not Required", FindingSeverity::Medium)
-                .url(format!("smb://{}", r.host))
-                .evidence(format!(
-                    "dialect={} signing_enabled={} signing_required=false — relay attack feasible",
-                    r.dialect, r.signing_enabled
-                ))
-                .recommendation(
-                    "Enable RequireSecuritySignature via Group Policy (GPO: Microsoft network server); \
-                     enforce SMB signing on all domain controllers"
-                );
+            let tf = ToolFinding::new(
+                "mg-smb",
+                "SMB Signing Not Required",
+                FindingSeverity::Medium,
+            )
+            .url(format!("smb://{}", r.host))
+            .evidence(format!(
+                "dialect={} signing_enabled={} signing_required=false — relay attack feasible",
+                r.dialect, r.signing_enabled
+            ))
+            .recommendation(
+                "Enable RequireSecuritySignature via Group Policy (GPO: Microsoft network server); \
+                     enforce SMB signing on all domain controllers",
+            );
             let _ = write_finding(&eng, &tf);
         }
     }
@@ -482,10 +486,7 @@ async fn main() -> Result<()> {
     let _ = eng.audit(
         AUDIT_TOOL,
         &eng.meta.target,
-        Some(&format!(
-            "hosts={} ts={ts}",
-            output.hosts_checked
-        )),
+        Some(&format!("hosts={} ts={ts}", output.hosts_checked)),
     );
 
     Ok(())
@@ -533,8 +534,7 @@ mod tests {
         buf[71] = 0x03;
         // SecurityMode at 72: SIGNING_REQUIRED_BIT | SIGNING_ENABLED_BIT = 0x03
         buf[72] = SIGNING_REQUIRED_BIT | SIGNING_ENABLED_BIT;
-        let (dialect, signing_enabled, signing_required) =
-            parse_negotiate_response(&buf).unwrap();
+        let (dialect, signing_enabled, signing_required) = parse_negotiate_response(&buf).unwrap();
         assert_eq!(dialect, "SMB 3.1.1");
         assert!(signing_enabled);
         assert!(signing_required);
@@ -557,6 +557,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T10:30:00Z"), "2026-05-18T10_30_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T10:30:00Z"),
+            "2026-05-18T10_30_00Z"
+        );
     }
 }

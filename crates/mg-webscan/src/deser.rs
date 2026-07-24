@@ -170,9 +170,7 @@ fn detect_static(ep: &CrawlEndpoint, oob_url: Option<&str>) -> Vec<DeserFinding>
 
         if is_java {
             let oob = oob_url.unwrap_or("http://your-oob-server.com");
-            let cmd = format!(
-                "java -jar ysoserial.jar URLDNS \"{oob}\"",
-            );
+            let cmd = format!("java -jar ysoserial.jar URLDNS \"{oob}\"",);
             findings.push(DeserFinding {
                 url: ep.url.clone(),
                 lang: "java".to_string(),
@@ -213,7 +211,8 @@ fn detect_static(ep: &CrawlEndpoint, oob_url: Option<&str>) -> Vec<DeserFinding>
             url: ep.url.clone(),
             lang: "python".to_string(),
             classification: DeserClass::Candidate,
-            detail: "Python pickle reference found in body — manual verification required".to_string(),
+            detail: "Python pickle reference found in body — manual verification required"
+                .to_string(),
             manual_payload: Some("import pickle; pickle.loads(<payload>)".to_string()),
         });
     }
@@ -293,10 +292,16 @@ pub async fn run(args: Args) -> Result<()> {
         active_count += 1;
     }
     while let Some(Ok((u, is_500))) = join_set.join_next().await {
-        if is_500 { error_based.push(u); }
+        if is_500 {
+            error_based.push(u);
+        }
     }
 
-    eprintln!("  {} PHP endpoints probed; {} returned 500", active_count, error_based.len());
+    eprintln!(
+        "  {} PHP endpoints probed; {} returned 500",
+        active_count,
+        error_based.len()
+    );
 
     // Upgrade candidate findings to error_based where confirmed
     for f in &mut findings {
@@ -330,11 +335,17 @@ pub async fn run(args: Args) -> Result<()> {
         let (sev, title) = match f.classification {
             DeserClass::ErrorBased | DeserClass::ConfirmedOob => (
                 FindingSeverity::High,
-                format!("{} Deserialization Confirmed (Error-Based)", f.lang.to_uppercase()),
+                format!(
+                    "{} Deserialization Confirmed (Error-Based)",
+                    f.lang.to_uppercase()
+                ),
             ),
             DeserClass::Candidate => (
                 FindingSeverity::Medium,
-                format!("{} Deserialization Candidate Detected", f.lang.to_uppercase()),
+                format!(
+                    "{} Deserialization Candidate Detected",
+                    f.lang.to_uppercase()
+                ),
             ),
         };
         let tf = ToolFinding::new("mg-deser", title, sev)
@@ -343,7 +354,7 @@ pub async fn run(args: Args) -> Result<()> {
             .recommendation(
                 "Avoid deserializing untrusted data; use safer alternatives (JSON, Protobuf); \
                  implement type-safe deserialization with an allowlist; \
-                 consider RASP/WAF rules to block serialized object patterns"
+                 consider RASP/WAF rules to block serialized object patterns",
             );
         let _ = write_finding(&eng, &tf);
     }

@@ -195,7 +195,8 @@ async fn st_fetch_cname_records(
         anyhow::bail!("SecurityTrails CNAME history returned {status}: {body}");
     }
 
-    let parsed: StCnameHistoryResponse = resp.json().await.context("parse ST CNAME history JSON")?;
+    let parsed: StCnameHistoryResponse =
+        resp.json().await.context("parse ST CNAME history JSON")?;
     let mut cnames: Vec<String> = parsed
         .records
         .into_iter()

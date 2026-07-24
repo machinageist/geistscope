@@ -36,14 +36,16 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Color::Red
             };
-            let timing_color = if r.elapsed_ms > 4000 { Color::Magenta } else { Color::Reset };
+            let timing_color = if r.elapsed_ms > 4000 {
+                Color::Magenta
+            } else {
+                Color::Reset
+            };
             Row::new(vec![
                 Cell::from(r.label.clone()),
-                Cell::from(r.status.to_string())
-                    .style(Style::default().fg(status_color)),
+                Cell::from(r.status.to_string()).style(Style::default().fg(status_color)),
                 Cell::from(format!("{:+}", r.len_delta)),
-                Cell::from(r.elapsed_ms.to_string())
-                    .style(Style::default().fg(timing_color)),
+                Cell::from(r.elapsed_ms.to_string()).style(Style::default().fg(timing_color)),
             ])
         })
         .collect();

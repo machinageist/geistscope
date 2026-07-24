@@ -193,9 +193,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for use in filename
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Build the request URL from target, port, and scheme
@@ -227,11 +225,7 @@ async fn probe_host(
     host_header: String,
     baseline: Baseline,
 ) -> VhostResult {
-    let resp = client
-        .get(&url)
-        .header("Host", &host_header)
-        .send()
-        .await;
+    let resp = client.get(&url).header("Host", &host_header).send().await;
 
     match resp {
         Ok(r) => {
@@ -242,8 +236,10 @@ async fn probe_host(
             let len_diff = body_len.abs_diff(baseline.body_len) > BODY_LEN_DIFF_THRESHOLD;
             let (verdict, reason) = if status_diff || len_diff {
                 let r = if status_diff && len_diff {
-                    format!("status {} (baseline {}) and body_len {} (baseline {})",
-                        status, baseline.status, body_len, baseline.body_len)
+                    format!(
+                        "status {} (baseline {}) and body_len {} (baseline {})",
+                        status, baseline.status, body_len, baseline.body_len
+                    )
                 } else if status_diff {
                     format!("status {} (baseline {})", status, baseline.status)
                 } else {
@@ -253,7 +249,13 @@ async fn probe_host(
             } else {
                 (VhostVerdict::Miss, String::new())
             };
-            VhostResult { host_header, status, body_len, verdict, reason }
+            VhostResult {
+                host_header,
+                status,
+                body_len,
+                verdict,
+                reason,
+            }
         }
         Err(_) => VhostResult {
             host_header,
@@ -295,9 +297,7 @@ async fn main() -> Result<()> {
     let baseline_body = baseline_resp.text().await.unwrap_or_default();
     let baseline_body_len = baseline_body.len();
 
-    eprintln!(
-        "mg-vhost: baseline status={baseline_status} body_len={baseline_body_len}"
-    );
+    eprintln!("mg-vhost: baseline status={baseline_status} body_len={baseline_body_len}");
 
     // Load prefix list
     let prefixes: Vec<String> = if let Some(wl_path) = &args.wordlist {
@@ -340,11 +340,7 @@ async fn main() -> Result<()> {
 
     // Host injection test
     let injection = {
-        let inj_resp = client
-            .get(&url)
-            .header("Host", INJECTION_HOST)
-            .send()
-            .await;
+        let inj_resp = client.get(&url).header("Host", INJECTION_HOST).send().await;
         match inj_resp {
             Ok(r) => {
                 let status = r.status().as_u16();
@@ -414,7 +410,11 @@ async fn main() -> Result<()> {
     );
 
     // Write finding for each discovered (interesting) virtual host
-    for r in output.results.iter().filter(|r| r.verdict == VhostVerdict::Interesting) {
+    for r in output
+        .results
+        .iter()
+        .filter(|r| r.verdict == VhostVerdict::Interesting)
+    {
         let tf = ToolFinding::new("mg-vhost", "Virtual Host Discovered", FindingSeverity::Medium)
             .url(format!("http://{}", r.host_header))
             .evidence(format!("host_header={} status={} body_len={} reason={}", r.host_header, r.status, r.body_len, r.reason))
@@ -463,6 +463,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 }

@@ -150,9 +150,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for filename use (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Return true if param name is redirect-prone
@@ -194,11 +192,7 @@ fn collect_redirect_points(crawl_dir: &Path) -> Vec<RedirectPoint> {
 }
 
 // Classify a response based on status, Location header, and body
-fn classify(
-    status: u16,
-    location: Option<&str>,
-    body: &str,
-) -> RedirectVerdict {
+fn classify(status: u16, location: Option<&str>, body: &str) -> RedirectVerdict {
     // 3xx with Location pointing to evil domain = confirmed open redirect
     if (300..=399).contains(&status)
         && let Some(loc) = location
@@ -214,10 +208,7 @@ fn classify(
 }
 
 // Probe one redirect point with all payloads; return results
-async fn probe_point(
-    client: reqwest::Client,
-    point: RedirectPoint,
-) -> Vec<RedirectResult> {
+async fn probe_point(client: reqwest::Client, point: RedirectPoint) -> Vec<RedirectResult> {
     let mut results = Vec::new();
 
     for payload in REDIRECT_PAYLOADS {
@@ -353,7 +344,11 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Write finding for each confirmed open redirect
-    for r in output.results.iter().filter(|r| r.verdict == RedirectVerdict::OpenRedirect) {
+    for r in output
+        .results
+        .iter()
+        .filter(|r| r.verdict == RedirectVerdict::OpenRedirect)
+    {
         let tf = ToolFinding::new("mg-redirect", "Open Redirect", FindingSeverity::Medium)
             .url(r.url.clone())
             .parameter(r.param.clone())
@@ -428,6 +423,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 }

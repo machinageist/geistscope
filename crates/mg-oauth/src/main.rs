@@ -40,10 +40,7 @@ const OAUTH_INDICATORS: &[&str] = &[
 ];
 
 // Attacker-controlled redirect_uri values to test
-const REDIRECT_BYPASS_URIS: &[&str] = &[
-    "https://attacker.com",
-    "//attacker.com",
-];
+const REDIRECT_BYPASS_URIS: &[&str] = &["https://attacker.com", "//attacker.com"];
 
 // Keyword fragments to detect in bypass redirect targets
 const ATTACKER_DOMAIN: &str = "attacker.com";
@@ -180,10 +177,7 @@ fn location_header(resp: &reqwest::Response) -> Option<String> {
 // ── Checks ────────────────────────────────────────────────────────────────────
 
 // Test missing state parameter — CSRF risk
-async fn check_state_csrf(
-    client: &reqwest::Client,
-    auth_url: &str,
-) -> Option<OAuthFinding> {
+async fn check_state_csrf(client: &reqwest::Client, auth_url: &str) -> Option<OAuthFinding> {
     // Strip the state param from the URL and send without it
     let mut parsed = Url::parse(auth_url).ok()?;
     let pairs: Vec<(String, String)> = parsed
@@ -230,10 +224,7 @@ async fn check_state_csrf(
 }
 
 // Test redirect_uri bypass with attacker-controlled values
-async fn check_redirect_bypass(
-    client: &reqwest::Client,
-    auth_url: &str,
-) -> Vec<OAuthFinding> {
+async fn check_redirect_bypass(client: &reqwest::Client, auth_url: &str) -> Vec<OAuthFinding> {
     let mut findings = Vec::new();
     let original_redir = extract_redirect_uri(auth_url);
     let legit_domain = original_redir
@@ -241,10 +232,7 @@ async fn check_redirect_bypass(
         .and_then(legit_domain_from_redirect_uri);
 
     // Build the full list of payloads including domain-prefixed variant
-    let mut payloads: Vec<String> = REDIRECT_BYPASS_URIS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let mut payloads: Vec<String> = REDIRECT_BYPASS_URIS.iter().map(|s| s.to_string()).collect();
     if let Some(ref domain) = legit_domain {
         payloads.push(format!("https://{domain}.attacker.com"));
         payloads.push("https://legit.com.attacker.com".to_string());
@@ -289,10 +277,7 @@ async fn check_redirect_bypass(
 }
 
 // Test PKCE downgrade — send without code_challenge when it was present
-async fn check_pkce_downgrade(
-    client: &reqwest::Client,
-    auth_url: &str,
-) -> Option<OAuthFinding> {
+async fn check_pkce_downgrade(client: &reqwest::Client, auth_url: &str) -> Option<OAuthFinding> {
     // Only relevant when original URL has code_challenge
     if !auth_url.contains("code_challenge") {
         return None;
@@ -328,10 +313,7 @@ async fn check_pkce_downgrade(
 }
 
 // Test implicit flow by sending response_type=token
-async fn check_implicit_flow(
-    client: &reqwest::Client,
-    auth_url: &str,
-) -> Option<OAuthFinding> {
+async fn check_implicit_flow(client: &reqwest::Client, auth_url: &str) -> Option<OAuthFinding> {
     let mut parsed = Url::parse(auth_url).ok()?;
     let pairs: Vec<(String, String)> = parsed
         .query_pairs()
@@ -462,7 +444,11 @@ async fn main() -> Result<()> {
     println!("[*] Results written to {}", out_path.display());
 
     // Audit log
-    let detail = format!("urls_tested={} findings={}", results.total_urls_tested, results.findings.len());
+    let detail = format!(
+        "urls_tested={} findings={}",
+        results.total_urls_tested,
+        results.findings.len()
+    );
     let _ = eng.audit(AUDIT_TOOL, &eng.meta.target, Some(&detail));
 
     Ok(())
@@ -476,8 +462,12 @@ mod tests {
 
     #[test]
     fn is_oauth_candidate_matches_known_patterns() {
-        assert!(is_oauth_candidate("https://example.com/oauth/authorize?client_id=abc"));
-        assert!(is_oauth_candidate("https://example.com/auth?response_type=code"));
+        assert!(is_oauth_candidate(
+            "https://example.com/oauth/authorize?client_id=abc"
+        ));
+        assert!(is_oauth_candidate(
+            "https://example.com/auth?response_type=code"
+        ));
         assert!(is_oauth_candidate("https://example.com/connect/token"));
         assert!(!is_oauth_candidate("https://example.com/api/users"));
         assert!(!is_oauth_candidate(""));

@@ -127,9 +127,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Build base URL for a recon host, preferring HTTPS
@@ -190,7 +188,11 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
 
     // Wildcard in script-src or default-src → any source allowed
     if effective_script.iter().any(|s| s == "*") {
-        let directive = if !script_sources.is_empty() { "script-src" } else { "default-src" };
+        let directive = if !script_sources.is_empty() {
+            "script-src"
+        } else {
+            "default-src"
+        };
         findings.push(CspFinding {
             directive: directive.into(),
             issue: "wildcard '*' allows scripts from any origin".into(),
@@ -200,7 +202,10 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
     }
 
     // unsafe-inline in script-src — weakens defense but isn't itself an exploit
-    if effective_script.iter().any(|s| s.eq_ignore_ascii_case("'unsafe-inline'")) {
+    if effective_script
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case("'unsafe-inline'"))
+    {
         findings.push(CspFinding {
             directive: "script-src".into(),
             issue: "'unsafe-inline' allows inline script execution".into(),
@@ -210,7 +215,10 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
     }
 
     // unsafe-eval in script-src
-    if effective_script.iter().any(|s| s.eq_ignore_ascii_case("'unsafe-eval'")) {
+    if effective_script
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case("'unsafe-eval'"))
+    {
         findings.push(CspFinding {
             directive: "script-src".into(),
             issue: "'unsafe-eval' allows eval() and Function() constructor".into(),
@@ -220,7 +228,10 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
     }
 
     // data: URI in script-src
-    if effective_script.iter().any(|s| s.eq_ignore_ascii_case("data:")) {
+    if effective_script
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case("data:"))
+    {
         findings.push(CspFinding {
             directive: "script-src".into(),
             issue: "'data:' URI scheme allows inline script via data URI".into(),
@@ -258,9 +269,12 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
         if is_wildcard_subdomain(source) {
             findings.push(CspFinding {
                 directive: "script-src".into(),
-                issue: format!("'{source}' wildcard allows any subdomain — subdomain takeover bypass"),
+                issue: format!(
+                    "'{source}' wildcard allows any subdomain — subdomain takeover bypass"
+                ),
                 severity: "MEDIUM".into(),
-                bypass_suggestion: "take over a subdomain matching the wildcard to serve malicious JS".into(),
+                bypass_suggestion:
+                    "take over a subdomain matching the wildcard to serve malicious JS".into(),
             });
         }
     }
@@ -272,7 +286,8 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
                 directive: name.clone(),
                 issue: format!("'http:' in {name} allows loading resources over plaintext HTTP"),
                 severity: "MEDIUM".into(),
-                bypass_suggestion: "serve malicious resource over HTTP via MitM or rogue HTTP host".into(),
+                bypass_suggestion: "serve malicious resource over HTTP via MitM or rogue HTTP host"
+                    .into(),
             });
         }
     }
@@ -295,7 +310,9 @@ fn analyze_csp(directives: &HashMap<String, Vec<String>>) -> Vec<CspFinding> {
         if !default_is_none {
             findings.push(CspFinding {
                 directive: "object-src".into(),
-                issue: "missing object-src with non-'none' default — Flash/plugin execution possible".into(),
+                issue:
+                    "missing object-src with non-'none' default — Flash/plugin execution possible"
+                        .into(),
                 severity: "MEDIUM".into(),
                 bypass_suggestion: "embed a malicious <object> or <embed> tag".into(),
             });
@@ -417,7 +434,8 @@ async fn main() -> Result<()> {
                     directive: "none".into(),
                     issue: "no Content-Security-Policy header present".into(),
                     severity: "HIGH".into(),
-                    bypass_suggestion: "CSP entirely absent — XSS has no browser-level restriction".into(),
+                    bypass_suggestion: "CSP entirely absent — XSS has no browser-level restriction"
+                        .into(),
                 }]
             }
         };
@@ -480,7 +498,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T09:00:00Z"), "2026-05-18T09_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T09:00:00Z"),
+            "2026-05-18T09_00_00Z"
+        );
     }
 
     #[test]
@@ -520,7 +541,11 @@ mod tests {
         let mut directives = HashMap::new();
         directives.insert("script-src".into(), vec!["*".into()]);
         let findings = analyze_csp(&directives);
-        assert!(findings.iter().any(|f| f.severity == "HIGH" && f.issue.contains("wildcard")));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.severity == "HIGH" && f.issue.contains("wildcard"))
+        );
     }
 
     #[test]
@@ -568,6 +593,10 @@ mod tests {
         // Neither script-src nor default-src
         let directives = HashMap::new();
         let findings = analyze_csp(&directives);
-        assert!(findings.iter().any(|f| f.issue.contains("no script-src or default-src")));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.issue.contains("no script-src or default-src"))
+        );
     }
 }

@@ -53,12 +53,7 @@ const METADATA_KEYWORDS: &[&str] = &[
 ];
 
 // Headers injected as injectable points in addition to query params
-const INJECTABLE_HEADERS: &[&str] = &[
-    "X-Forwarded-For",
-    "X-Real-IP",
-    "Referer",
-    "Host",
-];
+const INJECTABLE_HEADERS: &[&str] = &["X-Forwarded-For", "X-Real-IP", "Referer", "Host"];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -247,17 +242,23 @@ fn body_has_metadata(body: &str) -> bool {
 }
 
 // Probe one injectable point with one payload, return a ProbeResult
-async fn probe(
-    client: reqwest::Client,
-    point: InjectablePoint,
-    payload: String,
-) -> ProbeResult {
+async fn probe(client: reqwest::Client, point: InjectablePoint, payload: String) -> ProbeResult {
     let result = match point.inject_kind {
         InjectKind::QueryParam => {
             let url = if point.base_url.contains('?') {
-                format!("{}&{}={}", point.base_url, point.param_name, urlencoding_simple(&payload))
+                format!(
+                    "{}&{}={}",
+                    point.base_url,
+                    point.param_name,
+                    urlencoding_simple(&payload)
+                )
             } else {
-                format!("{}?{}={}", point.base_url, point.param_name, urlencoding_simple(&payload))
+                format!(
+                    "{}?{}={}",
+                    point.base_url,
+                    point.param_name,
+                    urlencoding_simple(&payload)
+                )
             };
             client.get(&url).send().await
         }
@@ -419,8 +420,14 @@ pub async fn run(args: Args) -> Result<()> {
     }
 
     // Print summary to stdout
-    let confirmed_count = all_results.iter().filter(|r| r.verdict == Verdict::Confirmed).count();
-    let potential_count = all_results.iter().filter(|r| r.verdict == Verdict::Potential).count();
+    let confirmed_count = all_results
+        .iter()
+        .filter(|r| r.verdict == Verdict::Confirmed)
+        .count();
+    let potential_count = all_results
+        .iter()
+        .filter(|r| r.verdict == Verdict::Potential)
+        .count();
 
     println!("\n=== SSRF Findings ===");
     for r in all_results.iter().filter(|r| r.verdict != Verdict::Miss) {
@@ -451,12 +458,25 @@ pub async fn run(args: Args) -> Result<()> {
     println!("[*] Results written to {}", out_path.display());
 
     // Write finding for each confirmed SSRF hit
-    for r in results.results.iter().filter(|r| r.verdict == Verdict::Confirmed) {
-        let tf = ToolFinding::new("mg-ssrf", "Server-Side Request Forgery (SSRF)", FindingSeverity::High)
-            .url(r.url.clone())
-            .parameter(r.param.clone())
-            .evidence(format!("payload={} status={} body_preview={}", r.payload, r.status, r.body_preview))
-            .recommendation("Restrict outbound requests to an allowlist; enforce IMDS v2 on cloud instances");
+    for r in results
+        .results
+        .iter()
+        .filter(|r| r.verdict == Verdict::Confirmed)
+    {
+        let tf = ToolFinding::new(
+            "mg-ssrf",
+            "Server-Side Request Forgery (SSRF)",
+            FindingSeverity::High,
+        )
+        .url(r.url.clone())
+        .parameter(r.param.clone())
+        .evidence(format!(
+            "payload={} status={} body_preview={}",
+            r.payload, r.status, r.body_preview
+        ))
+        .recommendation(
+            "Restrict outbound requests to an allowlist; enforce IMDS v2 on cloud instances",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -507,7 +527,11 @@ mod tests {
         let endpoints = serde_json::json!([
             {"path": "/api/fetch?url=x", "params": ["url"], "method": "GET", "source": "js", "source_url": "https://example.com"}
         ]);
-        fs::write(host_dir.join("endpoints.json"), serde_json::to_string(&endpoints).unwrap()).unwrap();
+        fs::write(
+            host_dir.join("endpoints.json"),
+            serde_json::to_string(&endpoints).unwrap(),
+        )
+        .unwrap();
         let points = collect_from_crawl(tmp.path());
         // url param + INJECTABLE_HEADERS
         assert!(points.len() > 1);

@@ -97,10 +97,10 @@ struct HostRecord {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum AnomalyKind {
-    Circular,              // loop detected in chain
-    NxdomainIntermediate,  // intermediate hop returned NXDOMAIN
-    ExternalCname,         // chain passes through an out-of-scope domain
-    LongChain,             // chain exceeds LONG_CHAIN_THRESHOLD hops
+    Circular,             // loop detected in chain
+    NxdomainIntermediate, // intermediate hop returned NXDOMAIN
+    ExternalCname,        // chain passes through an out-of-scope domain
+    LongChain,            // chain exceeds LONG_CHAIN_THRESHOLD hops
 }
 
 // Result for one subdomain
@@ -199,14 +199,21 @@ async fn resolve_chain(
         match resolver.lookup_ip(current.as_str()).await {
             Ok(ips) => {
                 // resolved to an IP — chain ends here
-                let first_ip = ips.iter().next().map(|ip| ip.to_string()).unwrap_or_else(|| "no-ip".into());
+                let first_ip = ips
+                    .iter()
+                    .next()
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_else(|| "no-ip".into());
                 final_resolution = first_ip;
                 break;
             }
             Err(ref e) if e.is_no_records_found() => {
                 // could be NXDOMAIN or NOERROR/NXDOMAIN — try CNAME lookup
                 match resolver
-                    .lookup(current.as_str(), hickory_resolver::proto::rr::RecordType::CNAME)
+                    .lookup(
+                        current.as_str(),
+                        hickory_resolver::proto::rr::RecordType::CNAME,
+                    )
                     .await
                 {
                     Ok(cname_lookup) => {
@@ -276,9 +283,7 @@ async fn resolve_chain(
     }
 
     // deduplicate anomalies (ExternalCname can appear per-hop)
-    anomalies.dedup_by(|a, b| {
-        std::mem::discriminant(a) == std::mem::discriminant(b)
-    });
+    anomalies.dedup_by(|a, b| std::mem::discriminant(a) == std::mem::discriminant(b));
 
     ChainResult {
         subdomain: start.to_string(),
@@ -298,8 +303,7 @@ async fn main() -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
-    let subdomains = load_subdomains(&eng.recon_dir())
-        .context("load subdomains from recon dir")?;
+    let subdomains = load_subdomains(&eng.recon_dir()).context("load subdomains from recon dir")?;
 
     eprintln!(
         "mg-cname-chain: {} subdomains (concurrency={} max_hops={})",
@@ -328,9 +332,7 @@ async fn main() -> Result<()> {
         let resolver = Arc::clone(&resolver);
         let apex = Arc::clone(&origin_apex);
         let subdomain = subdomain.clone();
-        set.spawn(async move {
-            resolve_chain(&resolver, &subdomain, max_hops, &apex).await
-        });
+        set.spawn(async move { resolve_chain(&resolver, &subdomain, max_hops, &apex).await });
     }
 
     // drain remaining
@@ -346,7 +348,10 @@ async fn main() -> Result<()> {
     // print flagged entries to stderr
     for r in &results {
         if !r.anomalies.is_empty() {
-            eprintln!("  [FLAG] {} chain={:?} anomalies={:?}", r.subdomain, r.chain, r.anomalies);
+            eprintln!(
+                "  [FLAG] {} chain={:?} anomalies={:?}",
+                r.subdomain, r.chain, r.anomalies
+            );
         }
     }
     eprintln!(
@@ -380,7 +385,10 @@ async fn main() -> Result<()> {
 
     // Emit HIGH finding for each subdomain with an NXDOMAIN intermediate (hijackable CNAME)
     for r in &output.results {
-        let has_nxdomain = r.anomalies.iter().any(|a| matches!(a, AnomalyKind::NxdomainIntermediate));
+        let has_nxdomain = r
+            .anomalies
+            .iter()
+            .any(|a| matches!(a, AnomalyKind::NxdomainIntermediate));
         if has_nxdomain {
             let chain_str = r.chain.join(" -> ");
             let tf = ToolFinding::new("mg-cname-chain", "Hijackable CNAME Chain Detected", FindingSeverity::High)
@@ -432,7 +440,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T10:30:00Z"), "2026-05-18T10_30_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T10:30:00Z"),
+            "2026-05-18T10_30_00Z"
+        );
     }
 
     #[test]

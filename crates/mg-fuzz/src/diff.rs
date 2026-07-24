@@ -50,7 +50,15 @@ impl ResponseRecord {
     ) -> Self {
         let body_len = body.len();
         let body_hash = sha256_hex(&body);
-        Self { status, body, body_len, body_hash, elapsed_ms, content_type, location }
+        Self {
+            status,
+            body,
+            body_len,
+            body_hash,
+            elapsed_ms,
+            content_type,
+            location,
+        }
     }
 }
 
@@ -63,9 +71,8 @@ pub fn diff(baseline: &ResponseRecord, probe: &ResponseRecord) -> Diff {
     let elapsed_delta_ms = probe.elapsed_ms as i64 - baseline.elapsed_ms as i64;
 
     // mark interesting if status changed, body differs meaningfully, or large time delta (blind SQLi / sleep)
-    let interesting = status_changed
-        || !hash_match && len_delta.unsigned_abs() > 50
-        || elapsed_delta_ms > 4_000;  // >4s additional delay suggests sleep-based injection
+    let interesting =
+        status_changed || !hash_match && len_delta.unsigned_abs() > 50 || elapsed_delta_ms > 4_000; // >4s additional delay suggests sleep-based injection
 
     Diff {
         status_changed,
@@ -126,7 +133,7 @@ mod tests {
     #[test]
     fn small_body_delta_not_interesting() {
         let base = rec(200, "hello world", 100);
-        let probe = rec(200, "hello world!", 100);  // 1-byte diff, below 50-byte threshold
+        let probe = rec(200, "hello world!", 100); // 1-byte diff, below 50-byte threshold
         let d = diff(&base, &probe);
         assert!(!d.interesting);
     }
@@ -134,7 +141,7 @@ mod tests {
     #[test]
     fn long_elapsed_is_interesting() {
         let base = rec(200, "ok", 200);
-        let probe = rec(200, "ok", 5000);  // 4.8s additional delay
+        let probe = rec(200, "ok", 5000); // 4.8s additional delay
         let d = diff(&base, &probe);
         assert!(d.interesting);
         assert_eq!(d.elapsed_delta_ms, 4800);

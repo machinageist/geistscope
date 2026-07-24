@@ -131,9 +131,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for filename use (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Return true if the param name suggests file path injection
@@ -220,10 +218,7 @@ async fn send_probe(client: &reqwest::Client, url: &str) -> String {
 }
 
 // Probe one injectable point with all traversal payloads; return results
-async fn probe_point(
-    client: reqwest::Client,
-    point: InjectablePoint,
-) -> Vec<TraversalResult> {
+async fn probe_point(client: reqwest::Client, point: InjectablePoint) -> Vec<TraversalResult> {
     let mut results = Vec::new();
     for payload in TRAVERSAL_PAYLOADS {
         let url = build_url(&point, payload);
@@ -336,7 +331,11 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Write finding for each confirmed path traversal result
-    for r in output.results.iter().filter(|r| r.verdict == TraversalVerdict::Confirmed) {
+    for r in output
+        .results
+        .iter()
+        .filter(|r| r.verdict == TraversalVerdict::Confirmed)
+    {
         let tf = ToolFinding::new("mg-traversal", "Path Traversal / Local File Inclusion", FindingSeverity::High)
             .url(r.url.clone())
             .parameter(r.param.clone())
@@ -436,6 +435,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 }

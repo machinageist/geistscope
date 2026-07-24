@@ -4,9 +4,9 @@
  * Date:            2026-05-01
  * Description:     Table and JSON output formatting
  *************************************************************/
+use serde::Serialize;
 use std::net::IpAddr;
 use std::time::Duration;
-use serde::Serialize;
 
 use crate::scanner::{PortResult, PortState};
 
@@ -40,7 +40,12 @@ pub fn state_str(state: &PortState) -> &'static str {
 }
 
 // Build ScanResult from raw scan output for JSON serialization
-pub fn make_result(ports: Vec<PortResult>, host: &str, ip: IpAddr, elapsed: Duration) -> ScanResult {
+pub fn make_result(
+    ports: Vec<PortResult>,
+    host: &str,
+    ip: IpAddr,
+    elapsed: Duration,
+) -> ScanResult {
     ScanResult {
         host: host.to_string(),
         ip: ip.to_string(),
@@ -91,8 +96,14 @@ pub fn print_table(ports: &[PortResult], host: &str, ip: IpAddr, elapsed: Durati
     }
 
     let open = ports.iter().filter(|r| r.state == PortState::Open).count();
-    let filtered = ports.iter().filter(|r| r.state == PortState::Filtered).count();
-    let closed = ports.iter().filter(|r| r.state == PortState::Closed).count();
+    let filtered = ports
+        .iter()
+        .filter(|r| r.state == PortState::Filtered)
+        .count();
+    let closed = ports
+        .iter()
+        .filter(|r| r.state == PortState::Closed)
+        .count();
 
     println!(
         "\n{} open, {} filtered, {} closed (hidden) — scanned in {:?}",

@@ -38,7 +38,10 @@ pub struct ParsedOutput {
 pub fn parse_llm_output(llm_response: &str, skills_dir: &Path) -> ParsedOutput {
     let raw_markdown = llm_response.to_string();
     let priorities = extract_table_rows(llm_response, skills_dir);
-    ParsedOutput { priorities, raw_markdown }
+    ParsedOutput {
+        priorities,
+        raw_markdown,
+    }
 }
 
 // Walk the markdown looking for pipe-delimited table rows that start with a rank integer
@@ -48,16 +51,21 @@ fn extract_table_rows(text: &str, skills_dir: &Path) -> Vec<Priority> {
     for line in text.lines() {
         let line = line.trim();
         // table rows start and end with |; skip header and separator rows
-        if !line.starts_with('|') || !line.ends_with('|') { continue; }
+        if !line.starts_with('|') || !line.ends_with('|') {
+            continue;
+        }
 
         // split on | and trim each cell
-        let cells: Vec<&str> = line.split('|')
+        let cells: Vec<&str> = line
+            .split('|')
             .map(str::trim)
             .filter(|c| !c.is_empty())
             .collect();
 
         // expect exactly 7 columns: Rank Host BugClass PayoutBand Rationale FirstTest Skill
-        if cells.len() != 7 { continue; }
+        if cells.len() != 7 {
+            continue;
+        }
 
         // first cell must be a positive integer (the rank)
         let rank = match cells[0].parse::<u32>() {

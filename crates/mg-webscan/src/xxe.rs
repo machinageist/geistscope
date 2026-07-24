@@ -138,9 +138,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for filename use (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Return true if the endpoint looks like it accepts XML
@@ -229,15 +227,10 @@ fn check_disclosure(body: &str, label: &str) -> XxeVerdict {
 }
 
 // Send one XXE probe; return (body, status)
-async fn send_probe(
-    client: &reqwest::Client,
-    target: &XmlTarget,
-    payload: &str,
-) -> String {
+async fn send_probe(client: &reqwest::Client, target: &XmlTarget, payload: &str) -> String {
     let result = client
         .request(
-            reqwest::Method::from_bytes(target.method.as_bytes())
-                .unwrap_or(reqwest::Method::POST),
+            reqwest::Method::from_bytes(target.method.as_bytes()).unwrap_or(reqwest::Method::POST),
             &target.url,
         )
         .header("Content-Type", "application/xml")
@@ -285,10 +278,13 @@ async fn probe_target(
 
     // OOB blind XXE if configured
     if let Some(ref oob) = oob_url {
-        let token = format!("{:x}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0));
+        let token = format!(
+            "{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
         let payload = PAYLOAD_OOB_TEMPLATE
             .replace("{oob_url}", oob)
             .replace("{token}", &token);
@@ -347,10 +343,7 @@ pub async fn run(args: Args) -> Result<()> {
         .build()
         .context("build HTTP client")?;
 
-    let oob_dir = args
-        .oob_url
-        .as_ref()
-        .map(|_| eng.root.join("oob"));
+    let oob_dir = args.oob_url.as_ref().map(|_| eng.root.join("oob"));
 
     let mut join_set: JoinSet<Vec<XxeResult>> = JoinSet::new();
     let mut all_results: Vec<XxeResult> = Vec::new();
@@ -414,7 +407,11 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Write finding for each confirmed XXE result
-    for r in output.results.iter().filter(|r| r.verdict == XxeVerdict::Confirmed) {
+    for r in output
+        .results
+        .iter()
+        .filter(|r| r.verdict == XxeVerdict::Confirmed)
+    {
         let tf = ToolFinding::new("mg-xxe", "XML External Entity Injection (XXE)", FindingSeverity::High)
             .url(r.url.clone())
             .evidence(format!("method={} payload={}", r.method, r.payload_label))
@@ -473,13 +470,19 @@ mod tests {
     #[test]
     fn disclosure_linux_confirmed_on_root_marker() {
         let body = "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1";
-        assert_eq!(check_disclosure(body, "linux_passwd"), XxeVerdict::Confirmed);
+        assert_eq!(
+            check_disclosure(body, "linux_passwd"),
+            XxeVerdict::Confirmed
+        );
     }
 
     #[test]
     fn disclosure_windows_confirmed_on_fonts_marker() {
         let body = "[fonts]\ncharset=00\n[extensions]\n";
-        assert_eq!(check_disclosure(body, "windows_winini"), XxeVerdict::Confirmed);
+        assert_eq!(
+            check_disclosure(body, "windows_winini"),
+            XxeVerdict::Confirmed
+        );
     }
 
     #[test]
@@ -490,7 +493,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 
     #[test]

@@ -27,14 +27,26 @@ const SSH_KEY_BEGIN: &str = "-----BEGIN";
 const HISTORY_FILES: &[&str] = &[".bash_history", ".zsh_history", ".sh_history"];
 
 const HISTORY_PATTERNS: &[&str] = &[
-    "password", "secret", "token", "api_key", " -p ", "--password", "Authorization",
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    " -p ",
+    "--password",
+    "Authorization",
 ];
 
 const ENV_FILE_NAMES: &[&str] = &[".env", ".env.local", ".env.production"];
 
 // Patterns that indicate a secret in KEY=VALUE env lines
 const SECRET_KEY_PATTERNS: &[&str] = &[
-    "PASSWORD", "SECRET", "TOKEN", "KEY", "CREDENTIAL", "AUTH", "PRIVATE",
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+    "KEY",
+    "CREDENTIAL",
+    "AUTH",
+    "PRIVATE",
 ];
 
 const BROWSER_PROFILE_PATHS: &[(&str, &str)] = &[
@@ -180,9 +192,8 @@ fn scan_ssh_keys(home: &Path) -> Vec<Finding> {
         let path = entry.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-        let is_key_name = SSH_KEY_NAMES.contains(&name)
-            || name.ends_with(".pem")
-            || name.ends_with(".key");
+        let is_key_name =
+            SSH_KEY_NAMES.contains(&name) || name.ends_with(".pem") || name.ends_with(".key");
 
         if !is_key_name {
             continue;
@@ -234,7 +245,11 @@ fn scan_aws_credentials(home: &Path) -> Vec<Finding> {
 
 // Extract AWS key names and their values from credentials file content
 fn extract_aws_values(content: &str) -> Vec<(String, String)> {
-    let patterns = ["aws_access_key_id", "aws_secret_access_key", "aws_session_token"];
+    let patterns = [
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "aws_session_token",
+    ];
     let mut results = Vec::new();
 
     for line in content.lines() {
@@ -347,8 +362,7 @@ fn decode_docker_auth(content: &str) -> Vec<(String, String)> {
 
     for (registry, auth_obj) in auths {
         if let Some(auth_b64) = auth_obj.get("auth").and_then(|a| a.as_str())
-            && let Ok(decoded_bytes) =
-                base64::engine::general_purpose::STANDARD.decode(auth_b64)
+            && let Ok(decoded_bytes) = base64::engine::general_purpose::STANDARD.decode(auth_b64)
         {
             let decoded = String::from_utf8_lossy(&decoded_bytes);
             if let Some(colon) = decoded.find(':') {
@@ -516,12 +530,17 @@ fn parse_kubectl_config(content: &str, path: &str) -> Vec<Finding> {
                     detail: format!("user token: {}", mask_secret(token)),
                 });
             }
-        } else if trimmed.starts_with("client-certificate-data:") || trimmed.starts_with("client-key-data:") {
+        } else if trimmed.starts_with("client-certificate-data:")
+            || trimmed.starts_with("client-key-data:")
+        {
             findings.push(Finding {
                 check: "KUBECTL_CLIENT_CERT".into(),
                 severity: Severity::High,
                 path: path.to_string(),
-                detail: format!("embedded client cert/key data: {}", trimmed.split(':').next().unwrap_or("")),
+                detail: format!(
+                    "embedded client cert/key data: {}",
+                    trimmed.split(':').next().unwrap_or("")
+                ),
             });
         }
     }

@@ -365,7 +365,7 @@ mod tests {
     fn semantic_diff_401_403_404_becomes_secure_denied() {
         for status in [401, 403, 404] {
             let outcome = ReplayOutcome::http(status, "{\"error\":\"denied\"}");
-            let verdict = SemanticDiffEngine::default().classify(&outcome);
+            let verdict = SemanticDiffEngine.classify(&outcome);
 
             assert_eq!(verdict.classification, SemanticVerdictClass::SecureDenied);
             assert!(!verdict.boundary_violation);
@@ -380,7 +380,7 @@ mod tests {
         )
         .with_target_tenant_markers(["tenant-victim"]);
 
-        let verdict = SemanticDiffEngine::default().classify(&outcome);
+        let verdict = SemanticDiffEngine.classify(&outcome);
 
         assert_eq!(
             verdict.classification,
@@ -395,7 +395,7 @@ mod tests {
         let outcome = ReplayOutcome::http(401, "{\"error\":\"token expired\"}")
             .with_auth_failure_shape(AuthFailureShape::ExpiredToken);
 
-        let verdict = SemanticDiffEngine::default().classify(&outcome);
+        let verdict = SemanticDiffEngine.classify(&outcome);
 
         assert_eq!(verdict.classification, SemanticVerdictClass::InvalidTest);
         assert!(!verdict.boundary_violation);
@@ -408,7 +408,7 @@ mod tests {
             "{\"errors\":[{\"message\":\"Access denied\",\"extensions\":{\"code\":\"FORBIDDEN\"}}]}",
         );
 
-        let verdict = SemanticDiffEngine::default().classify(&outcome);
+        let verdict = SemanticDiffEngine.classify(&outcome);
 
         assert_eq!(verdict.classification, SemanticVerdictClass::SecureDenied);
         assert!(!verdict.boundary_violation);

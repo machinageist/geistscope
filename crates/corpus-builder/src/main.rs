@@ -5,8 +5,8 @@
  *******************************************************************/
 mod cli;
 
+use corpus_builder::{Corpus, ct, wayback};
 use std::fs;
-use corpus_builder::{ct, wayback, Corpus};
 
 // Validate ASCII domain syntax — alnum + . + -, no leading/trailing dot or dash,
 // no double-dot, must contain at least one dot
@@ -19,13 +19,16 @@ fn is_valid_domain(s: &str) -> bool {
         && !s.ends_with('.')
         && !s.starts_with('-')
         && !s.ends_with('-')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
 }
 
 // Read domains file, skip blank/comment lines, warn on (and skip) malformed entries
 fn read_domains(path: &str) -> Vec<String> {
-    let raw = fs::read_to_string(path)
-        .unwrap_or_else(|e| { eprintln!("cannot read {path}: {e}"); std::process::exit(1); });
+    let raw = fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("cannot read {path}: {e}");
+        std::process::exit(1);
+    });
     let mut valid = Vec::new();
     for (i, line) in raw.lines().enumerate() {
         let line = line.trim();
@@ -43,7 +46,10 @@ fn read_domains(path: &str) -> Vec<String> {
 }
 
 fn open_corpus(db: &str) -> Corpus {
-    Corpus::open(db).unwrap_or_else(|e| { eprintln!("cannot open {db}: {e}"); std::process::exit(1); })
+    Corpus::open(db).unwrap_or_else(|e| {
+        eprintln!("cannot open {db}: {e}");
+        std::process::exit(1);
+    })
 }
 
 #[tokio::main]
@@ -51,7 +57,11 @@ async fn main() {
     let args = cli::get_args();
 
     match args.command {
-        cli::Command::MineCt { domains, db, rate_limit_ms } => {
+        cli::Command::MineCt {
+            domains,
+            db,
+            rate_limit_ms,
+        } => {
             let domains = read_domains(&domains);
             let mut corpus = open_corpus(&db);
             eprintln!("Mining CT logs for {} domains → {db}", domains.len());
@@ -60,7 +70,11 @@ async fn main() {
             eprintln!("Done. Total subdomains in corpus: {subs}");
         }
 
-        cli::Command::MineWayback { domains, db, rate_limit_ms } => {
+        cli::Command::MineWayback {
+            domains,
+            db,
+            rate_limit_ms,
+        } => {
             let domains = read_domains(&domains);
             let mut corpus = open_corpus(&db);
             eprintln!("Mining Wayback CDX for {} domains → {db}", domains.len());
@@ -76,7 +90,9 @@ async fn main() {
                 eprintln!("No subdomains found for {domain}");
             } else {
                 println!("Subdomains for {domain} ({} total):", subs.len());
-                for s in &subs { println!("  {s}"); }
+                for s in &subs {
+                    println!("  {s}");
+                }
             }
         }
 

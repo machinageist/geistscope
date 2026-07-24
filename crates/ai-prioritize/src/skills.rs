@@ -10,13 +10,13 @@
  *                  the prompt focused and within budget.
  *******************************************************************/
 
-use std::path::{Path, PathBuf};
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 // Parsed representation of one skill relevant to prioritization
 pub struct Skill {
     pub name: String,
-    #[allow(dead_code)]  // path reserved for future skill-specific tooling
+    #[allow(dead_code)] // path reserved for future skill-specific tooling
     pub path: PathBuf,
     // compact trigger description from YAML frontmatter
     pub description: String,
@@ -33,11 +33,16 @@ pub fn load_skills(skills_dir: &Path) -> Result<Vec<Skill>> {
     for entry in entries.flatten() {
         let path = entry.path();
         // skip files and hidden entries; only process directories that contain SKILL.md
-        if !path.is_dir() { continue; }
+        if !path.is_dir() {
+            continue;
+        }
         let skill_md = path.join("SKILL.md");
-        if !skill_md.exists() { continue; }
+        if !skill_md.exists() {
+            continue;
+        }
 
-        let name = path.file_name()
+        let name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
@@ -46,7 +51,12 @@ pub fn load_skills(skills_dir: &Path) -> Result<Vec<Skill>> {
         let description = extract_frontmatter_description(&raw);
         let context = extract_priority_sections(&raw);
 
-        skills.push(Skill { name, path, description, context });
+        skills.push(Skill {
+            name,
+            path,
+            description,
+            context,
+        });
     }
 
     // sort alphabetically so the prompt order is deterministic
@@ -58,13 +68,17 @@ pub fn load_skills(skills_dir: &Path) -> Result<Vec<Skill>> {
 fn extract_frontmatter_description(raw: &str) -> String {
     // find the opening and closing --- markers
     let mut lines = raw.lines();
-    if lines.next().map(str::trim) != Some("---") { return String::new(); }
+    if lines.next().map(str::trim) != Some("---") {
+        return String::new();
+    }
 
     let mut in_description = false;
     let mut desc_lines: Vec<String> = Vec::new();
 
     for line in lines {
-        if line.trim() == "---" { break; }
+        if line.trim() == "---" {
+            break;
+        }
 
         if let Some(after_key) = line.strip_prefix("description:") {
             // the value may be on the same line or as a multi-line YAML block scalar (>)
@@ -102,10 +116,17 @@ fn extract_priority_sections(raw: &str) -> String {
         // skip YAML frontmatter block
         if !frontmatter_done {
             if line.trim() == "---" {
-                if !in_frontmatter { in_frontmatter = true; continue; }
-                else { frontmatter_done = true; continue; }
+                if !in_frontmatter {
+                    in_frontmatter = true;
+                    continue;
+                } else {
+                    frontmatter_done = true;
+                    continue;
+                }
             }
-            if in_frontmatter { continue; }
+            if in_frontmatter {
+                continue;
+            }
         }
 
         // detect numbered section headings like "## 3. Where To Find It"
@@ -120,7 +141,9 @@ fn extract_priority_sections(raw: &str) -> String {
             output.push(line);
             line_count += 1;
             // safety cap: never emit more than 200 lines per skill to bound prompt size
-            if line_count >= 200 { break; }
+            if line_count >= 200 {
+                break;
+            }
         }
     }
 

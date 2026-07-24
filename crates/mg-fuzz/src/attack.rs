@@ -48,38 +48,48 @@ pub fn sniper(positions: &[String], payload_lists: &[Vec<String>]) -> Vec<Attack
 // Total requests = payload_list_length
 pub fn battering_ram(positions: &[String], payload_lists: &[Vec<String>]) -> Vec<AttackRequest> {
     let list = payload_lists.first().cloned().unwrap_or_default();
-    list.iter().map(|payload| AttackRequest {
-        label: format!("payload={payload}"),
-        payloads: vec![payload.clone(); positions.len()],
-    }).collect()
+    list.iter()
+        .map(|payload| AttackRequest {
+            label: format!("payload={payload}"),
+            payloads: vec![payload.clone(); positions.len()],
+        })
+        .collect()
 }
 
 // Generate Pitchfork requests: advance all lists simultaneously, stop at shortest
 // Total requests = min(payload_list_length across all lists)
 pub fn pitchfork(positions: &[String], payload_lists: &[Vec<String>]) -> Vec<AttackRequest> {
-    if payload_lists.is_empty() { return vec![]; }
+    if payload_lists.is_empty() {
+        return vec![];
+    }
     let min_len = payload_lists.iter().map(|l| l.len()).min().unwrap_or(0);
-    (0..min_len).map(|i| {
-        let payloads: Vec<String> = payload_lists.iter().map(|l| l[i].clone()).collect();
-        // pad if fewer lists than positions
-        let mut row = payloads;
-        row.resize(positions.len(), String::new());
-        AttackRequest {
-            label: format!("row={i} payloads={}", row.join(",")),
-            payloads: row,
-        }
-    }).collect()
+    (0..min_len)
+        .map(|i| {
+            let payloads: Vec<String> = payload_lists.iter().map(|l| l[i].clone()).collect();
+            // pad if fewer lists than positions
+            let mut row = payloads;
+            row.resize(positions.len(), String::new());
+            AttackRequest {
+                label: format!("row={i} payloads={}", row.join(",")),
+                payloads: row,
+            }
+        })
+        .collect()
 }
 
 // Generate Cluster Bomb requests: cartesian product of all payload lists
 // Total requests = product of all list lengths — can explode; warn if > 10 000
 pub fn cluster_bomb(positions: &[String], payload_lists: &[Vec<String>]) -> Vec<AttackRequest> {
-    if payload_lists.is_empty() { return vec![]; }
+    if payload_lists.is_empty() {
+        return vec![];
+    }
 
     // compute total request count for early warning
     let total: usize = payload_lists.iter().map(|l| l.len()).product();
     if total > 10_000 {
-        eprintln!("  [warn] cluster-bomb will generate {total} requests — this may take a long time");
+        eprintln!(
+            "  [warn] cluster-bomb will generate {total} requests — this may take a long time"
+        );
     }
 
     // build cartesian product iteratively using itertools
@@ -89,22 +99,29 @@ pub fn cluster_bomb(positions: &[String], payload_lists: &[Vec<String>]) -> Vec<
         .multi_cartesian_product()
         .collect();
 
-    product.into_iter().map(|combo| {
-        let mut row: Vec<String> = combo.iter().map(|s| s.to_string()).collect();
-        row.resize(positions.len(), String::new());
-        AttackRequest {
-            label: format!("combo={}", combo.join(",")),
-            payloads: row,
-        }
-    }).collect()
+    product
+        .into_iter()
+        .map(|combo| {
+            let mut row: Vec<String> = combo.iter().map(|s| s.to_string()).collect();
+            row.resize(positions.len(), String::new());
+            AttackRequest {
+                label: format!("combo={}", combo.join(",")),
+                payloads: row,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn positions() -> Vec<String> { vec!["id".into(), "role".into()] }
-    fn single_list() -> Vec<Vec<String>> { vec![vec!["1".into(), "2".into(), "3".into()]] }
+    fn positions() -> Vec<String> {
+        vec!["id".into(), "role".into()]
+    }
+    fn single_list() -> Vec<Vec<String>> {
+        vec![vec!["1".into(), "2".into(), "3".into()]]
+    }
     fn two_lists() -> Vec<Vec<String>> {
         vec![vec!["a".into(), "b".into()], vec!["x".into(), "y".into()]]
     }
@@ -143,7 +160,7 @@ mod tests {
             vec!["x".into(), "y".into()],
         ];
         let reqs = pitchfork(&positions(), &lists);
-        assert_eq!(reqs.len(), 2);  // stops at len 2 (shortest)
+        assert_eq!(reqs.len(), 2); // stops at len 2 (shortest)
         assert_eq!(reqs[0].payloads, vec!["a", "x"]);
     }
 

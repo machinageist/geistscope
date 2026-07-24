@@ -10,7 +10,10 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "mg-fingerprint", about = "HTTP fingerprinting — detect server, framework, CDN, CMS, cloud")]
+#[command(
+    name = "mg-fingerprint",
+    about = "HTTP fingerprinting — detect server, framework, CDN, CMS, cloud"
+)]
 pub struct Args {
     /// Target URL to probe (e.g. https://api.example.com)
     pub url: String,

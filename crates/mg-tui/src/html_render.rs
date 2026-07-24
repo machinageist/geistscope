@@ -227,9 +227,9 @@ impl Ctx {
         });
         for row in 0..IMAGE_BLOCK_HEIGHT {
             // Each placeholder line: \x01IMG:idx:row\x01
-            self.lines.push(Line::from(Span::raw(
-                format!("{IMG_PFX}IMG:{idx}:{row}{IMG_PFX}"),
-            )));
+            self.lines.push(Line::from(Span::raw(format!(
+                "{IMG_PFX}IMG:{idx}:{row}{IMG_PFX}"
+            ))));
         }
         self.had_blank = false;
         self.ensure_blank();
@@ -244,9 +244,9 @@ impl Ctx {
             return;
         }
         self.newline();
-        self.lines.push(Line::from(Span::raw(
-            format!("{FIELD_PFX}FIELD:{idx}{FIELD_PFX}"),
-        )));
+        self.lines.push(Line::from(Span::raw(format!(
+            "{FIELD_PFX}FIELD:{idx}{FIELD_PFX}"
+        ))));
         self.had_blank = false;
     }
 
@@ -254,10 +254,19 @@ impl Ctx {
     fn emit_media_box(&mut self, tag: &str, src: &str, media_type: &str) {
         self.ensure_blank();
         let bar = "─".repeat(68);
-        let icon = if tag == "video" { "▶ VIDEO" } else { "♪ AUDIO" };
-        let color = if tag == "video" { Color::Magenta } else { Color::Blue };
+        let icon = if tag == "video" {
+            "▶ VIDEO"
+        } else {
+            "♪ AUDIO"
+        };
+        let color = if tag == "video" {
+            Color::Magenta
+        } else {
+            Color::Blue
+        };
         let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
-        self.lines.push(Line::from(Span::styled(format!("{icon} {bar}"), style)));
+        self.lines
+            .push(Line::from(Span::styled(format!("{icon} {bar}"), style)));
         if !src.is_empty() {
             self.lines.push(Line::from(vec![
                 Span::styled("  src:  ", Style::default().fg(Color::DarkGray)),
@@ -286,7 +295,10 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
             let tag = elem.name();
 
             // Completely skip invisible subtrees
-            if matches!(tag, "script" | "style" | "noscript" | "svg" | "canvas" | "head") {
+            if matches!(
+                tag,
+                "script" | "style" | "noscript" | "svg" | "canvas" | "head"
+            ) {
                 return;
             }
 
@@ -312,8 +324,14 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                 // --- headings ---
                 "h1" => {
                     ctx.ensure_blank();
-                    ctx.push_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
-                    for c in node.children() { walk_node(c, ctx); }
+                    ctx.push_style(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                     ctx.newline();
                     ctx.push_raw_line("═".repeat(72));
@@ -321,8 +339,14 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                 }
                 "h2" => {
                     ctx.ensure_blank();
-                    ctx.push_style(Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
-                    for c in node.children() { walk_node(c, ctx); }
+                    ctx.push_style(
+                        Style::default()
+                            .fg(Color::LightCyan)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                     ctx.newline();
                     ctx.push_raw_line("─".repeat(52));
@@ -330,8 +354,14 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                 }
                 "h3" | "h4" | "h5" | "h6" => {
                     ctx.ensure_blank();
-                    ctx.push_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
-                    for c in node.children() { walk_node(c, ctx); }
+                    ctx.push_style(
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                     ctx.newline();
                     ctx.ensure_blank();
@@ -346,41 +376,52 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                     let prev = ctx.current_form;
                     ctx.current_form = Some(fi);
                     ctx.ensure_blank();
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.current_form = prev;
                     ctx.newline();
                 }
 
                 // --- block containers ---
-                "p" | "div" | "section" | "article" | "main" | "aside"
-                | "header" | "footer" | "nav" | "fieldset" | "figure"
-                | "address" | "details" | "summary" => {
+                "p" | "div" | "section" | "article" | "main" | "aside" | "header" | "footer"
+                | "nav" | "fieldset" | "figure" | "address" | "details" | "summary" => {
                     ctx.ensure_blank();
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.newline();
                 }
 
                 // --- lists ---
                 "ul" | "ol" | "dl" => {
                     ctx.ensure_blank();
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.ensure_blank();
                 }
                 "li" => {
                     ctx.newline();
                     ctx.push_span(Span::raw("  • "));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                 }
                 "dt" => {
                     ctx.newline();
                     ctx.push_style(Style::default().add_modifier(Modifier::BOLD));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "dd" => {
                     ctx.newline();
                     ctx.push_span(Span::raw("    "));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                 }
 
                 // --- preformatted ---
@@ -388,7 +429,9 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                     ctx.ensure_blank();
                     ctx.in_pre = true;
                     ctx.push_style(Style::default().fg(Color::Yellow));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                     ctx.in_pre = false;
                     ctx.newline();
@@ -398,41 +441,57 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                 // --- inline formatting ---
                 "strong" | "b" => {
                     ctx.push_style(Style::default().add_modifier(Modifier::BOLD));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "em" | "i" | "cite" | "var" => {
                     ctx.push_style(Style::default().add_modifier(Modifier::ITALIC));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "u" | "ins" => {
                     ctx.push_style(Style::default().add_modifier(Modifier::UNDERLINED));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "s" | "del" | "strike" => {
                     ctx.push_style(Style::default().add_modifier(Modifier::CROSSED_OUT));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "code" | "kbd" | "samp" | "tt" => {
                     ctx.push_style(Style::default().fg(Color::Yellow));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "mark" => {
                     ctx.push_style(Style::default().fg(Color::Black).bg(Color::Yellow));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "small" | "sub" | "sup" => {
                     ctx.push_style(Style::default().fg(Color::Gray));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                 }
                 "abbr" | "acronym" => {
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     if let Some(title) = elem.attr("title") {
                         ctx.push_span(Span::styled(
                             format!(" ({title})"),
@@ -442,14 +501,22 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                 }
                 "q" => {
                     ctx.push_span(Span::raw("\u{201C}"));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.push_span(Span::raw("\u{201D}"));
                 }
                 "blockquote" => {
                     ctx.ensure_blank();
-                    ctx.push_style(Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC));
+                    ctx.push_style(
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::ITALIC),
+                    );
                     ctx.push_span(Span::raw("  \u{258C} "));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                     ctx.newline();
                     ctx.ensure_blank();
@@ -463,15 +530,23 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                         && !href.starts_with("javascript:");
                     if is_real {
                         let n = ctx.add_link(href);
-                        ctx.push_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED));
-                        for c in node.children() { walk_node(c, ctx); }
+                        ctx.push_style(
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::UNDERLINED),
+                        );
+                        for c in node.children() {
+                            walk_node(c, ctx);
+                        }
                         ctx.pop_style();
                         ctx.push_span(Span::styled(
                             format!("[{n}]"),
                             Style::default().fg(Color::DarkGray),
                         ));
                     } else {
-                        for c in node.children() { walk_node(c, ctx); }
+                        for c in node.children() {
+                            walk_node(c, ctx);
+                        }
                     }
                 }
 
@@ -491,7 +566,9 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
 
                 // <picture>: walk children; the nested <img> handles rendering
                 "picture" => {
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                 }
 
                 // <source> standalone (outside <video>/<picture>): ignore
@@ -504,7 +581,9 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                     // Check children for <source src="...">
                     for child in node.children() {
                         if let Node::Element(ce) = child.value()
-                            && ce.name() == "source" && src.is_empty() {
+                            && ce.name() == "source"
+                            && src.is_empty()
+                        {
                             src = ce.attr("src").unwrap_or("").to_string();
                             media_type = ce.attr("type").unwrap_or("").to_string();
                         }
@@ -522,8 +601,12 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                         "password" => FieldType::Password,
                         "email" => FieldType::Email,
                         "search" => FieldType::Search,
-                        "checkbox" => FieldType::Checkbox { checked: elem.attr("checked").is_some() },
-                        "radio" => FieldType::Radio { checked: elem.attr("checked").is_some() },
+                        "checkbox" => FieldType::Checkbox {
+                            checked: elem.attr("checked").is_some(),
+                        },
+                        "radio" => FieldType::Radio {
+                            checked: elem.attr("checked").is_some(),
+                        },
                         "submit" => FieldType::Submit,
                         "button" => FieldType::Button,
                         "hidden" => FieldType::Hidden,
@@ -532,29 +615,72 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                     };
                     let idx = ctx.field_count;
                     ctx.field_count += 1;
-                    ctx.emit_field(FormElement { index: idx, form_index: ctx.current_form, name, value, placeholder, field_type });
+                    ctx.emit_field(FormElement {
+                        index: idx,
+                        form_index: ctx.current_form,
+                        name,
+                        value,
+                        placeholder,
+                        field_type,
+                    });
                 }
                 "textarea" => {
                     let name = elem.attr("name").unwrap_or("").to_string();
                     let placeholder = elem.attr("placeholder").unwrap_or("").to_string();
-                    let value: String = node.children()
-                        .filter_map(|c| if let Node::Text(t) = c.value() { Some(t.text.as_ref().to_string()) } else { None })
-                        .collect::<Vec<_>>().join("");
+                    let value: String = node
+                        .children()
+                        .filter_map(|c| {
+                            if let Node::Text(t) = c.value() {
+                                Some(t.text.as_ref().to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
                     let idx = ctx.field_count;
                     ctx.field_count += 1;
-                    ctx.emit_field(FormElement { index: idx, form_index: ctx.current_form, name, value, placeholder, field_type: FieldType::TextArea });
+                    ctx.emit_field(FormElement {
+                        index: idx,
+                        form_index: ctx.current_form,
+                        name,
+                        value,
+                        placeholder,
+                        field_type: FieldType::TextArea,
+                    });
                 }
                 "button" => {
                     let btn_type = elem.attr("type").unwrap_or("submit").to_lowercase();
                     let name = elem.attr("name").unwrap_or("").to_string();
                     let value = elem.attr("value").unwrap_or("").to_string();
-                    let placeholder: String = node.children()
-                        .filter_map(|c| if let Node::Text(t) = c.value() { Some(t.text.as_ref().to_string()) } else { None })
-                        .collect::<Vec<_>>().join("").trim().to_string();
-                    let field_type = if btn_type == "submit" { FieldType::Submit } else { FieldType::Button };
+                    let placeholder: String = node
+                        .children()
+                        .filter_map(|c| {
+                            if let Node::Text(t) = c.value() {
+                                Some(t.text.as_ref().to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("")
+                        .trim()
+                        .to_string();
+                    let field_type = if btn_type == "submit" {
+                        FieldType::Submit
+                    } else {
+                        FieldType::Button
+                    };
                     let idx = ctx.field_count;
                     ctx.field_count += 1;
-                    ctx.emit_field(FormElement { index: idx, form_index: ctx.current_form, name, value, placeholder, field_type });
+                    ctx.emit_field(FormElement {
+                        index: idx,
+                        form_index: ctx.current_form,
+                        name,
+                        value,
+                        placeholder,
+                        field_type,
+                    });
                 }
                 "select" => {
                     let name = elem.attr("name").unwrap_or("").to_string();
@@ -562,12 +688,25 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                     let mut default_value = String::new();
                     for child in node.children() {
                         if let Node::Element(ce) = child.value()
-                            && ce.name() == "option" {
+                            && ce.name() == "option"
+                        {
                             let val = ce.attr("value").unwrap_or("").to_string();
-                            let label: String = child.children()
-                                .filter_map(|c| if let Node::Text(t) = c.value() { Some(t.text.as_ref().to_string()) } else { None })
-                                .collect::<Vec<_>>().join("").trim().to_string();
-                            if ce.attr("selected").is_some() { default_value = val.clone(); }
+                            let label: String = child
+                                .children()
+                                .filter_map(|c| {
+                                    if let Node::Text(t) = c.value() {
+                                        Some(t.text.as_ref().to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("")
+                                .trim()
+                                .to_string();
+                            if ce.attr("selected").is_some() {
+                                default_value = val.clone();
+                            }
                             options.push((val, label));
                         }
                     }
@@ -576,44 +715,65 @@ fn walk_node(node: NodeRef<'_, Node>, ctx: &mut Ctx) {
                     }
                     let idx = ctx.field_count;
                     ctx.field_count += 1;
-                    ctx.emit_field(FormElement { index: idx, form_index: ctx.current_form, name, value: default_value, placeholder: String::new(), field_type: FieldType::Select(options) });
+                    ctx.emit_field(FormElement {
+                        index: idx,
+                        form_index: ctx.current_form,
+                        name,
+                        value: default_value,
+                        placeholder: String::new(),
+                        field_type: FieldType::Select(options),
+                    });
                 }
                 "label" => {
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.push_span(Span::raw(": "));
                 }
 
                 // --- tables ---
                 "table" => {
                     ctx.ensure_blank();
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.ensure_blank();
                 }
                 "thead" | "tbody" | "tfoot" | "colgroup" | "col" => {
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                 }
                 "tr" => {
                     ctx.newline();
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.newline();
                     ctx.push_raw_line("\u{00B7}".repeat(72));
                 }
                 "th" => {
                     ctx.push_span(Span::raw("\u{2502} "));
                     ctx.push_style(Style::default().add_modifier(Modifier::BOLD));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.pop_style();
                     ctx.push_span(Span::raw(" "));
                 }
                 "td" => {
                     ctx.push_span(Span::raw("\u{2502} "));
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                     ctx.push_span(Span::raw(" "));
                 }
 
                 // Structural pass-through
                 _ => {
-                    for c in node.children() { walk_node(c, ctx); }
+                    for c in node.children() {
+                        walk_node(c, ctx);
+                    }
                 }
             }
         }
@@ -661,7 +821,14 @@ pub fn render_html(src: &str, _base_url: &str) -> RenderedPage {
 // Wrap a plain-text body into rendered lines
 pub fn render_plain(text: &str) -> RenderedPage {
     let lines = text.lines().map(|l| Line::raw(l.to_string())).collect();
-    RenderedPage { title: "(plain text)".into(), lines, links: vec![], images: vec![], forms: vec![], form_elements: vec![] }
+    RenderedPage {
+        title: "(plain text)".into(),
+        lines,
+        links: vec![],
+        images: vec![],
+        forms: vec![],
+        form_elements: vec![],
+    }
 }
 
 // Return the field element index for a FIELD placeholder line, or None

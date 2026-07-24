@@ -133,11 +133,7 @@ fn validate_with_tools(tools: &[String]) -> Result<()> {
 }
 
 // Run each requested post-recon tool sequentially via tokio::process::Command
-async fn run_with_tools(
-    tools: &[String],
-    engagement: &str,
-    engagements_dir: &str,
-) -> Result<()> {
+async fn run_with_tools(tools: &[String], engagement: &str, engagements_dir: &str) -> Result<()> {
     for tool in tools {
         let binary = tool_binary(tool);
         eprintln!("=== --with {tool}: running {binary} ===");
@@ -153,7 +149,10 @@ async fn run_with_tools(
         } else {
             eprintln!(
                 "=== --with {tool}: {binary} exited with {} ===",
-                status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into())
+                status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".into())
             );
         }
     }

@@ -22,8 +22,8 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::net::runtime::TokioRuntimeProvider;
-use hickory_resolver::{Resolver, TokioResolver};
 use hickory_resolver::proto::rr::{Name, RData, RecordType};
+use hickory_resolver::{Resolver, TokioResolver};
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -151,9 +151,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Build a TokioResolver using either the system config or a custom nameserver IP
@@ -163,7 +161,9 @@ fn build_resolver(nameserver_ip: Option<&str>, timeout_secs: u64) -> Result<Toki
 
     let config = match nameserver_ip {
         Some(ip) => {
-            let addr: std::net::IpAddr = ip.parse().with_context(|| format!("parse nameserver IP: {ip}"))?;
+            let addr: std::net::IpAddr = ip
+                .parse()
+                .with_context(|| format!("parse nameserver IP: {ip}"))?;
             use hickory_resolver::config::{ConnectionConfig, NameServerConfig};
             // Single UDP connection on the standard DNS port to the chosen server
             let mut conn = ConnectionConfig::udp();
@@ -291,11 +291,8 @@ async fn attempt_axfr(ns_host: &str, domain: &str, timeout_secs: u64) -> ZoneTra
 
     // Read up to 65536 bytes of response
     let mut buf = vec![0u8; 65536];
-    let n = match tokio::time::timeout(
-        Duration::from_secs(timeout_secs),
-        stream.read(&mut buf),
-    )
-    .await
+    let n = match tokio::time::timeout(Duration::from_secs(timeout_secs), stream.read(&mut buf))
+        .await
     {
         Ok(Ok(n)) => n,
         _ => {
@@ -350,7 +347,9 @@ async fn attempt_axfr(ns_host: &str, domain: &str, timeout_secs: u64) -> ZoneTra
         success: true,
         denied: false,
         record_count: 1,
-        records: vec![format!("AXFR response received ({n} bytes) — manual review required")],
+        records: vec![format!(
+            "AXFR response received ({n} bytes) — manual review required"
+        )],
     }
 }
 
@@ -423,7 +422,9 @@ async fn check_dnssec(resolver: &TokioResolver, domain: &str) -> DnssecResult {
         .await
         .map(|l| !l.answers().is_empty())
         .unwrap_or(false);
-    DnssecResult { dnskey_found: found }
+    DnssecResult {
+        dnskey_found: found,
+    }
 }
 
 // Query SRV records for all known service names under the domain
@@ -505,8 +506,8 @@ async fn main() -> Result<()> {
     let eng = Engagement::load_named(Path::new(&args.engagements_dir), &args.engagement)
         .with_context(|| format!("load engagement {}", args.engagement))?;
 
-    let resolver = build_resolver(args.nameserver.as_deref(), args.timeout)
-        .context("build DNS resolver")?;
+    let resolver =
+        build_resolver(args.nameserver.as_deref(), args.timeout).context("build DNS resolver")?;
 
     eprintln!(
         "mg-dns-enum: domain={} nameserver={}",
@@ -535,7 +536,10 @@ async fn main() -> Result<()> {
     eprintln!("  checking wildcard DNS");
     let wildcard = check_wildcard(&resolver, &args.domain).await;
     if wildcard.resolved {
-        eprintln!("  [INFO] wildcard DNS detected: {} -> {:?}", wildcard.probe_hostname, wildcard.addresses);
+        eprintln!(
+            "  [INFO] wildcard DNS detected: {} -> {:?}",
+            wildcard.probe_hostname, wildcard.addresses
+        );
     }
 
     // ── DNSSEC check ─────────────────────────────────────────────────────────
@@ -599,9 +603,18 @@ async fn main() -> Result<()> {
 
     // Write finding for each successful zone transfer
     for zt in output.zone_transfers.iter().filter(|z| z.success) {
-        let tf = ToolFinding::new("mg-dns-enum", "DNS Zone Transfer Allowed (AXFR)", FindingSeverity::High)
-            .evidence(format!("nameserver={} domain={} records={}", zt.nameserver, args.domain, zt.record_count))
-            .recommendation("Restrict AXFR to authorized secondary nameservers only; configure zone transfer ACLs");
+        let tf = ToolFinding::new(
+            "mg-dns-enum",
+            "DNS Zone Transfer Allowed (AXFR)",
+            FindingSeverity::High,
+        )
+        .evidence(format!(
+            "nameserver={} domain={} records={}",
+            zt.nameserver, args.domain, zt.record_count
+        ))
+        .recommendation(
+            "Restrict AXFR to authorized secondary nameservers only; configure zone transfer ACLs",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -613,8 +626,16 @@ async fn main() -> Result<()> {
             "domain={} axfr_success={} wildcard={} dnssec={} ptr={} ts={ts}",
             args.domain,
             axfr_success,
-            output.wildcard.as_ref().map(|w| w.resolved).unwrap_or(false),
-            output.dnssec.as_ref().map(|d| d.dnskey_found).unwrap_or(false),
+            output
+                .wildcard
+                .as_ref()
+                .map(|w| w.resolved)
+                .unwrap_or(false),
+            output
+                .dnssec
+                .as_ref()
+                .map(|d| d.dnskey_found)
+                .unwrap_or(false),
             output.ptr_records.len()
         )),
     );
@@ -659,7 +680,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 
     #[test]

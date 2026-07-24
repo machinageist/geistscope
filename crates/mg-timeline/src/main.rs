@@ -223,7 +223,8 @@ fn format_unix_utc(unix_secs: i64) -> String {
     OffsetDateTime::from_unix_timestamp(unix_secs)
         .ok()
         .and_then(|dt| {
-            let fmt = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]").ok()?;
+            let fmt =
+                time::format_description::parse("[year]-[month]-[day] [hour]:[minute]").ok()?;
             dt.format(&fmt).ok()
         })
         .unwrap_or_else(|| unix_secs.to_string())
@@ -339,7 +340,11 @@ fn main() -> Result<()> {
     let out_path = timeline_dir.join(format!("{TIMELINE_FILE_PREFIX}{ts_safe}.{ext}"));
     fs::write(&out_path, &content).context("write timeline file")?;
 
-    eprintln!("mg-timeline: {} events written to {}", events.len(), out_path.display());
+    eprintln!(
+        "mg-timeline: {} events written to {}",
+        events.len(),
+        out_path.display()
+    );
 
     let _ = eng.audit(
         AUDIT_TOOL,
@@ -361,8 +366,7 @@ mod tests {
     fn tmp() -> PathBuf {
         static C: AtomicU64 = AtomicU64::new(0);
         let n = C.fetch_add(1, Ordering::Relaxed);
-        let p =
-            std::env::temp_dir().join(format!("mg-timeline-test-{}-{n}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("mg-timeline-test-{}-{n}", std::process::id()));
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -426,7 +430,11 @@ mod tests {
             serde_json::to_string(&meta).unwrap(),
         )
         .unwrap();
-        fs::write(eng_dir.join("scope.json"), serde_json::json!({"allow":["acme.test"],"deny":[]}).to_string()).unwrap();
+        fs::write(
+            eng_dir.join("scope.json"),
+            serde_json::json!({"allow":["acme.test"],"deny":[]}).to_string(),
+        )
+        .unwrap();
 
         // Write a finding file
         let finding = serde_json::json!({"title":"Test XSS","severity":"high","url":"https://acme.test/search"});

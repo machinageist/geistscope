@@ -27,8 +27,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let title = format!(" Logs — {} lines  (↑↓ scroll) ", lines.len());
-    let p = Paragraph::new(visible)
-        .block(Block::default().title(title).borders(Borders::ALL));
+    let p = Paragraph::new(visible).block(Block::default().title(title).borders(Borders::ALL));
     f.render_widget(p, area);
 }
 

@@ -82,8 +82,7 @@ async fn main() -> Result<()> {
             engagement,
             engagements_dir,
         } => {
-            let path =
-                record_consent(&engagements_dir, &engagement).context("record consent")?;
+            let path = record_consent(&engagements_dir, &engagement).context("record consent")?;
             println!("{}", path.display());
         }
         Command::Run {

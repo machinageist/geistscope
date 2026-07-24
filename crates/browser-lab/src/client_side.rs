@@ -450,7 +450,7 @@ mod tests {
             "<div>mg-marker</div>",
         ));
 
-        let verdict = ClientSideVerdictEngine::default().classify(&[observation]);
+        let verdict = ClientSideVerdictEngine.classify(&[observation]);
 
         assert_eq!(
             verdict.classification,
@@ -479,7 +479,7 @@ mod tests {
             MessageRiskClass::TrustsWildcardOrigin,
         ));
 
-        let verdict = ClientSideVerdictEngine::default().classify(&[observation]);
+        let verdict = ClientSideVerdictEngine.classify(&[observation]);
 
         assert_eq!(
             verdict.classification,
@@ -502,7 +502,7 @@ mod tests {
             "raw-secret-storage-value",
         ));
 
-        let verdict = ClientSideVerdictEngine::default().classify(&[observation]);
+        let verdict = ClientSideVerdictEngine.classify(&[observation]);
 
         assert_eq!(
             verdict.classification,

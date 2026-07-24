@@ -121,9 +121,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons -> underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Decide if an endpoint is JSON-accepting based on content-type or path heuristics
@@ -356,7 +354,10 @@ pub async fn run(args: Args) -> Result<()> {
         results.push(r);
     }
 
-    let reflected_count = results.iter().filter(|r| r.verdict == Verdict::Reflected).count();
+    let reflected_count = results
+        .iter()
+        .filter(|r| r.verdict == Verdict::Reflected)
+        .count();
     let server_error_count = results
         .iter()
         .filter(|r| r.verdict == Verdict::ServerError)
@@ -378,7 +379,10 @@ pub async fn run(args: Args) -> Result<()> {
         };
         let tf = ToolFinding::new(
             AUDIT_TOOL,
-            format!("Prototype pollution: {} ({})", r.probe_type, r.payload_label),
+            format!(
+                "Prototype pollution: {} ({})",
+                r.probe_type, r.payload_label
+            ),
             severity,
         )
         .url(r.url.clone())
@@ -387,7 +391,9 @@ pub async fn run(args: Args) -> Result<()> {
             "verdict={:?} probe={} payload={}",
             r.verdict, r.probe_type, r.payload_label
         ))
-        .recommendation("Sanitize or reject __proto__/constructor keys in user-supplied JSON and URL params");
+        .recommendation(
+            "Sanitize or reject __proto__/constructor keys in user-supplied JSON and URL params",
+        );
         let _ = write_finding(&eng, &tf);
     }
 

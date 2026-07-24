@@ -141,7 +141,13 @@ fn scan_plist(bytes: &[u8]) -> Vec<IpaFinding> {
     findings
 }
 
-fn scan_macho(bytes: &[u8], location: &str, aws_re: &Regex, gcp_re: &Regex, http_re: &Regex) -> Vec<IpaFinding> {
+fn scan_macho(
+    bytes: &[u8],
+    location: &str,
+    aws_re: &Regex,
+    gcp_re: &Regex,
+    http_re: &Regex,
+) -> Vec<IpaFinding> {
     let text = String::from_utf8_lossy(bytes);
     let mut findings = Vec::new();
     for m in aws_re.find_iter(&text) {
@@ -326,7 +332,11 @@ mod tests {
         let http_re = Regex::new(HTTP_URL_PATTERN).unwrap();
         let content = b"key=AIzaSyD-9tSrke72I6e0a8lLkjBn3m6EXAMPLEabcdef trailing";
         let findings = scan_macho(content, "Payload/App.app/App", &aws_re, &gcp_re, &http_re);
-        assert!(findings.iter().any(|f| f.category == "hardcoded_google_key"));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "hardcoded_google_key")
+        );
     }
 
     #[test]

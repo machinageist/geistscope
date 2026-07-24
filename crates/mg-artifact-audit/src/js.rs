@@ -36,9 +36,7 @@ const SECRET_MASK_LEN: usize = 8;
 
 fn re_api_endpoint() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"['"/](?:api|v\d+|graphql|rest)/[a-zA-Z0-9/_\-]+"#).unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r#"['"/](?:api|v\d+|graphql|rest)/[a-zA-Z0-9/_\-]+"#).unwrap())
 }
 
 fn re_aws_key() -> &'static Regex {
@@ -173,7 +171,10 @@ fn extract_findings(source_url: &str, js: &str) -> Vec<JsFinding> {
         findings.push(JsFinding {
             source_url: source_url.to_string(),
             finding_type: "api_endpoint".to_string(),
-            value: m.as_str().trim_matches(|c| c == '\'' || c == '"').to_string(),
+            value: m
+                .as_str()
+                .trim_matches(|c| c == '\'' || c == '"')
+                .to_string(),
         });
     }
     for m in re_aws_key().find_iter(js) {
@@ -312,11 +313,21 @@ pub async fn run(args: Args) -> Result<()> {
     println!("[*] Results written to {}", out_path.display());
 
     const HIGH_TYPES: &[&str] = &["aws_key", "api_key", "jwt_token", "password"];
-    for f in results.findings.iter().filter(|f| HIGH_TYPES.contains(&f.finding_type.as_str())) {
-        let tf = ToolFinding::new(AUDIT_TOOL, format!("JS Secret: {}", f.finding_type), FindingSeverity::High)
-            .url(f.source_url.clone())
-            .evidence(format!("Type: {} — value: {}", f.finding_type, f.value))
-            .recommendation("Remove secrets from client-side JavaScript; use server-side secret management");
+    for f in results
+        .findings
+        .iter()
+        .filter(|f| HIGH_TYPES.contains(&f.finding_type.as_str()))
+    {
+        let tf = ToolFinding::new(
+            AUDIT_TOOL,
+            format!("JS Secret: {}", f.finding_type),
+            FindingSeverity::High,
+        )
+        .url(f.source_url.clone())
+        .evidence(format!("Type: {} — value: {}", f.finding_type, f.value))
+        .recommendation(
+            "Remove secrets from client-side JavaScript; use server-side secret management",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -338,7 +349,10 @@ mod tests {
     fn extract_aws_key_and_masks_it() {
         let js = r#"var key = "AKIAIOSFODNN7EXAMPLE";"#;
         let findings = extract_findings("https://example.com/app.js", js);
-        let aws: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "aws_key").collect();
+        let aws: Vec<&JsFinding> = findings
+            .iter()
+            .filter(|f| f.finding_type == "aws_key")
+            .collect();
         assert!(!aws.is_empty());
         assert!(aws[0].value.ends_with("..."));
         assert_eq!(aws[0].value.len(), SECRET_MASK_LEN + 3);
@@ -348,7 +362,10 @@ mod tests {
     fn extract_api_endpoint_from_fetch_call() {
         let js = r#"fetch("/api/v1/users")"#;
         let findings = extract_findings("https://example.com/app.js", js);
-        let ep: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "api_endpoint").collect();
+        let ep: Vec<&JsFinding> = findings
+            .iter()
+            .filter(|f| f.finding_type == "api_endpoint")
+            .collect();
         assert!(!ep.is_empty());
         assert!(ep[0].value.contains("/api/"));
     }
@@ -357,7 +374,10 @@ mod tests {
     fn extract_source_map_reference() {
         let js = "//# sourceMappingURL=app.js.map";
         let findings = extract_findings("https://example.com/app.js", js);
-        let maps: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "source_map").collect();
+        let maps: Vec<&JsFinding> = findings
+            .iter()
+            .filter(|f| f.finding_type == "source_map")
+            .collect();
         assert!(!maps.is_empty());
         assert_eq!(maps[0].value, "app.js.map");
     }
@@ -366,7 +386,10 @@ mod tests {
     fn extract_internal_ip() {
         let js = r#"var endpoint = "http://10.0.0.5/api";"#;
         let findings = extract_findings("https://example.com/app.js", js);
-        let ips: Vec<&JsFinding> = findings.iter().filter(|f| f.finding_type == "internal_ip").collect();
+        let ips: Vec<&JsFinding> = findings
+            .iter()
+            .filter(|f| f.finding_type == "internal_ip")
+            .collect();
         assert!(!ips.is_empty());
         assert_eq!(ips[0].value, "10.0.0.5");
     }
@@ -400,7 +423,11 @@ mod tests {
                 "js_files": ["https://example.com/vendor.js"]
             }
         ]);
-        fs::write(host_dir.join("pages.json"), serde_json::to_string(&entries).unwrap()).unwrap();
+        fs::write(
+            host_dir.join("pages.json"),
+            serde_json::to_string(&entries).unwrap(),
+        )
+        .unwrap();
         let urls = collect_js_urls(tmp.path());
         assert!(urls.contains(&"https://example.com/app.js".to_string()));
         assert!(urls.contains(&"https://example.com/vendor.js".to_string()));

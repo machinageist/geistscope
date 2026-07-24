@@ -50,8 +50,7 @@ const PROBE_DNS: &[u8] = &[
     0x00, 0x00, // Authority RRs: 0
     0x00, 0x00, // Additional RRs: 0
     // QNAME: version.bind (7 bytes "version", 4 bytes "bind", 0 terminator)
-    0x07, b'v', b'e', b'r', b's', b'i', b'o', b'n',
-    0x04, b'b', b'i', b'n', b'd',
+    0x07, b'v', b'e', b'r', b's', b'i', b'o', b'n', 0x04, b'b', b'i', b'n', b'd',
     0x00, // end of name
     0x00, 0x10, // QTYPE: TXT
     0x00, 0x03, // QCLASS: CHAOS
@@ -95,10 +94,8 @@ const PROBE_MDNS: &[u8] = &[
     0x00, 0x00, // Authority RRs: 0
     0x00, 0x00, // Additional RRs: 0
     // _services._dns-sd._udp.local
-    0x09, b'_', b's', b'e', b'r', b'v', b'i', b'c', b'e', b's',
-    0x07, b'_', b'd', b'n', b's', b'-', b's', b'd',
-    0x04, b'_', b'u', b'd', b'p',
-    0x05, b'l', b'o', b'c', b'a', b'l',
+    0x09, b'_', b's', b'e', b'r', b'v', b'i', b'c', b'e', b's', 0x07, b'_', b'd', b'n', b's', b'-',
+    b's', b'd', 0x04, b'_', b'u', b'd', b'p', 0x05, b'l', b'o', b'c', b'a', b'l',
     0x00, // end of name
     0x00, 0x0c, // QTYPE: PTR
     0x00, 0x01, // QCLASS: IN
@@ -340,7 +337,12 @@ async fn main() -> Result<()> {
             && let Some(Ok(r)) = set.join_next().await
             && r.open
         {
-            eprintln!("  open: {}:{} ({})", r.host, r.port, r.service.as_deref().unwrap_or("?"));
+            eprintln!(
+                "  open: {}:{} ({})",
+                r.host,
+                r.port,
+                r.service.as_deref().unwrap_or("?")
+            );
             open_results.push(r);
         }
         set.spawn(async move { probe_udp(&host, port, timeout_secs).await });
@@ -349,7 +351,12 @@ async fn main() -> Result<()> {
     // drain remaining
     while let Some(Ok(r)) = set.join_next().await {
         if r.open {
-            eprintln!("  open: {}:{} ({})", r.host, r.port, r.service.as_deref().unwrap_or("?"));
+            eprintln!(
+                "  open: {}:{} ({})",
+                r.host,
+                r.port,
+                r.service.as_deref().unwrap_or("?")
+            );
             open_results.push(r);
         }
     }

@@ -326,8 +326,7 @@ fn check_hostname_match(
             && let Some(stripped) = hostname_lower.strip_suffix(wildcard_suffix)
         {
             // wildcard covers exactly one label: "api." is valid, "api.v2." is not
-            return stripped.ends_with('.')
-                && !stripped[..stripped.len() - 1].contains('.');
+            return stripped.ends_with('.') && !stripped[..stripped.len() - 1].contains('.');
         }
         false
     });
@@ -491,10 +490,7 @@ fn print_summary_table(results: &[HostResult]) {
         };
 
         if let Some(ref err) = r.error {
-            println!(
-                "{:<35} {:<10} {:<15} ERROR: {}",
-                host_col, r.port, "-", err
-            );
+            println!("{:<35} {:<10} {:<15} ERROR: {}", host_col, r.port, "-", err);
             continue;
         }
 
@@ -635,7 +631,9 @@ async fn main() -> Result<()> {
             let tf = ToolFinding::new("mg-tls-scan", &f.check, sev)
                 .url(format!("https://{}:{}", r.hostname, r.port))
                 .evidence(f.detail.clone())
-                .recommendation("Upgrade TLS configuration; refer to Mozilla SSL Configuration Generator");
+                .recommendation(
+                    "Upgrade TLS configuration; refer to Mozilla SSL Configuration Generator",
+                );
             let _ = write_finding(&eng, &tf);
         }
     }

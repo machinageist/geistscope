@@ -32,13 +32,8 @@ const OUTPUT_SUBDIR: &str = "graphql";
 const AUDIT_TOOL: &str = "mg-graphql";
 
 // URL path suffixes that suggest a GraphQL endpoint
-const GRAPHQL_PATH_SUFFIXES: &[&str] = &[
-    "/graphql",
-    "/api/graphql",
-    "/v1/graphql",
-    "/query",
-    "/gql",
-];
+const GRAPHQL_PATH_SUFFIXES: &[&str] =
+    &["/graphql", "/api/graphql", "/v1/graphql", "/query", "/gql"];
 
 // Mutation name substrings that suggest a dangerous operation
 const DANGEROUS_MUTATION_KEYWORDS: &[&str] = &[
@@ -168,9 +163,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Build base URL for a recon host, preferring HTTPS
@@ -292,7 +285,9 @@ fn parse_schema(json: &serde_json::Value) -> GraphqlSchema {
 // Check whether a mutation name contains a dangerous keyword
 fn is_dangerous_mutation(name: &str) -> bool {
     let lower = name.to_lowercase();
-    DANGEROUS_MUTATION_KEYWORDS.iter().any(|kw| lower.contains(kw))
+    DANGEROUS_MUTATION_KEYWORDS
+        .iter()
+        .any(|kw| lower.contains(kw))
 }
 
 // Test one GraphQL endpoint: introspect, batch, depth
@@ -372,10 +367,7 @@ async fn test_endpoint(
         {
             // Batching is confirmed if we get an array of two data responses
             if let Some(arr) = json.as_array() {
-                let data_count = arr
-                    .iter()
-                    .filter(|v| v.get("data").is_some())
-                    .count();
+                let data_count = arr.iter().filter(|v| v.get("data").is_some()).count();
                 if data_count >= 2 {
                     result.batching_enabled = true;
                     result.findings.push(Finding {
@@ -450,9 +442,7 @@ async fn main() -> Result<()> {
     candidates.retain(|c| seen.insert(c.clone()));
 
     if candidates.is_empty() {
-        anyhow::bail!(
-            "no GraphQL candidates found — run mg-crawl first or provide --endpoint"
-        );
+        anyhow::bail!("no GraphQL candidates found — run mg-crawl first or provide --endpoint");
     }
 
     eprintln!(
@@ -489,7 +479,13 @@ async fn main() -> Result<()> {
             all_results.push(r);
         }
         let c = client.clone();
-        join_set.spawn(test_endpoint(c, endpoint, run_introspect, run_batch, run_depth));
+        join_set.spawn(test_endpoint(
+            c,
+            endpoint,
+            run_introspect,
+            run_batch,
+            run_depth,
+        ));
     }
 
     // Drain remaining tasks
@@ -565,17 +561,27 @@ async fn main() -> Result<()> {
     // Write findings for introspection enabled (MEDIUM) and no depth limit (MEDIUM)
     for r in &output.results {
         if r.introspection_succeeded {
-            let tf = ToolFinding::new("mg-graphql", "GraphQL Introspection Enabled", FindingSeverity::Medium)
-                .url(r.endpoint.clone())
-                .evidence(format!("endpoint={}", r.endpoint))
-                .recommendation("Disable introspection in production; use field-level authorization instead");
+            let tf = ToolFinding::new(
+                "mg-graphql",
+                "GraphQL Introspection Enabled",
+                FindingSeverity::Medium,
+            )
+            .url(r.endpoint.clone())
+            .evidence(format!("endpoint={}", r.endpoint))
+            .recommendation(
+                "Disable introspection in production; use field-level authorization instead",
+            );
             let _ = write_finding(&eng, &tf);
         }
         if r.no_depth_limit {
-            let tf = ToolFinding::new("mg-graphql", "GraphQL Missing Query Depth Limit", FindingSeverity::Medium)
-                .url(r.endpoint.clone())
-                .evidence("10-level nested query returned data without error")
-                .recommendation("Implement query depth limiting and query complexity analysis");
+            let tf = ToolFinding::new(
+                "mg-graphql",
+                "GraphQL Missing Query Depth Limit",
+                FindingSeverity::Medium,
+            )
+            .url(r.endpoint.clone())
+            .evidence("10-level nested query returned data without error")
+            .recommendation("Implement query depth limiting and query complexity analysis");
             let _ = write_finding(&eng, &tf);
         }
     }

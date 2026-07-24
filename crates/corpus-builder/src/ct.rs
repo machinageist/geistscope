@@ -37,10 +37,7 @@ pub async fn mine_ct_logs(domains: &[String], corpus: &mut Corpus, rate_limit_ms
     }
 }
 
-async fn fetch_ct(
-    domain: &str,
-    client: &Client,
-) -> Result<Vec<String>, http_client::HttpError> {
+async fn fetch_ct(domain: &str, client: &Client) -> Result<Vec<String>, http_client::HttpError> {
     let raw_q = format!("%.{domain}");
     let q = urlencoding::encode(&raw_q);
     let url = format!("https://crt.sh/?q={q}&output=json");

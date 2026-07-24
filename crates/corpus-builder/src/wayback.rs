@@ -32,10 +32,7 @@ pub async fn mine_wayback(domains: &[String], corpus: &mut Corpus, rate_limit_ms
     }
 }
 
-async fn fetch_paths(
-    domain: &str,
-    client: &Client,
-) -> Result<Vec<String>, http_client::HttpError> {
+async fn fetch_paths(domain: &str, client: &Client) -> Result<Vec<String>, http_client::HttpError> {
     // CDX API: returns JSON array-of-arrays; first row is header ["original"]
     let raw_url = format!("*.{domain}/*");
     let url_param = urlencoding::encode(&raw_url);

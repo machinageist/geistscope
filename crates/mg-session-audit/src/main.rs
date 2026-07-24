@@ -139,9 +139,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons -> underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Build a new reqwest client with a fresh cookie store
@@ -189,8 +187,7 @@ fn has_httponly(raw: &str) -> bool {
 
 // Check if a raw Set-Cookie string has the Secure flag
 fn has_secure(raw: &str) -> bool {
-    raw.to_lowercase().contains("; secure")
-        || raw.to_lowercase().ends_with("secure")
+    raw.to_lowercase().contains("; secure") || raw.to_lowercase().ends_with("secure")
 }
 
 // Check if a raw Set-Cookie string has a SameSite attribute
@@ -201,7 +198,9 @@ fn has_samesite(raw: &str) -> bool {
 // Detect if a session cookie name is a known session identifier
 fn is_session_cookie(name: &str) -> bool {
     let lower = name.to_lowercase();
-    SESSION_COOKIE_NAMES.iter().any(|n| lower == *n || lower.contains(n))
+    SESSION_COOKIE_NAMES
+        .iter()
+        .any(|n| lower == *n || lower.contains(n))
 }
 
 // Send form POST credentials and return the response
@@ -328,7 +327,10 @@ async fn check_cookie_flags(
         Err(_) => return findings,
     };
 
-    let resp = match post_login(&client, login_url, field_user, field_pass, username, password).await
+    let resp = match post_login(
+        &client, login_url, field_user, field_pass, username, password,
+    )
+    .await
     {
         Ok(r) => r,
         Err(_) => return findings,
@@ -346,7 +348,9 @@ async fn check_cookie_flags(
             findings.push(AuditFinding {
                 check: "cookie_httponly".into(),
                 severity: Severity::Medium,
-                detail: format!("cookie '{name}' is missing the HttpOnly flag — accessible via JavaScript"),
+                detail: format!(
+                    "cookie '{name}' is missing the HttpOnly flag — accessible via JavaScript"
+                ),
             });
         }
 
@@ -388,8 +392,10 @@ async fn collect_session_tokens(
             Ok(c) => c,
             Err(_) => continue,
         };
-        let resp = match post_login(&client, login_url, field_user, field_pass, username, password)
-            .await
+        let resp = match post_login(
+            &client, login_url, field_user, field_pass, username, password,
+        )
+        .await
         {
             Ok(r) => r,
             Err(_) => continue,
@@ -483,11 +489,14 @@ async fn check_invalidation(
         Err(_) => return findings,
     };
 
-    let login_resp =
-        match post_login(&client, login_url, field_user, field_pass, username, password).await {
-            Ok(r) => r,
-            Err(_) => return findings,
-        };
+    let login_resp = match post_login(
+        &client, login_url, field_user, field_pass, username, password,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => return findings,
+    };
 
     let set_cookies = parse_set_cookies(&login_resp);
     let mut old_cookie_header = String::new();
@@ -588,7 +597,10 @@ async fn main() -> Result<()> {
 
     // Entropy check requires credentials to be set
     if !args.username.is_empty() && !args.password.is_empty() {
-        eprintln!("  collecting {} tokens for entropy analysis...", ENTROPY_SAMPLE_COUNT);
+        eprintln!(
+            "  collecting {} tokens for entropy analysis...",
+            ENTROPY_SAMPLE_COUNT
+        );
         let tokens = collect_session_tokens(
             &args.login_url,
             &args.field_user,
@@ -743,18 +755,22 @@ mod tests {
     fn check_token_entropy_flags_short_tokens() {
         let tokens = vec!["abc".to_string(), "def".to_string()];
         let findings = check_token_entropy(&tokens);
-        assert!(findings
-            .iter()
-            .any(|f| f.check == "token_entropy_length" && f.severity == Severity::High));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.check == "token_entropy_length" && f.severity == Severity::High)
+        );
     }
 
     #[test]
     fn check_token_entropy_flags_sequential_numeric_tokens() {
         let tokens: Vec<String> = (1000u64..1010).map(|n| n.to_string()).collect();
         let findings = check_token_entropy(&tokens);
-        assert!(findings
-            .iter()
-            .any(|f| f.check == "token_entropy_sequential"));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.check == "token_entropy_sequential")
+        );
     }
 
     #[test]
@@ -765,9 +781,7 @@ mod tests {
         ];
         // Tokens are 32 chars (OK length) and non-numeric (no sequential check applies)
         let findings = check_token_entropy(&tokens);
-        assert!(!findings
-            .iter()
-            .any(|f| f.severity == Severity::High));
+        assert!(!findings.iter().any(|f| f.severity == Severity::High));
     }
 
     #[test]

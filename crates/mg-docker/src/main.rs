@@ -37,8 +37,7 @@ const DOCKER_NETWORKS_PATH: &str = "/networks";
 const PORTAINER_STATUS_PATH: &str = "/api/status";
 
 // Privileged mount payload — documented only, never sent
-const PRIVILEGED_MOUNT_PAYLOAD: &str =
-    r#"{"Image":"alpine","HostConfig":{"Binds":["/:/host"]}}"#;
+const PRIVILEGED_MOUNT_PAYLOAD: &str = r#"{"Image":"alpine","HostConfig":{"Binds":["/:/host"]}}"#;
 
 const OUTPUT_SUBDIR: &str = "docker";
 const OUTPUT_FILE_PREFIX: &str = "results-";
@@ -227,9 +226,7 @@ async fn probe_docker_port(
         port,
         component: "docker-api".to_string(),
         severity: Severity::Critical,
-        detail: format!(
-            "Unauthenticated Docker API on port {port} — full daemon control possible"
-        ),
+        detail: format!("Unauthenticated Docker API on port {port} — full daemon control possible"),
         manual_verification_payload: None,
     });
 
@@ -270,7 +267,8 @@ async fn probe_docker_port(
         port,
         component: "docker-api".to_string(),
         severity: Severity::High,
-        detail: "Privileged container with host root mount possible — manual verification required".to_string(),
+        detail: "Privileged container with host root mount possible — manual verification required"
+            .to_string(),
         manual_verification_payload: Some(PRIVILEGED_MOUNT_PAYLOAD.to_string()),
     });
 
@@ -288,11 +286,7 @@ async fn probe_docker_port(
 }
 
 // Probe Portainer on a single port
-async fn probe_portainer(
-    client: &reqwest::Client,
-    host: &str,
-    port: u16,
-) -> Vec<DockerFinding> {
+async fn probe_portainer(client: &reqwest::Client, host: &str, port: u16) -> Vec<DockerFinding> {
     let mut findings = Vec::new();
     let scheme = if port == 9443 { "https" } else { "http" };
     let url = format!("{scheme}://{host}:{port}{PORTAINER_STATUS_PATH}");
@@ -370,8 +364,7 @@ async fn main() -> Result<()> {
 
             // Docker API ports
             for &port in DOCKER_API_PORTS {
-                let (mut f, exposure) =
-                    probe_docker_port(&client_clone, &host_clone, port).await;
+                let (mut f, exposure) = probe_docker_port(&client_clone, &host_clone, port).await;
                 findings.append(&mut f);
                 if let Some(e) = exposure {
                     exposures.push(e);
@@ -396,8 +389,13 @@ async fn main() -> Result<()> {
 
     // For each confirmed Docker API exposure, fetch and save container/image lists
     for exposure in &all_exposures {
-        let (s_ctr, b_ctr) =
-            docker_get(&client, &exposure.host, exposure.port, DOCKER_CONTAINERS_PATH).await;
+        let (s_ctr, b_ctr) = docker_get(
+            &client,
+            &exposure.host,
+            exposure.port,
+            DOCKER_CONTAINERS_PATH,
+        )
+        .await;
         if s_ctr == 200 {
             let containers: Vec<ContainerSummary> =
                 serde_json::from_str(&b_ctr).unwrap_or_default();
@@ -432,9 +430,10 @@ async fn main() -> Result<()> {
     );
 
     // Print critical and high findings to stdout
-    for f in all_findings.iter().filter(|f| {
-        matches!(f.severity, Severity::Critical | Severity::High)
-    }) {
+    for f in all_findings
+        .iter()
+        .filter(|f| matches!(f.severity, Severity::Critical | Severity::High))
+    {
         println!("[{:?}] {}:{} — {}", f.severity, f.host, f.port, f.detail);
         if let Some(ref payload) = f.manual_verification_payload {
             println!("  Manual payload (DO NOT auto-send): {payload}");
@@ -457,15 +456,15 @@ async fn main() -> Result<()> {
         high_count,
     };
     let out_path = out_dir.join(format!("{OUTPUT_FILE_PREFIX}{ts_file}.json"));
-    fs::write(&out_path, serde_json::to_string_pretty(&results)?)
-        .context("write results JSON")?;
+    fs::write(&out_path, serde_json::to_string_pretty(&results)?).context("write results JSON")?;
     println!("[*] Results written to {}", out_path.display());
 
     // Write per-host container lists
     for (host, port, containers) in &all_containers {
         let safe_host = host.replace(['.', ':'], "_");
-        let ctr_path =
-            out_dir.join(format!("{CONTAINERS_FILE_PREFIX}{safe_host}_{port}_{ts_file}.json"));
+        let ctr_path = out_dir.join(format!(
+            "{CONTAINERS_FILE_PREFIX}{safe_host}_{port}_{ts_file}.json"
+        ));
         let _ = fs::write(&ctr_path, serde_json::to_string_pretty(containers)?);
         println!("[*] Containers written to {}", ctr_path.display());
     }
@@ -473,8 +472,9 @@ async fn main() -> Result<()> {
     // Write per-host image lists
     for (host, port, images) in &all_images {
         let safe_host = host.replace(['.', ':'], "_");
-        let img_path =
-            out_dir.join(format!("{IMAGES_FILE_PREFIX}{safe_host}_{port}_{ts_file}.json"));
+        let img_path = out_dir.join(format!(
+            "{IMAGES_FILE_PREFIX}{safe_host}_{port}_{ts_file}.json"
+        ));
         let _ = fs::write(&img_path, serde_json::to_string_pretty(images)?);
         println!("[*] Images written to {}", img_path.display());
     }

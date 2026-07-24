@@ -6,6 +6,6 @@ pub mod brute;
 pub mod ct_logs;
 pub mod output;
 
-pub use brute::{brute_force, BruteResult};
+pub use brute::{BruteResult, brute_force};
 pub use ct_logs::query_ct_logs;
-pub use output::{make_output, print_json, print_table, ScanOutput, SubdomainEntry};
+pub use output::{ScanOutput, SubdomainEntry, make_output, print_json, print_table};

@@ -182,11 +182,7 @@ async fn cmd(
 
 // Extract the first 3-digit code from an SMTP response
 fn smtp_code(resp: &str) -> &str {
-    if resp.len() >= 3 {
-        &resp[..3]
-    } else {
-        ""
-    }
+    if resp.len() >= 3 { &resp[..3] } else { "" }
 }
 
 // ── Core probe ───────────────────────────────────────────────────────────────
@@ -243,7 +239,10 @@ async fn probe_smtp(host: String, port: u16, timeout_secs: u64, users: Vec<Strin
     let ehlo_capabilities: Vec<String> = ehlo_resp
         .lines()
         .skip(1)
-        .map(|l| l.trim_start_matches(|c: char| c.is_ascii_digit() || c == '-' || c == ' ').to_string())
+        .map(|l| {
+            l.trim_start_matches(|c: char| c.is_ascii_digit() || c == '-' || c == ' ')
+                .to_string()
+        })
         .filter(|l| !l.is_empty())
         .collect();
 
@@ -273,7 +272,9 @@ async fn probe_smtp(host: String, port: u16, timeout_secs: u64, users: Vec<Strin
         // 252 and non-550 both suggest the server doesn't refuse VRFY
         if code != VRFY_MISSING_CODE && code != "500" && code != "502" && !code.is_empty() {
             // only record VRFY-enabled finding once
-            if vrfy_users_found.len() == 1 || (code == VRFY_EXISTS_CODE && vrfy_users_found.len() == 1) {
+            if vrfy_users_found.len() == 1
+                || (code == VRFY_EXISTS_CODE && vrfy_users_found.len() == 1)
+            {
                 findings.push(SmtpFinding {
                     severity: Severity::Medium,
                     category: "vrfy".to_string(),
@@ -427,7 +428,11 @@ async fn main() -> Result<()> {
         {
             eprintln!(
                 "  {}:{} — {} findings, relay={}, inject={}",
-                r.host, r.port, r.findings.len(), r.open_relay, r.header_injection
+                r.host,
+                r.port,
+                r.findings.len(),
+                r.open_relay,
+                r.header_injection
             );
             results.push(r);
         }
@@ -438,13 +443,21 @@ async fn main() -> Result<()> {
     while let Some(Ok(r)) = set.join_next().await {
         eprintln!(
             "  {}:{} — {} findings, relay={}, inject={}",
-            r.host, r.port, r.findings.len(), r.open_relay, r.header_injection
+            r.host,
+            r.port,
+            r.findings.len(),
+            r.open_relay,
+            r.header_injection
         );
         results.push(r);
     }
 
     let total_findings: usize = results.iter().map(|r| r.findings.len()).sum();
-    eprintln!("mg-smtp: {} total findings across {} results", total_findings, results.len());
+    eprintln!(
+        "mg-smtp: {} total findings across {} results",
+        total_findings,
+        results.len()
+    );
 
     // write output
     let out_dir = eng.root.join(OUTPUT_SUBDIR);

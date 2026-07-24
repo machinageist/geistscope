@@ -70,7 +70,10 @@ fn error_catalog() -> &'static ErrorPatterns {
         patterns: vec![
             (
                 "MySQL",
-                Regex::new(r"You have an error in your SQL syntax|mysql_fetch_array|MySQLSyntaxError").unwrap(),
+                Regex::new(
+                    r"You have an error in your SQL syntax|mysql_fetch_array|MySQLSyntaxError",
+                )
+                .unwrap(),
             ),
             (
                 "MSSQL",
@@ -80,10 +83,7 @@ fn error_catalog() -> &'static ErrorPatterns {
                 "PostgreSQL",
                 Regex::new(r"PostgreSQL.*ERROR|pg_query\(\)|PSQLException").unwrap(),
             ),
-            (
-                "Oracle",
-                Regex::new(r"ORA-[0-9]+|Oracle.*Driver").unwrap(),
-            ),
+            ("Oracle", Regex::new(r"ORA-[0-9]+|Oracle.*Driver").unwrap()),
             (
                 "SQLite",
                 Regex::new(r"SQLite.*error|sqlite3\.OperationalError").unwrap(),
@@ -206,9 +206,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize a timestamp string for use in a filename (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Collect injectable points from crawl host directories
@@ -283,7 +281,12 @@ async fn send_injected(
             .send()
             .await
     } else {
-        let url = format!("{}?{}={}", point.base_url, point.param, urlencoding_simple(payload));
+        let url = format!(
+            "{}?{}={}",
+            point.base_url,
+            point.param,
+            urlencoding_simple(payload)
+        );
         client.get(&url).send().await
     };
     let elapsed = start.elapsed().as_millis() as u64;
@@ -493,7 +496,11 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Write findings for confirmed error-based SQLi
-    for r in output.error_results.iter().filter(|r| r.verdict == ErrorVerdict::Confirmed) {
+    for r in output
+        .error_results
+        .iter()
+        .filter(|r| r.verdict == ErrorVerdict::Confirmed)
+    {
         let tf = ToolFinding::new("mg-sqli", "SQL Injection (Error-Based)", FindingSeverity::High)
             .url(r.url.clone())
             .parameter(r.param.clone())
@@ -502,7 +509,11 @@ pub async fn run(args: Args) -> Result<()> {
         let _ = write_finding(&eng, &tf);
     }
     // Write findings for confirmed time-based SQLi
-    for r in output.time_results.iter().filter(|r| r.verdict == TimeVerdict::Confirmed) {
+    for r in output
+        .time_results
+        .iter()
+        .filter(|r| r.verdict == TimeVerdict::Confirmed)
+    {
         let tf = ToolFinding::new("mg-sqli", "SQL Injection (Time-Based Blind)", FindingSeverity::High)
             .url(r.url.clone())
             .parameter(r.param.clone())
@@ -578,6 +589,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-17T12:00:00Z"), "2026-05-17T12_00_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-17T12:00:00Z"),
+            "2026-05-17T12_00_00Z"
+        );
     }
 }

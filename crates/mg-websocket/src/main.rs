@@ -24,8 +24,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async_tls_with_config;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use engagement::{Engagement, FindingSeverity, ToolFinding, write_finding};
 
@@ -132,9 +132,7 @@ fn now_rfc3339() -> String {
 
 // Sanitize timestamp for filename use (colons → underscores)
 fn ts_for_filename(ts: &str) -> String {
-    ts.chars()
-        .map(|c| if c == ':' { '_' } else { c })
-        .collect()
+    ts.chars().map(|c| if c == ':' { '_' } else { c }).collect()
 }
 
 // Collect WebSocket endpoint URLs from the crawl corpus directory
@@ -207,11 +205,13 @@ async fn test_endpoint(endpoint: String, timeout_secs: u64, fuzz: bool) -> WsRes
             Ok(r) => r,
             Err(_) => return result,
         };
-        req.headers_mut().insert(
-            "Origin",
-            ATTACKER_ORIGIN.parse().unwrap(),
-        );
-        timeout(connect_timeout, connect_async_tls_with_config(req, None, false, None)).await
+        req.headers_mut()
+            .insert("Origin", ATTACKER_ORIGIN.parse().unwrap());
+        timeout(
+            connect_timeout,
+            connect_async_tls_with_config(req, None, false, None),
+        )
+        .await
     };
 
     match cswsh_result {
@@ -278,7 +278,11 @@ async fn test_endpoint(endpoint: String, timeout_secs: u64, fuzz: bool) -> WsRes
                 Ok(r) => r,
                 Err(_) => return result,
             };
-            timeout(connect_timeout, connect_async_tls_with_config(req, None, false, None)).await
+            timeout(
+                connect_timeout,
+                connect_async_tls_with_config(req, None, false, None),
+            )
+            .await
         };
 
         if let Ok(Ok((mut ws_stream, _))) = unauth_result {
@@ -349,9 +353,7 @@ async fn main() -> Result<()> {
     endpoints.retain(|e| seen.insert(e.clone()));
 
     if endpoints.is_empty() {
-        anyhow::bail!(
-            "no WebSocket endpoints found — run mg-crawl first or provide --endpoint"
-        );
+        anyhow::bail!("no WebSocket endpoints found — run mg-crawl first or provide --endpoint");
     }
 
     eprintln!(
@@ -374,7 +376,9 @@ async fn main() -> Result<()> {
             )
             .url(r.endpoint.clone())
             .evidence("Handshake accepted with attacker-controlled Origin header")
-            .recommendation("Validate the Origin header on WebSocket upgrade and reject untrusted origins");
+            .recommendation(
+                "Validate the Origin header on WebSocket upgrade and reject untrusted origins",
+            );
             let _ = write_finding(&eng, &tf);
         }
         if r.unauth_accessible {
@@ -440,7 +444,10 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T10:30:00Z"), "2026-05-18T10_30_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T10:30:00Z"),
+            "2026-05-18T10_30_00Z"
+        );
     }
 
     #[test]

@@ -140,12 +140,11 @@ fn is_private_ip(addr: IpAddr) -> bool {
 async fn resolve_ttl(domain: &str, timeout_secs: u64) -> u64 {
     let mut opts = ResolverOpts::default();
     opts.timeout = std::time::Duration::from_secs(timeout_secs);
-    let Ok(resolver) = Resolver::builder_with_config(
-        ResolverConfig::default(),
-        TokioRuntimeProvider::default(),
-    )
-    .with_options(opts)
-    .build() else {
+    let Ok(resolver) =
+        Resolver::builder_with_config(ResolverConfig::default(), TokioRuntimeProvider::default())
+            .with_options(opts)
+            .build()
+    else {
         return FALLBACK_TTL_SECS;
     };
 
@@ -295,7 +294,10 @@ async fn main() -> Result<()> {
     eprintln!("Attack chain summary:");
     eprintln!("  1. Host payload.html at http://{}", args.domain);
     eprintln!("  2. Victim visits — browser caches DNS for {ttl_seconds}s");
-    eprintln!("  3. After TTL, update DNS: {} -> {}", args.domain, args.target);
+    eprintln!(
+        "  3. After TTL, update DNS: {} -> {}",
+        args.domain, args.target
+    );
     eprintln!(
         "  4. Browser re-resolves and XHR to {}:{} hits internal service",
         args.domain, args.port
@@ -304,16 +306,20 @@ async fn main() -> Result<()> {
 
     // Emit MEDIUM finding when target is private and TTL is low enough to be exploitable
     if target_is_private && ttl_seconds <= LOW_TTL_THRESHOLD_SECS {
-        let tf = ToolFinding::new("mg-dns-rebind", "DNS Rebinding Attack Feasible", FindingSeverity::Medium)
-            .url(format!("http://{}:{}", args.domain, args.port))
-            .evidence(format!(
-                "target={} (private IP) domain={} port={} TTL={}s (<= {}s threshold)",
-                args.target, args.domain, args.port, ttl_seconds, LOW_TTL_THRESHOLD_SECS
-            ))
-            .recommendation(
-                "Increase DNS TTL above 60s; use CORS to restrict cross-origin XHR; \
-                 deploy DNS rebinding protection at the browser or server level"
-            );
+        let tf = ToolFinding::new(
+            "mg-dns-rebind",
+            "DNS Rebinding Attack Feasible",
+            FindingSeverity::Medium,
+        )
+        .url(format!("http://{}:{}", args.domain, args.port))
+        .evidence(format!(
+            "target={} (private IP) domain={} port={} TTL={}s (<= {}s threshold)",
+            args.target, args.domain, args.port, ttl_seconds, LOW_TTL_THRESHOLD_SECS
+        ))
+        .recommendation(
+            "Increase DNS TTL above 60s; use CORS to restrict cross-origin XHR; \
+                 deploy DNS rebinding protection at the browser or server level",
+        );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -380,6 +386,9 @@ mod tests {
 
     #[test]
     fn ts_for_filename_replaces_colons() {
-        assert_eq!(ts_for_filename("2026-05-18T10:30:00Z"), "2026-05-18T10_30_00Z");
+        assert_eq!(
+            ts_for_filename("2026-05-18T10:30:00Z"),
+            "2026-05-18T10_30_00Z"
+        );
     }
 }

@@ -126,7 +126,11 @@ fn new_finding_filenames(findings_dir: &Path, state: &NotifyState) -> Result<Vec
 
 // Format a plain-text notification message from a finding
 fn format_message(finding: &FindingFile, filename: &str, engagement_name: &str) -> String {
-    let severity = finding.severity.as_deref().unwrap_or("UNKNOWN").to_uppercase();
+    let severity = finding
+        .severity
+        .as_deref()
+        .unwrap_or("UNKNOWN")
+        .to_uppercase();
     let title = finding.title.as_deref().unwrap_or(filename);
     let url = finding.url.as_deref().unwrap_or("(no url)");
     format!("[{severity}] {title}\nURL: {url}\nEngagement: {engagement_name}")
@@ -346,8 +350,7 @@ mod tests {
     fn tmp() -> PathBuf {
         static C: AtomicU64 = AtomicU64::new(0);
         let n = C.fetch_add(1, Ordering::Relaxed);
-        let p =
-            std::env::temp_dir().join(format!("mg-notify-test-{}-{n}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("mg-notify-test-{}-{n}", std::process::id()));
         fs::create_dir_all(&p).unwrap();
         p
     }

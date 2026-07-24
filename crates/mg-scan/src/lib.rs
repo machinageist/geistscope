@@ -13,5 +13,5 @@ pub mod services;
 
 // Re-export the core types so callers can write `use mg_scan::ScanConfig`
 // without knowing which sub-module they live in
-pub use scanner::{scan_ports, PortResult, PortState, ScanConfig};
+pub use scanner::{PortResult, PortState, ScanConfig, scan_ports};
 pub use services::service_name;

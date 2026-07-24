@@ -35,13 +35,7 @@ const DEFAULT_FIELD_PASS: &str = "password";
 const RATE_LIMIT_PAUSE_SECS: u64 = 5;
 
 // Built-in username list (used when no --username and no --username-list)
-const BUILTIN_USERNAMES: &[&str] = &[
-    "admin",
-    "administrator",
-    "root",
-    "user",
-    "test",
-];
+const BUILTIN_USERNAMES: &[&str] = &["admin", "administrator", "root", "user", "test"];
 
 // Built-in password list (used when no --password-list)
 const BUILTIN_PASSWORDS: &[&str] = &[
@@ -68,21 +62,10 @@ const BUILTIN_PASSWORDS: &[&str] = &[
 ];
 
 // Response body keywords that indicate failure
-const FAILURE_KEYWORDS: &[&str] = &[
-    "invalid",
-    "incorrect",
-    "failed",
-    "wrong",
-    "error",
-];
+const FAILURE_KEYWORDS: &[&str] = &["invalid", "incorrect", "failed", "wrong", "error"];
 
 // Response body keywords that indicate success
-const SUCCESS_KEYWORDS: &[&str] = &[
-    "welcome",
-    "dashboard",
-    "logout",
-    "profile",
-];
+const SUCCESS_KEYWORDS: &[&str] = &["welcome", "dashboard", "logout", "profile"];
 
 // Body keywords that indicate rate limiting
 const RATE_LIMIT_KEYWORDS: &[&str] = &["too many"];
@@ -190,8 +173,7 @@ struct FoundCredential {
 
 // Load a newline-delimited word list from a file, skipping empty lines and comments
 fn load_word_list(path: &str) -> Result<Vec<String>> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("read word list {path}"))?;
+    let raw = fs::read_to_string(path).with_context(|| format!("read word list {path}"))?;
     Ok(raw
         .lines()
         .map(str::trim)
@@ -242,7 +224,13 @@ async fn attempt(
             let body = resp.text().await.unwrap_or_default();
             let outcome = classify_response(status, &body);
             let detail = body.chars().take(256).collect();
-            AttemptResult { username, password, status, outcome, detail }
+            AttemptResult {
+                username,
+                password,
+                status,
+                outcome,
+                detail,
+            }
         }
         Err(e) => AttemptResult {
             username,
@@ -351,7 +339,9 @@ async fn main() -> Result<()> {
         let tf = ToolFinding::new(AUDIT_TOOL, "Valid Credential Found", FindingSeverity::High)
             .url(args.target_url.clone())
             .evidence(format!("username={} password=<redacted>", fc.username))
-            .recommendation("Implement account lockout, rate limiting, and MFA on the login endpoint");
+            .recommendation(
+                "Implement account lockout, rate limiting, and MFA on the login endpoint",
+            );
         let _ = write_finding(&eng, &tf);
     }
 
@@ -391,7 +381,10 @@ async fn main() -> Result<()> {
 fn handle_result(r: &AttemptResult, found: &mut Vec<FoundCredential>, args: &Args) {
     match r.outcome {
         AttemptOutcome::Success => {
-            println!("[FOUND] {}:{} (status={})", r.username, r.password, r.status);
+            println!(
+                "[FOUND] {}:{} (status={})",
+                r.username, r.password, r.status
+            );
             found.push(FoundCredential {
                 username: r.username.clone(),
                 password: r.password.clone(),

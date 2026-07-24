@@ -35,8 +35,12 @@ const AUDIT_TOOL: &str = "mg-authz";
 
 // URL path segments that suggest ownership-scoped resources
 const OWNERSHIP_SEGMENTS: &[&str] = &[
-    "/users/", "/accounts/", "/orders/", "/items/",
-    "/files/", "/documents/",
+    "/users/",
+    "/accounts/",
+    "/orders/",
+    "/items/",
+    "/files/",
+    "/documents/",
 ];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -226,9 +230,12 @@ fn is_ownership_scoped(url_str: &str) -> bool {
     }
     // Check for numeric ID segments in the path
     if let Ok(parsed) = Url::parse(url_str) {
-        return parsed.path_segments().map(|mut segs| {
-            segs.any(|seg| seg.chars().all(|c| c.is_ascii_digit()) && !seg.is_empty())
-        }).unwrap_or(false);
+        return parsed
+            .path_segments()
+            .map(|mut segs| {
+                segs.any(|seg| seg.chars().all(|c| c.is_ascii_digit()) && !seg.is_empty())
+            })
+            .unwrap_or(false);
     }
     false
 }
@@ -248,8 +255,7 @@ async fn replay(
     req: &RequestRecord,
     session_headers: &HeaderMap,
 ) -> (u16, String) {
-    let method = reqwest::Method::from_bytes(req.method.as_bytes())
-        .unwrap_or(reqwest::Method::GET);
+    let method = reqwest::Method::from_bytes(req.method.as_bytes()).unwrap_or(reqwest::Method::GET);
     let mut builder = client.request(method, &req.url);
     // Apply request-level headers from the record
     for (k, v) in &req.headers {
@@ -383,7 +389,10 @@ async fn main() -> Result<()> {
         .collect();
 
     // Print table
-    println!("{:<6} {:<50} {:>8} {:>8} VERDICT", "METHOD", "URL", "SES-A", "SES-B");
+    println!(
+        "{:<6} {:<50} {:>8} {:>8} VERDICT",
+        "METHOD", "URL", "SES-A", "SES-B"
+    );
     println!("{}", "-".repeat(90));
     for r in &results {
         let url_display: String = r.url.chars().take(50).collect();
@@ -393,7 +402,10 @@ async fn main() -> Result<()> {
         );
     }
 
-    let idor_count = results.iter().filter(|r| r.verdict == Verdict::Idor).count();
+    let idor_count = results
+        .iter()
+        .filter(|r| r.verdict == Verdict::Idor)
+        .count();
     println!("\nIDOR findings: {idor_count}");
 
     // Write results to disk
@@ -434,10 +446,7 @@ async fn main() -> Result<()> {
     // Audit log
     let detail = format!(
         "requests={} idor={} session_a={} session_b={}",
-        output.total_requests,
-        idor_count,
-        args.session_a,
-        args.session_b
+        output.total_requests, idor_count, args.session_a, args.session_b
     );
     let _ = eng.audit(AUDIT_TOOL, &eng.meta.target, Some(&detail));
 
@@ -453,7 +462,9 @@ mod tests {
     #[test]
     fn is_ownership_scoped_detects_named_segments() {
         assert!(is_ownership_scoped("https://api.example.com/users/123"));
-        assert!(is_ownership_scoped("https://api.example.com/orders/456/detail"));
+        assert!(is_ownership_scoped(
+            "https://api.example.com/orders/456/detail"
+        ));
         assert!(is_ownership_scoped("https://api.example.com/files/abc.pdf"));
         assert!(!is_ownership_scoped("https://api.example.com/health"));
         assert!(!is_ownership_scoped("https://api.example.com/login"));
@@ -461,7 +472,9 @@ mod tests {
 
     #[test]
     fn is_ownership_scoped_detects_numeric_id_segments() {
-        assert!(is_ownership_scoped("https://api.example.com/api/123/profile"));
+        assert!(is_ownership_scoped(
+            "https://api.example.com/api/123/profile"
+        ));
         assert!(!is_ownership_scoped("https://api.example.com/api/profile"));
     }
 

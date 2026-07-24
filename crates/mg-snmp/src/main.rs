@@ -53,8 +53,21 @@ const OID_SYS_LOCATION: &[u8] = &[0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x06, 0x00
 
 // Built-in community strings to try
 const DEFAULT_COMMUNITIES: &[&str] = &[
-    "public", "private", "community", "manager", "admin", "snmp", "default", "cisco", "monitor",
-    "read", "write", "all", "secret", "password", "test",
+    "public",
+    "private",
+    "community",
+    "manager",
+    "admin",
+    "snmp",
+    "default",
+    "cisco",
+    "monitor",
+    "read",
+    "write",
+    "all",
+    "secret",
+    "password",
+    "test",
 ];
 
 // Community strings considered write/high-risk
@@ -229,9 +242,9 @@ fn is_valid_response(buf: &[u8]) -> bool {
         return false;
     }
     // Scan for GetResponse PDU tag 0xa2 in the buffer
-    buf.iter().enumerate().any(|(i, &b)| {
-        b == SNMP_GET_RESPONSE_TAG && i + 2 < buf.len()
-    })
+    buf.iter()
+        .enumerate()
+        .any(|(i, &b)| b == SNMP_GET_RESPONSE_TAG && i + 2 < buf.len())
 }
 
 // Extract an OCTET STRING value from an SNMP response for a known OID
@@ -346,8 +359,13 @@ async fn probe_host(
 
                 // walk additional OIDs
                 let sys_name = if let Some(r) = snmp_get(
-                    &sock, target, community, OID_SYS_NAME, version_byte,
-                    request_id, timeout_secs,
+                    &sock,
+                    target,
+                    community,
+                    OID_SYS_NAME,
+                    version_byte,
+                    request_id,
+                    timeout_secs,
                 )
                 .await
                 {
@@ -358,8 +376,13 @@ async fn probe_host(
                 };
 
                 let sys_contact = if let Some(r) = snmp_get(
-                    &sock, target, community, OID_SYS_CONTACT, version_byte,
-                    request_id, timeout_secs,
+                    &sock,
+                    target,
+                    community,
+                    OID_SYS_CONTACT,
+                    version_byte,
+                    request_id,
+                    timeout_secs,
                 )
                 .await
                 {
@@ -370,8 +393,13 @@ async fn probe_host(
                 };
 
                 let sys_location = if let Some(r) = snmp_get(
-                    &sock, target, community, OID_SYS_LOCATION, version_byte,
-                    request_id, timeout_secs,
+                    &sock,
+                    target,
+                    community,
+                    OID_SYS_LOCATION,
+                    version_byte,
+                    request_id,
+                    timeout_secs,
                 )
                 .await
                 {
@@ -469,7 +497,11 @@ async fn main() -> Result<()> {
                     "  {} — {} valid communities: {}",
                     r.host,
                     r.valid_communities.len(),
-                    r.valid_communities.iter().map(|h| h.community.as_str()).collect::<Vec<_>>().join(", ")
+                    r.valid_communities
+                        .iter()
+                        .map(|h| h.community.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             }
             results.push(r);
@@ -485,14 +517,22 @@ async fn main() -> Result<()> {
                 "  {} — {} valid communities: {}",
                 r.host,
                 r.valid_communities.len(),
-                r.valid_communities.iter().map(|h| h.community.as_str()).collect::<Vec<_>>().join(", ")
+                r.valid_communities
+                    .iter()
+                    .map(|h| h.community.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
         }
         results.push(r);
     }
 
     let total_hits: usize = results.iter().map(|r| r.valid_communities.len()).sum();
-    eprintln!("mg-snmp: {} community hits across {} hosts", total_hits, results.len());
+    eprintln!(
+        "mg-snmp: {} community hits across {} hosts",
+        total_hits,
+        results.len()
+    );
 
     // write output
     let out_dir = eng.root.join(OUTPUT_SUBDIR);
@@ -556,7 +596,8 @@ mod tests {
         let pdu = build_get_request(b"mycommunity", OID_SYS_DESCR, 0x00, 1);
         let community_bytes = b"mycommunity";
         assert!(
-            pdu.windows(community_bytes.len()).any(|w| w == community_bytes),
+            pdu.windows(community_bytes.len())
+                .any(|w| w == community_bytes),
             "PDU must contain community string bytes"
         );
     }

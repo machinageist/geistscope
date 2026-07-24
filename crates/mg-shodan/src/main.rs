@@ -150,13 +150,11 @@ struct ShodanResults {
 
 // Resolve a domain name to its first IPv4/IPv6 address
 async fn resolve_domain(domain: &str) -> Result<IpAddr> {
-    let resolver = Resolver::builder_with_config(
-        ResolverConfig::default(),
-        TokioRuntimeProvider::default(),
-    )
-    .with_options(ResolverOpts::default())
-    .build()
-    .context("build DNS resolver")?;
+    let resolver =
+        Resolver::builder_with_config(ResolverConfig::default(), TokioRuntimeProvider::default())
+            .with_options(ResolverOpts::default())
+            .build()
+            .context("build DNS resolver")?;
     let response = resolver
         .lookup_ip(domain)
         .await
@@ -217,9 +215,7 @@ async fn shodan_search(
     api_key: &str,
 ) -> Result<ShodanSearchResponse> {
     let query = format!("hostname:{domain}");
-    let url = format!(
-        "{SHODAN_API_BASE}/shodan/host/search?query={query}&key={api_key}"
-    );
+    let url = format!("{SHODAN_API_BASE}/shodan/host/search?query={query}&key={api_key}");
     let resp = client
         .get(&url)
         .send()
@@ -288,11 +284,7 @@ async fn main() -> Result<()> {
     let host_data = shodan_host_lookup(&client, &ip, &api_key).await?;
 
     let cves: Vec<String> = host_data.vulns.unwrap_or_default();
-    let services: Vec<ServiceRecord> = host_data
-        .data
-        .iter()
-        .map(service_record_from)
-        .collect();
+    let services: Vec<ServiceRecord> = host_data.data.iter().map(service_record_from).collect();
 
     // Hostname-based search (only if target is a domain)
     let search_matches = if !is_ip_addr(&target) {
@@ -341,10 +333,14 @@ async fn main() -> Result<()> {
 
     // Write findings for each CVE (HIGH) and each versioned service (MEDIUM)
     for cve in &cves {
-        let tf = ToolFinding::new(AUDIT_TOOL, format!("Shodan CVE: {cve}"), FindingSeverity::High)
-            .url(format!("shodan://{target}"))
-            .evidence(format!("CVE {cve} listed in Shodan host data for {ip}"))
-            .recommendation("Patch the vulnerable service or restrict access");
+        let tf = ToolFinding::new(
+            AUDIT_TOOL,
+            format!("Shodan CVE: {cve}"),
+            FindingSeverity::High,
+        )
+        .url(format!("shodan://{target}"))
+        .evidence(format!("CVE {cve} listed in Shodan host data for {ip}"))
+        .recommendation("Patch the vulnerable service or restrict access");
         let _ = write_finding(&eng, &tf);
     }
     // Versioned-service exposure is informational — every banner-disclosed product
@@ -354,12 +350,18 @@ async fn main() -> Result<()> {
         if !svc.version.is_empty() {
             let tf = ToolFinding::new(
                 AUDIT_TOOL,
-                format!("Exposed service with version: {} {}", svc.product, svc.version),
+                format!(
+                    "Exposed service with version: {} {}",
+                    svc.product, svc.version
+                ),
                 FindingSeverity::Info,
             )
             .url(format!("shodan://{target}"))
             .discriminator(format!("{}/{}", svc.port, svc.transport))
-            .evidence(format!("Port {}/{}: {} {}", svc.port, svc.transport, svc.product, svc.version))
+            .evidence(format!(
+                "Port {}/{}: {} {}",
+                svc.port, svc.transport, svc.product, svc.version
+            ))
             .recommendation("Restrict service exposure and update to a patched version");
             let _ = write_finding(&eng, &tf);
         }

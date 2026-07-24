@@ -256,10 +256,7 @@ fn tete_probe_bytes(host: &str) -> Vec<u8> {
 }
 
 // Read all available bytes from an async reader into a BytesMut until EOF or timeout
-async fn read_response(
-    reader: &mut (impl AsyncReadExt + Unpin),
-    timeout: Duration,
-) -> BytesMut {
+async fn read_response(reader: &mut (impl AsyncReadExt + Unpin), timeout: Duration) -> BytesMut {
     let mut buf = BytesMut::with_capacity(4096);
     let _ = tokio::time::timeout(timeout, async {
         loop {
@@ -348,22 +345,25 @@ async fn run_probe_inner(
             .await
             .context("baseline connect timeout")?
             .context("baseline connect")?;
-        let get = format!(
-            "GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
-        );
+        let get = format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
         if tls {
             let connector = TlsConnector::from(tls_config.clone());
-            let server_name = ServerName::try_from(host.to_string())
-                .context("invalid server name")?;
+            let server_name =
+                ServerName::try_from(host.to_string()).context("invalid server name")?;
             let mut stream = tokio::time::timeout(timeout, connector.connect(server_name, tcp))
                 .await
                 .context("baseline tls timeout")?
                 .context("baseline tls handshake")?;
-            stream.write_all(get.as_bytes()).await.context("baseline write")?;
+            stream
+                .write_all(get.as_bytes())
+                .await
+                .context("baseline write")?;
             read_response(&mut stream, timeout).await;
         } else {
             let mut tcp = tcp;
-            tcp.write_all(get.as_bytes()).await.context("baseline write")?;
+            tcp.write_all(get.as_bytes())
+                .await
+                .context("baseline write")?;
             read_response(&mut tcp, timeout).await;
         }
         t0.elapsed().as_millis() as u64
@@ -384,13 +384,15 @@ async fn run_probe_inner(
     let t1 = Instant::now();
     let raw_buf = if tls {
         let connector = TlsConnector::from(tls_config);
-        let server_name = ServerName::try_from(host.to_string())
-            .context("invalid server name")?;
+        let server_name = ServerName::try_from(host.to_string()).context("invalid server name")?;
         let mut stream = tokio::time::timeout(timeout, connector.connect(server_name, tcp2))
             .await
             .context("probe tls timeout")?
             .context("probe tls handshake")?;
-        stream.write_all(&probe_bytes).await.context("probe write")?;
+        stream
+            .write_all(&probe_bytes)
+            .await
+            .context("probe write")?;
         read_response(&mut stream, timeout).await
     } else {
         let mut tcp2 = tcp2;
@@ -403,20 +405,20 @@ async fn run_probe_inner(
     let first_status = parse_status(raw_slice);
 
     // Locate second response in the buffer (if server returned two)
-    let (second_status, second_body_preview) =
-        if let Some(offset) = find_second_response(raw_slice) {
-            let second_slice = &raw_slice[offset..];
-            let status = parse_status(second_slice);
-            let preview_end = second_slice.len().min(BODY_PREVIEW_LEN);
-            let preview = String::from_utf8_lossy(&second_slice[..preview_end]).into_owned();
-            (status, preview)
-        } else {
-            (None, String::new())
-        };
+    let (second_status, second_body_preview) = if let Some(offset) = find_second_response(raw_slice)
+    {
+        let second_slice = &raw_slice[offset..];
+        let status = parse_status(second_slice);
+        let preview_end = second_slice.len().min(BODY_PREVIEW_LEN);
+        let preview = String::from_utf8_lossy(&second_slice[..preview_end]).into_owned();
+        (status, preview)
+    } else {
+        (None, String::new())
+    };
 
     // Verdict: suspicious second status OR timing significantly over baseline
-    let timing_flagged = baseline_ms > 0
-        && second_ms as f64 > baseline_ms as f64 * TIMING_RATIO_THRESHOLD;
+    let timing_flagged =
+        baseline_ms > 0 && second_ms as f64 > baseline_ms as f64 * TIMING_RATIO_THRESHOLD;
     let status_flagged = second_status
         .map(|s| SUSPICIOUS_STATUSES.contains(&s))
         .unwrap_or(false);
@@ -523,8 +525,7 @@ pub async fn run(args: Args) -> Result<()> {
     {
         println!(
             "[{:?}] {} {} first={:?} second={:?} baseline={}ms second={}ms",
-            r.verdict, r.host, r.kind, r.first_status, r.second_status,
-            r.baseline_ms, r.second_ms
+            r.verdict, r.host, r.kind, r.first_status, r.second_status, r.baseline_ms, r.second_ms
         );
         let severity = match r.verdict {
             Verdict::Vulnerable => FindingSeverity::High,

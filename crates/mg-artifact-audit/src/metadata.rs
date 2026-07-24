@@ -169,7 +169,11 @@ fn extract_pdf_flags(bytes: &[u8]) -> DocFlags {
             }
         }
     }
-    DocFlags { authors, internal_paths, software_versions }
+    DocFlags {
+        authors,
+        internal_paths,
+        software_versions,
+    }
 }
 
 fn extract_pdf_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
@@ -259,7 +263,11 @@ fn extract_jpeg_flags(bytes: &[u8]) -> DocFlags {
     }
     software_versions.sort();
     software_versions.dedup();
-    DocFlags { authors: Vec::new(), internal_paths: Vec::new(), software_versions }
+    DocFlags {
+        authors: Vec::new(),
+        internal_paths: Vec::new(),
+        software_versions,
+    }
 }
 
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -336,7 +344,11 @@ pub async fn run(args: Args) -> Result<()> {
                 || !flags.internal_paths.is_empty()
                 || !flags.software_versions.is_empty();
             if has_flags {
-                Some(DocMetadata { url: url_clone, doc_type: doc_type.to_string(), flags })
+                Some(DocMetadata {
+                    url: url_clone,
+                    doc_type: doc_type.to_string(),
+                    flags,
+                })
             } else {
                 None
             }
@@ -348,11 +360,14 @@ pub async fn run(args: Args) -> Result<()> {
     }
 
     let total_checked = results.len();
-    let with_flags = results.iter().filter(|r| {
-        !r.flags.authors.is_empty()
-            || !r.flags.internal_paths.is_empty()
-            || !r.flags.software_versions.is_empty()
-    }).count();
+    let with_flags = results
+        .iter()
+        .filter(|r| {
+            !r.flags.authors.is_empty()
+                || !r.flags.internal_paths.is_empty()
+                || !r.flags.software_versions.is_empty()
+        })
+        .count();
     eprintln!("  {} documents with flags", with_flags);
 
     let out_dir = eng.root.join(OUTPUT_SUBDIR);
@@ -374,25 +389,43 @@ pub async fn run(args: Args) -> Result<()> {
 
     for doc in &output.results {
         if !doc.flags.software_versions.is_empty()
-            && doc.flags.software_versions.iter().any(|s| s.contains("AKIA") || s.contains("secret"))
+            && doc
+                .flags
+                .software_versions
+                .iter()
+                .any(|s| s.contains("AKIA") || s.contains("secret"))
         {
-            let tf = ToolFinding::new("mg-metadata", "Secret Found in Document Metadata", FindingSeverity::High)
-                .url(doc.url.clone())
-                .evidence(format!("doc_type={} secrets={:?}", doc.doc_type, doc.flags.software_versions))
-                .recommendation(
-                    "Remove sensitive data from document metadata before publishing; \
-                     rotate any exposed credentials; audit document publishing pipeline"
-                );
+            let tf = ToolFinding::new(
+                "mg-metadata",
+                "Secret Found in Document Metadata",
+                FindingSeverity::High,
+            )
+            .url(doc.url.clone())
+            .evidence(format!(
+                "doc_type={} secrets={:?}",
+                doc.doc_type, doc.flags.software_versions
+            ))
+            .recommendation(
+                "Remove sensitive data from document metadata before publishing; \
+                     rotate any exposed credentials; audit document publishing pipeline",
+            );
             let _ = write_finding(&eng, &tf);
         }
         if !doc.flags.internal_paths.is_empty() {
-            let tf = ToolFinding::new("mg-metadata", "Internal Filesystem Path in Document Metadata", FindingSeverity::Medium)
-                .url(doc.url.clone())
-                .evidence(format!("doc_type={} internal_paths={:?}", doc.doc_type, doc.flags.internal_paths))
-                .recommendation(
-                    "Strip document metadata before publishing; use PDF/Office metadata scrubbers; \
-                     check document conversion pipeline for path leakage"
-                );
+            let tf = ToolFinding::new(
+                "mg-metadata",
+                "Internal Filesystem Path in Document Metadata",
+                FindingSeverity::Medium,
+            )
+            .url(doc.url.clone())
+            .evidence(format!(
+                "doc_type={} internal_paths={:?}",
+                doc.doc_type, doc.flags.internal_paths
+            ))
+            .recommendation(
+                "Strip document metadata before publishing; use PDF/Office metadata scrubbers; \
+                     check document conversion pipeline for path leakage",
+            );
             let _ = write_finding(&eng, &tf);
         }
     }
@@ -433,7 +466,10 @@ mod tests {
     #[test]
     fn extract_xml_value_finds_tag_content() {
         let xml = "<dc:creator>John</dc:creator><dc:title>Doc</dc:title>";
-        assert_eq!(extract_xml_value(xml, "<dc:creator>", "</dc:creator>"), Some("John"));
+        assert_eq!(
+            extract_xml_value(xml, "<dc:creator>", "</dc:creator>"),
+            Some("John")
+        );
     }
 
     #[test]

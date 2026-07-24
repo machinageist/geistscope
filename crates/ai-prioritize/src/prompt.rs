@@ -180,12 +180,7 @@ mod tests {
 
     #[test]
     fn chain_user_prompt_wraps_evidence() {
-        let prompt = chain_user_prompt(
-            "{\"hosts\":[]}",
-            "| Rank |",
-            Some("{\"issues\":[]}"),
-            None,
-        );
+        let prompt = chain_user_prompt("{\"hosts\":[]}", "| Rank |", Some("{\"issues\":[]}"), None);
         assert!(prompt.contains("<recon_summary_json>"));
         assert!(prompt.contains("<priorities_markdown>"));
         assert!(prompt.contains("<probe_report_json>"));

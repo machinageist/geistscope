@@ -33,8 +33,7 @@ const DASHBOARD_PORTS: &[u16] = &[8001, 30000, 30001, 30002];
 
 const API_NAMESPACES_PATH: &str = "/api/v1/namespaces";
 const API_DEFAULT_SECRETS_PATH: &str = "/api/v1/namespaces/default/secrets";
-const API_CLUSTERROLEBINDINGS_PATH: &str =
-    "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings";
+const API_CLUSTERROLEBINDINGS_PATH: &str = "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings";
 const ETCD_KEYS_PATH: &str = "/v2/keys";
 const KUBELET_PODS_PATH: &str = "/pods";
 const DASHBOARD_PROXY_PATH: &str =
@@ -146,11 +145,7 @@ async fn http_get(
 }
 
 // Probe one API server port — check anonymous access and auth status
-async fn probe_api_server(
-    client: &reqwest::Client,
-    host: &str,
-    port: u16,
-) -> Vec<K8sFinding> {
+async fn probe_api_server(client: &reqwest::Client, host: &str, port: u16) -> Vec<K8sFinding> {
     let scheme = if port == 8080 { "http" } else { "https" };
     let mut findings = Vec::new();
 
@@ -168,8 +163,7 @@ async fn probe_api_server(
                 detail: "API server allows unauthenticated namespace listing".to_string(),
             });
             // Since we have access, probe for secret listing and RBAC bindings
-            let (s_sec, _) =
-                http_get(client, scheme, host, port, API_DEFAULT_SECRETS_PATH).await;
+            let (s_sec, _) = http_get(client, scheme, host, port, API_DEFAULT_SECRETS_PATH).await;
             if s_sec == 200 {
                 findings.push(K8sFinding {
                     host: host.to_string(),
@@ -216,8 +210,7 @@ async fn probe_api_server(
                 detail: "API server exists but authentication is required".to_string(),
             });
             // Still probe secrets and RBAC even with auth — 200 would mean misconfigured RBAC
-            let (s_sec, _) =
-                http_get(client, scheme, host, port, API_DEFAULT_SECRETS_PATH).await;
+            let (s_sec, _) = http_get(client, scheme, host, port, API_DEFAULT_SECRETS_PATH).await;
             if s_sec == 200 {
                 findings.push(K8sFinding {
                     host: host.to_string(),
@@ -239,7 +232,8 @@ async fn probe_api_server(
                     path: API_CLUSTERROLEBINDINGS_PATH.to_string(),
                     status: s_rbac,
                     severity: Severity::Critical,
-                    detail: "ClusterRoleBinding grants system:anonymous despite auth required".to_string(),
+                    detail: "ClusterRoleBinding grants system:anonymous despite auth required"
+                        .to_string(),
                 });
             }
         }
@@ -271,8 +265,14 @@ async fn probe_etcd(client: &reqwest::Client, host: &str) -> Vec<K8sFinding> {
 // Probe kubelet secure port 10250 (TLS, no cert verify)
 async fn probe_kubelet_secure(client: &reqwest::Client, host: &str) -> Vec<K8sFinding> {
     let mut findings = Vec::new();
-    let (status, _) =
-        http_get(client, "https", host, KUBELET_SECURE_PORT, KUBELET_PODS_PATH).await;
+    let (status, _) = http_get(
+        client,
+        "https",
+        host,
+        KUBELET_SECURE_PORT,
+        KUBELET_PODS_PATH,
+    )
+    .await;
     if status == 200 {
         findings.push(K8sFinding {
             host: host.to_string(),
@@ -290,8 +290,14 @@ async fn probe_kubelet_secure(client: &reqwest::Client, host: &str) -> Vec<K8sFi
 // Probe kubelet read-only port 10255 (plain HTTP)
 async fn probe_kubelet_readonly(client: &reqwest::Client, host: &str) -> Vec<K8sFinding> {
     let mut findings = Vec::new();
-    let (status, _) =
-        http_get(client, "http", host, KUBELET_READONLY_PORT, KUBELET_PODS_PATH).await;
+    let (status, _) = http_get(
+        client,
+        "http",
+        host,
+        KUBELET_READONLY_PORT,
+        KUBELET_PODS_PATH,
+    )
+    .await;
     if status == 200 {
         findings.push(K8sFinding {
             host: host.to_string(),
@@ -427,9 +433,10 @@ async fn main() -> Result<()> {
     );
 
     // Print any critical or high findings to stdout
-    for f in all_findings.iter().filter(|f| {
-        matches!(f.severity, Severity::Critical | Severity::High)
-    }) {
+    for f in all_findings
+        .iter()
+        .filter(|f| matches!(f.severity, Severity::Critical | Severity::High))
+    {
         println!(
             "[{:?}] {}:{}{} — {}",
             f.severity, f.host, f.port, f.path, f.detail

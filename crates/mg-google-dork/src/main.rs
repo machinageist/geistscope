@@ -224,13 +224,17 @@ async fn main() -> Result<()> {
 
             // Emit MEDIUM finding per result returned from Google CSE
             for hit in &hits {
-                let tf = ToolFinding::new("mg-google-dork", "Google Dork Result Returned", FindingSeverity::Medium)
-                    .url(hit.url.clone())
-                    .evidence(format!("query={} title={}", query, hit.title))
-                    .recommendation(
-                        "Review exposed resource and restrict access or remove from public index; \
-                         add sensitive paths to robots.txt or implement access controls"
-                    );
+                let tf = ToolFinding::new(
+                    "mg-google-dork",
+                    "Google Dork Result Returned",
+                    FindingSeverity::Medium,
+                )
+                .url(hit.url.clone())
+                .evidence(format!("query={} title={}", query, hit.title))
+                .recommendation(
+                    "Review exposed resource and restrict access or remove from public index; \
+                         add sensitive paths to robots.txt or implement access controls",
+                );
                 let _ = write_finding(&eng, &tf);
             }
 

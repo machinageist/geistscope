@@ -47,7 +47,11 @@ impl OllamaClient {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .build()?;
-        Ok(Self { endpoint: endpoint.into(), model: model.into(), http })
+        Ok(Self {
+            endpoint: endpoint.into(),
+            model: model.into(),
+            http,
+        })
     }
 
     // Send system + user messages and return the assistant's reply text
@@ -56,8 +60,14 @@ impl OllamaClient {
         let body = ChatRequest {
             model: &self.model,
             messages: vec![
-                Message { role: "system", content: system },
-                Message { role: "user", content: user },
+                Message {
+                    role: "system",
+                    content: system,
+                },
+                Message {
+                    role: "user",
+                    content: user,
+                },
             ],
             stream: false,
         };
@@ -87,8 +97,14 @@ mod tests {
         let req = ChatRequest {
             model: "mistral",
             messages: vec![
-                Message { role: "system", content: "sys" },
-                Message { role: "user", content: "usr" },
+                Message {
+                    role: "system",
+                    content: "sys",
+                },
+                Message {
+                    role: "user",
+                    content: "usr",
+                },
             ],
             stream: false,
         };

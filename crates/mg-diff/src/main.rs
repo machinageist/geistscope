@@ -156,10 +156,14 @@ fn main() -> Result<()> {
         .with_context(|| format!("load current {}", current_dir.display()))?;
 
     // Index both host lists by hostname for fast lookup
-    let baseline_map: HashMap<String, &HostRecord> =
-        baseline_hosts.iter().map(|h| (h.hostname.clone(), h)).collect();
-    let current_map: HashMap<String, &HostRecord> =
-        current_hosts.iter().map(|h| (h.hostname.clone(), h)).collect();
+    let baseline_map: HashMap<String, &HostRecord> = baseline_hosts
+        .iter()
+        .map(|h| (h.hostname.clone(), h))
+        .collect();
+    let current_map: HashMap<String, &HostRecord> = current_hosts
+        .iter()
+        .map(|h| (h.hostname.clone(), h))
+        .collect();
 
     // Compute new and removed subdomains
     let new_subdomains: Vec<String> = current_hosts
@@ -201,10 +205,24 @@ fn main() -> Result<()> {
         }
 
         // Tech diff
-        let base_tech: HashSet<&str> = baseline_rec.technologies.iter().map(|s| s.as_str()).collect();
-        let curr_tech: HashSet<&str> = current_rec.technologies.iter().map(|s| s.as_str()).collect();
-        let added_tech: Vec<String> = curr_tech.difference(&base_tech).map(|s| s.to_string()).collect();
-        let removed_tech: Vec<String> = base_tech.difference(&curr_tech).map(|s| s.to_string()).collect();
+        let base_tech: HashSet<&str> = baseline_rec
+            .technologies
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        let curr_tech: HashSet<&str> = current_rec
+            .technologies
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        let added_tech: Vec<String> = curr_tech
+            .difference(&base_tech)
+            .map(|s| s.to_string())
+            .collect();
+        let removed_tech: Vec<String> = base_tech
+            .difference(&curr_tech)
+            .map(|s| s.to_string())
+            .collect();
         if !added_tech.is_empty() || !removed_tech.is_empty() {
             tech_changes.push(TechChange {
                 hostname: hostname.clone(),
@@ -327,10 +345,9 @@ fn auto_detect_snapshots(recon_dir: &Path) -> Result<(PathBuf, PathBuf)> {
 
 // Load and parse a summary.json, tolerating envelope or bare-array shape
 fn load_summary(path: &Path) -> Result<Vec<HostRecord>> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
-    let parsed: SummaryFile = serde_json::from_str(&raw)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let parsed: SummaryFile =
+        serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
     Ok(parsed.into_hosts())
 }
 
@@ -343,8 +360,7 @@ fn collect_crawl_urls(dir: &Path) -> Result<HashSet<String>> {
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let raw = fs::read_to_string(&path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         // Try array of CrawlEndpoint first, then array of bare strings
         if let Ok(endpoints) = serde_json::from_str::<Vec<CrawlEndpoint>>(&raw) {
             urls.extend(endpoints.into_iter().map(|e| e.url));
@@ -416,8 +432,12 @@ fn print_text_report(r: &DiffReport) {
         println!(
             "  {} {} -> {}",
             sc.hostname,
-            sc.baseline_status.map(|s| s.to_string()).unwrap_or_else(|| "none".into()),
-            sc.current_status.map(|s| s.to_string()).unwrap_or_else(|| "none".into()),
+            sc.baseline_status
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "none".into()),
+            sc.current_status
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "none".into()),
         );
     }
 
@@ -426,7 +446,10 @@ fn print_text_report(r: &DiffReport) {
         println!("  + {u}");
     }
 
-    println!("Removed crawl endpoints ({}):", r.removed_crawl_endpoints.len());
+    println!(
+        "Removed crawl endpoints ({}):",
+        r.removed_crawl_endpoints.len()
+    );
     for u in &r.removed_crawl_endpoints {
         println!("  - {u}");
     }
@@ -451,7 +474,11 @@ mod tests {
     fn write_summary(dir: &Path, hosts: &[serde_json::Value]) {
         fs::create_dir_all(dir).unwrap();
         let arr = serde_json::Value::Array(hosts.to_vec());
-        fs::write(dir.join(SUMMARY_FILENAME), serde_json::to_string(&arr).unwrap()).unwrap();
+        fs::write(
+            dir.join(SUMMARY_FILENAME),
+            serde_json::to_string(&arr).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -543,9 +570,18 @@ mod tests {
         let a = recon.join("2026-01-01");
         let b = recon.join("2026-02-01");
         let c = recon.join("2026-03-01");
-        write_summary(&a, &[serde_json::json!({"hostname":"a.example.com","open_ports":[]})]);
-        write_summary(&b, &[serde_json::json!({"hostname":"b.example.com","open_ports":[]})]);
-        write_summary(&c, &[serde_json::json!({"hostname":"c.example.com","open_ports":[]})]);
+        write_summary(
+            &a,
+            &[serde_json::json!({"hostname":"a.example.com","open_ports":[]})],
+        );
+        write_summary(
+            &b,
+            &[serde_json::json!({"hostname":"b.example.com","open_ports":[]})],
+        );
+        write_summary(
+            &c,
+            &[serde_json::json!({"hostname":"c.example.com","open_ports":[]})],
+        );
 
         let (baseline, current) = auto_detect_snapshots(&recon).unwrap();
         assert_eq!(baseline, b);

@@ -32,16 +32,25 @@ pub enum LlmClient {
 impl LlmClient {
     /// Local Ollama instance at the default endpoint (localhost:11434)
     pub fn ollama(model: impl Into<String>) -> Result<Self, LlmError> {
-        Ok(Self::Ollama(OllamaClient::new("http://localhost:11434", model)?))
+        Ok(Self::Ollama(OllamaClient::new(
+            "http://localhost:11434",
+            model,
+        )?))
     }
 
     /// Local Ollama at a custom endpoint
-    pub fn ollama_at(endpoint: impl Into<String>, model: impl Into<String>) -> Result<Self, LlmError> {
+    pub fn ollama_at(
+        endpoint: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<Self, LlmError> {
         Ok(Self::Ollama(OllamaClient::new(endpoint, model)?))
     }
 
     /// Anthropic API (remote)
-    pub fn anthropic(api_key: impl Into<String>, model: impl Into<String>) -> Result<Self, LlmError> {
+    pub fn anthropic(
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<Self, LlmError> {
         Ok(Self::Anthropic(AnthropicClient::new(api_key, model)?))
     }
 

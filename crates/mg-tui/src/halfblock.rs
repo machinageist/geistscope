@@ -60,10 +60,7 @@ pub fn to_lines(img: &DynamicImage, term_width: u16, term_height: u16) -> Vec<Li
                 (false, false) => (" ", Color::Reset, Color::Reset),
             };
 
-            spans.push(Span::styled(
-                ch.to_string(),
-                Style::default().fg(fg).bg(bg),
-            ));
+            spans.push(Span::styled(ch.to_string(), Style::default().fg(fg).bg(bg)));
         }
 
         lines.push(Line::from(spans));
