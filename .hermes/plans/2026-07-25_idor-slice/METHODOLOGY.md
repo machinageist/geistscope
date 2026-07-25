@@ -73,3 +73,31 @@ had already built the plan/approval/record/refuse scaffolding around the send. T
 unlocks a whole second vuln class (and authenticated SSRF) was mostly already there.
 
 **Adjustment.** None.
+
+---
+
+## Task 3 — Apply the session swap
+
+**Goal.** The core IDOR primitive: take the victim's captured request and re-issue it under the
+*attacker's* identity, so the verdict can decide whether the attacker reached the victim's data.
+
+**Design.** Added `build_swapped_request(method, url, base_headers, attacker_headers, body)` — a pure
+sibling of `build_injected_request`. It keeps the victim request's URL (pointing at the victim's
+resource) and non-secret headers, **strips any auth the capture carried** (reusing the same
+`is_sensitive_header` filter), and attaches only the attacker identity's resolved auth. The result
+is "the victim's request, sent as the attacker." Marker derivation needs no new code: the existing
+`ReplayOutcome::with_target_tenant_markers` + `SemanticDiffEngine::classify` already flag
+`BoundaryViolationRead` when a victim marker appears in the attacker's response — Task 5 attaches the
+candidate's victim marker to the outcome before classifying.
+
+**RED → GREEN.** One test: given a victim request carrying `Bearer victim-token`, the swapped request
+drops it and carries only `Bearer attacker-token`, preserves benign headers, and leaves the victim
+resource URL intact. replay-engine 16/16, clippy clean.
+
+**What it revealed.** The `ReplaySubstitution{from_session, to_session}` metadata already in the plan
+hash finally has an execution meaning — the swap it described is now a real request transform. And
+because the verdict half (`classify` → `BoundaryViolationRead`) was already built for the pre-SSRF
+authorization work, Task 3 was a single pure function.
+
+**Adjustment.** None — confirmed that "derive target markers" is orchestration (Task 5) over existing
+primitives, not new engine code.

@@ -25,11 +25,10 @@ unblocks SSRF against authenticated endpoints. Salvage source: `crates/mg-authz/
 - [x] **2. Auth-aware runner** (`replay-runner` + `http-client`) — added `http_client::Client::send`
   (method/headers/body, same retry/UA); runner sends the request verbatim (incl. auth headers).
   Refusals unchanged; SSRF E2E still green. Gate: passed.
-- [~] **3. Apply substitution + victim markers** (`replay-engine`) — apply `ReplaySubstitution`
-  (from_session/to_session → attacker/victim) when building the authenticated request; derive
-  `target_tenant_markers` from the victim baseline so `classify` can fire. Gate:
-  `cargo test -p replay-engine` + clippy.
-- [ ] **4. Refine CrossTenantRead** (`request-corpus`) — designate attacker vs victim record on the
+- [x] **3. Apply substitution + victim markers** (`replay-engine`) — `build_swapped_request` (victim
+  request + attacker auth, victim auth stripped). Marker attachment reuses `with_target_tenant_markers`
+  + `classify` (no new engine code). Gate: passed (16 tests).
+- [~] **4. Refine CrossTenantRead** (`request-corpus`) — designate attacker vs victim record on the
   candidate and carry the victim marker + the two session labels. Gate:
   `cargo test -p request-corpus` + clippy.
 - [ ] **5. mg-hunt authz path** (`mg-hunt`) — replace the fixture `load_replay_outcome` in the

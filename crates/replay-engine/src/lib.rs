@@ -456,6 +456,29 @@ const SENSITIVE_HEADER_NAMES: &[&str] = &[
     "x-csrf-token",
 ];
 
+// Build a cross-identity request: replay a captured request under a different identity's auth
+pub fn build_swapped_request(
+    method: &str,
+    url: &str,
+    base_headers: &[(String, String)],
+    attacker_headers: &[(String, String)],
+    body: Option<&str>,
+) -> ReplayRequest {
+    // Drop any auth the victim capture carried, then attach only the attacker identity's auth
+    let mut headers: Vec<(String, String)> = base_headers
+        .iter()
+        .filter(|(name, _)| !is_sensitive_header(name))
+        .cloned()
+        .collect();
+    headers.extend(attacker_headers.iter().cloned());
+    ReplayRequest {
+        method: method.to_string(),
+        url: url.to_string(),
+        headers,
+        body: body.map(str::to_string),
+    }
+}
+
 // Build a concrete replay request that injects a payload into one query parameter
 pub fn build_injected_request(
     method: &str,
@@ -554,6 +577,44 @@ mod tests {
 
         assert_eq!(verdict.classification, SemanticVerdictClass::SsrfNoSignal);
         assert!(!verdict.boundary_violation);
+    }
+
+    #[test]
+    fn build_swapped_request_replaces_victim_auth_with_attacker_auth() {
+        let request = build_swapped_request(
+            "GET",
+            "https://app.example.test/api/projects/victim-123",
+            &[
+                (
+                    "Authorization".to_string(),
+                    "Bearer victim-token".to_string(),
+                ),
+                ("Accept".to_string(), "application/json".to_string()),
+            ],
+            &[(
+                "authorization".to_string(),
+                "Bearer attacker-token".to_string(),
+            )],
+            None,
+        );
+
+        assert_eq!(request.method, "GET");
+        // The victim's own auth is dropped; only the attacker identity's auth remains
+        let auth: Vec<&String> = request
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(auth, vec!["Bearer attacker-token"]);
+        // Benign headers survive and the victim resource URL is unchanged
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| name == "Accept" && value == "application/json")
+        );
+        assert!(request.url.ends_with("/projects/victim-123"));
     }
 
     #[test]
