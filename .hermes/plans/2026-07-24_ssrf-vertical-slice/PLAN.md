@@ -52,9 +52,10 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
 - [x] **5. SSRF/OOB verdict** (`replay-engine`) — `classify_ssrf(outcome, oob_confirmed, markers)`
   → `SsrfOobConfirmed` / `SsrfResponseLeak` / `SsrfNoSignal`; confirmed only from a real OOB hit or
   a real response marker. OOB result passed as a bool (engine stays oob-core-free). Gate: passed.
-- [~] **6. Evidence with OOB artifact** (`evidence-core`) — correlated OOB hit + recorded I/O added
-  to the bundle, redacted + immutable. Gate: `cargo test -p evidence-core` + clippy.
-- [ ] **7. mg-hunt wiring** (`mg-hunt`) — replace fixture loader with the live runner for SSRF:
+- [x] **6. Evidence with OOB artifact** (`evidence-core`) — optional `oob_hit.json` + `replay_io.json`
+  slots written when an active test produces them; run-dir immutability guard; model still sees only
+  the redacted summary. Gate: passed.
+- [~] **7. mg-hunt wiring** (`mg-hunt`) — replace fixture loader with the live runner for SSRF:
   select → plan → policy gate (`--confirmed` + approval, HighActive) → OOB token → substitute →
   live send → classify → evidence incl. OOB → ledger; add active/SSRF `RiskFilter`. Gate:
   `cargo test -p mg-hunt` + clippy.

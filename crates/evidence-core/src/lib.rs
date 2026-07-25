@@ -23,6 +23,8 @@ pub struct EvidenceBundleRequest {
     pub summary: String,
     pub raw_artifacts: Vec<RawEvidenceArtifact>,
     pub browser_snapshots: Vec<BrowserSnapshotArtifact>,
+    pub oob_hit_json: Option<String>,
+    pub replay_io_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +85,8 @@ impl EvidenceBundleRequest {
             summary: String::new(),
             raw_artifacts: Vec::new(),
             browser_snapshots: Vec::new(),
+            oob_hit_json: None,
+            replay_io_json: None,
         }
     }
 
@@ -122,6 +126,18 @@ impl EvidenceBundleRequest {
     // Attach redacted browser DOM and screenshot evidence
     pub fn with_browser_snapshot(mut self, snapshot: BrowserSnapshotArtifact) -> Self {
         self.browser_snapshots.push(snapshot);
+        self
+    }
+
+    // Attach the correlated out-of-band hit JSON that proves a blind SSRF
+    pub fn with_oob_hit_json(mut self, oob_hit_json: impl Into<String>) -> Self {
+        self.oob_hit_json = Some(oob_hit_json.into());
+        self
+    }
+
+    // Attach the recorded replay request/response JSON for reproduction
+    pub fn with_replay_io_json(mut self, replay_io_json: impl Into<String>) -> Self {
+        self.replay_io_json = Some(replay_io_json.into());
         self
     }
 }
@@ -171,6 +187,13 @@ impl EvidenceBundleWriter {
             bundle_dir.join("summary.redacted.md"),
             &redact_summary(&request.summary),
         )?;
+        // OOB and replay I/O are optional; write them only for active tests that produced them
+        if let Some(oob_hit_json) = &request.oob_hit_json {
+            write_text(bundle_dir.join("oob_hit.json"), oob_hit_json)?;
+        }
+        if let Some(replay_io_json) = &request.replay_io_json {
+            write_text(bundle_dir.join("replay_io.json"), replay_io_json)?;
+        }
 
         let mut artifacts = Vec::new();
         for artifact in request.raw_artifacts {
@@ -372,6 +395,38 @@ mod tests {
         assert!(summary.contains("[REDACTED_COOKIE]"));
         assert!(summary.contains("[REDACTED_TOKEN]"));
         assert!(summary.contains("[REDACTED_EMAIL]"));
+    }
+
+    #[test]
+    fn oob_hit_and_replay_io_written_when_present() {
+        let root = tempfile::tempdir().unwrap();
+        let request = EvidenceBundleRequest::new(root.path(), "ssrf-candidate", "run-oob")
+            .with_semantic_diff_json("{\"classification\":\"ssrf_oob_confirmed\"}")
+            .with_oob_hit_json(
+                "{\"token\":\"abc\",\"binding\":{\"candidate_id\":\"ssrf-candidate\"}}",
+            )
+            .with_replay_io_json("{\"status\":200,\"url\":\"http://target.local/api/fetch\"}")
+            .with_summary("SSRF confirmed via out-of-band callback");
+
+        let bundle = EvidenceBundleWriter.write(request).unwrap();
+        let oob = std::fs::read_to_string(bundle.bundle_dir.join("oob_hit.json")).unwrap();
+        let replay_io = std::fs::read_to_string(bundle.bundle_dir.join("replay_io.json")).unwrap();
+
+        assert!(oob.contains("\"token\":\"abc\""));
+        assert!(oob.contains("ssrf-candidate"));
+        assert!(replay_io.contains("\"status\":200"));
+    }
+
+    #[test]
+    fn bundle_without_oob_omits_the_oob_file() {
+        let root = tempfile::tempdir().unwrap();
+        let request =
+            EvidenceBundleRequest::new(root.path(), "readonly", "run-1").with_summary("ok");
+
+        let bundle = EvidenceBundleWriter.write(request).unwrap();
+
+        assert!(!bundle.bundle_dir.join("oob_hit.json").exists());
+        assert!(!bundle.bundle_dir.join("replay_io.json").exists());
     }
 
     #[test]

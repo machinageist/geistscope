@@ -226,3 +226,26 @@ only exhaustive-ish consumer, `mg-hunt`, already matches `classification` with a
 **Adjustment.** None. Task 7 will call `classify_ssrf` with `oob_confirmed` from
 `OobListener::wait_for_hit` and `markers` being the cloud-metadata / lab-sentinel strings to look
 for in the response.
+
+---
+
+## Task 6 — Evidence with OOB artifact
+
+**Goal.** Make a confirmed SSRF reproducible: persist the correlated OOB hit and the exact
+request/response alongside the plan and verdict, immutably.
+
+**Design choice.** Followed the crate's existing grain rather than inventing a new mechanism.
+`evidence-core` already writes `plan.json` / `approvals.json` / `semantic_diff.json` as plain files
+and guarantees immutability with a fail-if-exists guard on the run directory. So Task 6 adds two
+*optional* slots — `oob_hit_json` and `replay_io_json` — written only when an active test produced
+them. The model never reads these raw files; the model-visible artifact remains the redacted
+`summary.redacted.md`. That keeps evidence fidelity (the raw proof is preserved for a human /
+reproduction) while honoring the decision record's rule that model-visible output is
+summaries/hashes/refs.
+
+**RED → GREEN.** Two tests: when present, `oob_hit.json` and `replay_io.json` are written with the
+expected content; when absent (a read-only run), neither file is created. 6/6 evidence-core tests
+pass; clippy clean; `mg-hunt` (the writer's main consumer) unaffected.
+
+**Adjustment.** None. Task 7 will serialize the `OobHit` into `with_oob_hit_json` and the
+`ReplayOutcome` (sent request + response) into `with_replay_io_json`.
