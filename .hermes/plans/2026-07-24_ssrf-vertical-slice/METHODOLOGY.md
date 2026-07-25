@@ -249,3 +249,40 @@ pass; clippy clean; `mg-hunt` (the writer's main consumer) unaffected.
 
 **Adjustment.** None. Task 7 will serialize the `OobHit` into `with_oob_hit_json` and the
 `ReplayOutcome` (sent request + response) into `with_replay_io_json`.
+
+---
+
+## Task 7 — mg-hunt wiring (the loop closes)
+
+**Goal.** Assemble the six previous pieces into one command: from an SSRF candidate to a verified
+finding with immutable evidence, all policy-gated.
+
+**Shape.** Kept the existing read-only path untouched and branched the `run` command on `--risk`:
+`read-only` runs the old deterministic planner; `active` runs the new SSRF path. The heart is one
+async function, `execute_ssrf_test`, that performs the whole loop for a single candidate:
+
+1. Build the plan, read its hash, rebuild it with a matching **approval grant** so the engine marks
+   it executable (the Task 4 mechanism — the `--confirmed` flag is the operator approval).
+2. Mint a plan-bound OOB token and inject its callback URL into the candidate's parameter via
+   `build_injected_request`.
+3. Send through the `ReplayRunner` (the only crate that touches the network).
+4. `wait_for_hit` on the OOB listener, then `classify_ssrf` from the correlated hit + response
+   markers.
+5. Write the immutable evidence bundle (plan, verdict, replay I/O, and the OOB hit).
+6. On a boundary violation, emit a High-severity engagement finding *immediately*, then append the
+   plan hash to the hunt ledger.
+
+**Decisions.** `main` stays synchronous; the SSRF path builds a Tokio runtime and `block_on`s the
+async orchestration, so only the live branch pays for async. Findings go through the engagement's
+own `write_finding` (a real, integrated finding) rather than a bespoke file. Selection is gated by
+`select_ssrf_candidates` (kind == `ServerSideRequestTarget`), and the whole active path refuses to
+execute without `--confirmed` (returns `ApprovalRequired`), matching SSRF's HighActive risk.
+
+**RED → GREEN.** A unit test pins that `select_ssrf_candidates` keeps only SSRF candidates; the
+existing read-only tests still pass unchanged (11/11). The *live* loop — a real send that triggers a
+real server-side callback — is deliberately left to Task 8's end-to-end test against a local lab,
+because it needs a running target. Clippy clean across the new dependency set (replay-runner,
+oob-core, engagement, http-client, tokio).
+
+**Adjustment.** None. Task 8 stands up an axum lab on `127.0.0.1` whose fetch endpoint performs the
+server-side request, and drives `execute_ssrf_test` to prove the closed loop.

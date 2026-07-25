@@ -5,15 +5,22 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use evidence_core::{EvidenceBundleRequest, EvidenceBundleWriter};
-use replay_engine::{
-    PlanBuilder, ReplayOutcome, ReplayPlanRequest, ScopeDecision, SemanticDiffEngine,
-    SemanticVerdictClass,
+use engagement::{
+    Engagement, FindingSeverity, ToolFinding, TrafficRecord, find_traffic_record, write_finding,
 };
-use request_corpus::{CandidateStateChange, CorpusCandidate};
+use evidence_core::{EvidenceBundleRequest, EvidenceBundleWriter};
+use http_client::{Client, ClientConfig};
+use oob_core::{OobHit, OobListener};
+use replay_engine::{
+    PlanBuilder, ReplayOutcome, ReplayPlan, ReplayPlanRequest, ScopeDecision, SemanticDiffEngine,
+    SemanticVerdict, SemanticVerdictClass, build_injected_request,
+};
+use replay_runner::ReplayRunner;
+use request_corpus::{CandidateKind, CandidateStateChange, CorpusCandidate};
 use serde::Serialize;
 
 const CANDIDATES_RELATIVE_PATH: &str = "corpus/candidates.jsonl";
@@ -24,6 +31,15 @@ const DEFAULT_MAX_DURATION_SECS: u64 = 300;
 const DEFAULT_MAX_BYTES: u64 = 1_048_576;
 const ESTIMATED_TEST_BYTES: u64 = 1024;
 const ESTIMATED_TEST_DURATION_SECS: u64 = 1;
+const SSRF_OOB_WAIT_MS: u64 = 1500;
+const SSRF_FINDING_TOOL: &str = "mg-hunt-ssrf";
+const SSRF_RESPONSE_MARKERS: &[&str] = &[
+    "instance-id",
+    "ami-id",
+    "security-credentials",
+    "computeMetadata",
+    "meta-data",
+];
 
 #[derive(Debug, Parser)]
 #[command(name = "mg-hunt", about = "Plan safe assisted autonomous hunt steps")]
@@ -81,6 +97,7 @@ enum HuntMode {
 #[value(rename_all = "kebab-case")]
 enum RiskFilter {
     ReadOnly,
+    Active,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,7 +224,7 @@ fn run(args: Args) -> Result<String> {
             engagement,
             mode: _,
             boundary: _,
-            risk: _,
+            risk,
             dry_run,
             max_tests,
             max_duration,
@@ -216,34 +233,116 @@ fn run(args: Args) -> Result<String> {
             confirmed,
             json,
         } => {
-            let candidates = load_candidates(&engagement.join(CANDIDATES_RELATIVE_PATH))?;
-            let resume_state = if resume {
-                load_resume_state(&engagement.join(RESUME_RELATIVE_PATH))?
-            } else {
-                ResumeState::default()
+            let budget = HuntBudget {
+                max_tests,
+                max_duration_secs: max_duration,
+                max_bytes,
             };
-            let mut plan = plan_dry_run(
-                candidates,
-                HuntBudget {
-                    max_tests,
-                    max_duration_secs: max_duration,
-                    max_bytes,
-                },
-                &resume_state,
-            );
-            if !dry_run {
-                apply_policy_gated_orchestration(&engagement, &mut plan, confirmed)?;
+            match risk {
+                RiskFilter::ReadOnly => {
+                    run_read_only(&engagement, budget, resume, dry_run, confirmed, json)
+                }
+                RiskFilter::Active => run_ssrf(&engagement, budget, dry_run, confirmed, json),
             }
-            render(json, &plan, || {
-                format!(
-                    "planned {} tests (policy skipped {}, resume skipped {})",
-                    plan.selected.len(),
-                    plan.skipped_by_policy,
-                    plan.skipped_by_resume
-                )
-            })
         }
     }
+}
+
+// Plan and optionally orchestrate read-only authorization tests
+fn run_read_only(
+    engagement: &Path,
+    budget: HuntBudget,
+    resume: bool,
+    dry_run: bool,
+    confirmed: bool,
+    json: bool,
+) -> Result<String> {
+    let candidates = load_candidates(&engagement.join(CANDIDATES_RELATIVE_PATH))?;
+    let resume_state = if resume {
+        load_resume_state(&engagement.join(RESUME_RELATIVE_PATH))?
+    } else {
+        ResumeState::default()
+    };
+    let mut plan = plan_dry_run(candidates, budget, &resume_state);
+    if !dry_run {
+        apply_policy_gated_orchestration(engagement, &mut plan, confirmed)?;
+    }
+    render(json, &plan, || {
+        format!(
+            "planned {} tests (policy skipped {}, resume skipped {})",
+            plan.selected.len(),
+            plan.skipped_by_policy,
+            plan.skipped_by_resume
+        )
+    })
+}
+
+// Plan and, with approval, execute live SSRF tests end to end
+fn run_ssrf(
+    engagement_root: &Path,
+    budget: HuntBudget,
+    dry_run: bool,
+    confirmed: bool,
+    json: bool,
+) -> Result<String> {
+    let candidates = load_candidates(&engagement_root.join(CANDIDATES_RELATIVE_PATH))?;
+    let selected: Vec<PlannedTest> = select_ssrf_candidates(candidates)
+        .into_iter()
+        .take(budget.max_tests)
+        .map(planned_ssrf_test)
+        .collect::<Result<Vec<_>>>()?;
+    let mut plan = HuntPlan {
+        selected,
+        skipped_by_policy: 0,
+        skipped_by_resume: 0,
+        executed: Vec::new(),
+        stop_reason: None,
+    };
+
+    // SSRF is HighActive; without dry-run and explicit approval it stays inert
+    if dry_run || !confirmed {
+        plan.stop_reason = Some(StopReason::ApprovalRequired);
+        return render(json, &plan, || {
+            format!(
+                "planned {} ssrf tests; approval required before execution",
+                plan.selected.len()
+            )
+        });
+    }
+
+    let engagement = Engagement::load(engagement_root).context("load engagement")?;
+    let engagement_name = engagement_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("engagement")
+        .to_string();
+    let listener = OobListener::bind().context("bind oob listener")?;
+    let runner = ReplayRunner::new(Client::new(ClientConfig::default()).context("build client")?);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build async runtime")?;
+
+    for test in &plan.selected {
+        let record_id = test
+            .candidate
+            .record_ids
+            .first()
+            .context("ssrf candidate has no source record")?;
+        let record = find_traffic_record(&engagement, record_id).context("resolve ssrf record")?;
+        let executed = runtime.block_on(execute_ssrf_test(
+            engagement_root,
+            &engagement_name,
+            &test.candidate,
+            &record,
+            &listener,
+            &runner,
+        ))?;
+        plan.executed.push(executed);
+    }
+    render(json, &plan, || {
+        format!("executed {} ssrf tests", plan.executed.len())
+    })
 }
 
 // Select next safe read-only tests without executing network requests
@@ -432,6 +531,206 @@ fn load_replay_outcome(engagement: &Path, candidate_id: &str) -> Result<ReplayOu
     serde_json::from_str(&raw).context("parse replay outcome")
 }
 
+// Keep only server-side request (SSRF) candidates for active testing
+fn select_ssrf_candidates(candidates: Vec<CorpusCandidate>) -> Vec<CorpusCandidate> {
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.kind == CandidateKind::ServerSideRequestTarget)
+        .collect()
+}
+
+// Describe the immutable SSRF replay plan request for a candidate
+fn ssrf_plan_request(candidate: &CorpusCandidate) -> ReplayPlanRequest {
+    ReplayPlanRequest::new(candidate.clone(), ScopeDecision::InScope)
+        .with_expected_secure_result("no server-side request to the controlled marker")
+        .with_stop_conditions([
+            "rate_limited",
+            "waf_detected",
+            "server_error",
+            "scope_drift",
+        ])
+        .with_evidence_output_dir(format!("evidence/{}", candidate.id))
+}
+
+// Build a planned test record carrying the SSRF plan hash for display
+fn planned_ssrf_test(candidate: CorpusCandidate) -> Result<PlannedTest> {
+    let plan = PlanBuilder
+        .build(ssrf_plan_request(&candidate))
+        .context("build ssrf plan")?;
+    Ok(PlannedTest {
+        candidate_id: candidate.id.clone(),
+        plan_hash: plan.plan_hash,
+        summary: candidate.summary.clone(),
+        candidate,
+    })
+}
+
+// Run one approved SSRF test end to end and record its evidence and finding
+async fn execute_ssrf_test(
+    engagement_root: &Path,
+    engagement_name: &str,
+    candidate: &CorpusCandidate,
+    record: &TrafficRecord,
+    listener: &OobListener,
+    runner: &ReplayRunner,
+) -> Result<ExecutedTest> {
+    // Bind a matching approval grant so the engine marks the plan executable
+    let base = ssrf_plan_request(candidate);
+    let unapproved = PlanBuilder.build(base.clone()).context("build ssrf plan")?;
+    let plan = PlanBuilder
+        .build(base.with_approval_grant_hash(unapproved.plan_hash.clone()))
+        .context("bind ssrf approval")?;
+
+    // Mint a plan-bound OOB token and inject its callback URL into the target parameter
+    let token = listener.mint(
+        engagement_name,
+        plan.plan_hash.clone(),
+        candidate.id.clone(),
+    );
+    let injection_param = candidate
+        .injection_params
+        .first()
+        .context("ssrf candidate has no injection parameter")?;
+    let request = build_injected_request(
+        &record.method,
+        &record.url,
+        &header_pairs(record),
+        None,
+        injection_param,
+        &listener.oob_url(&token),
+    );
+
+    // Send the approved request, then correlate any server-side callback it triggered
+    let outcome = runner
+        .run(&plan, &request)
+        .await
+        .context("send ssrf replay")?;
+    let hit = listener.wait_for_hit(&token, Duration::from_millis(SSRF_OOB_WAIT_MS));
+    let verdict = SemanticDiffEngine.classify_ssrf(&outcome, hit.is_some(), SSRF_RESPONSE_MARKERS);
+
+    let run_id = format!("run-{}", plan.plan_hash);
+    let evidence_bundle = write_ssrf_evidence(
+        engagement_root,
+        candidate,
+        &run_id,
+        &plan,
+        &verdict,
+        &outcome,
+        hit.as_ref(),
+    )?;
+    // Emit the finding immediately on a boundary violation, then record the plan hash
+    if verdict.boundary_violation {
+        emit_ssrf_finding(engagement_root, candidate, &verdict, &evidence_bundle)?;
+    }
+    append_tested_hash(engagement_root, &plan.plan_hash)?;
+
+    Ok(ExecutedTest {
+        candidate_id: candidate.id.clone(),
+        plan_hash: plan.plan_hash.clone(),
+        verdict_class: verdict_class_name(&verdict),
+        boundary_violation: verdict.boundary_violation,
+        evidence_bundle,
+    })
+}
+
+// Map captured request headers into name/value pairs for replay
+fn header_pairs(record: &TrafficRecord) -> Vec<(String, String)> {
+    record
+        .request_headers
+        .iter()
+        .map(|header| (header.name.clone(), header.value.clone()))
+        .collect()
+}
+
+// Write an immutable SSRF evidence bundle and return its engagement-relative path
+fn write_ssrf_evidence(
+    engagement_root: &Path,
+    candidate: &CorpusCandidate,
+    run_id: &str,
+    plan: &ReplayPlan,
+    verdict: &SemanticVerdict,
+    outcome: &ReplayOutcome,
+    hit: Option<&OobHit>,
+) -> Result<String> {
+    let plan_json = serde_json::to_string_pretty(plan).context("serialize ssrf plan")?;
+    let semantic_diff_json = serde_json::to_string_pretty(verdict).context("serialize verdict")?;
+    let replay_io_json = serde_json::to_string_pretty(outcome).context("serialize replay io")?;
+    let approvals_json =
+        serde_json::to_string(&[&plan.plan_hash]).context("serialize approvals")?;
+    let mut request = EvidenceBundleRequest::new(engagement_root, &candidate.id, run_id)
+        .with_plan_json(plan_json)
+        .with_approvals_json(approvals_json)
+        .with_semantic_diff_json(semantic_diff_json)
+        .with_replay_io_json(replay_io_json)
+        .with_summary(format!(
+            "SSRF {} on candidate {}",
+            verdict_class_name(verdict),
+            candidate.id
+        ));
+    if let Some(hit) = hit {
+        let oob_hit_json = serde_json::to_string_pretty(hit).context("serialize oob hit")?;
+        request = request.with_oob_hit_json(oob_hit_json);
+    }
+    let bundle = EvidenceBundleWriter
+        .write(request)
+        .context("write ssrf evidence bundle")?;
+    Ok(bundle
+        .bundle_dir
+        .strip_prefix(engagement_root)
+        .unwrap_or(&bundle.bundle_dir)
+        .display()
+        .to_string())
+}
+
+// Emit a high-severity SSRF finding into the engagement immediately on confirmation
+fn emit_ssrf_finding(
+    engagement_root: &Path,
+    candidate: &CorpusCandidate,
+    verdict: &SemanticVerdict,
+    evidence_bundle: &str,
+) -> Result<()> {
+    let engagement = Engagement::load(engagement_root).context("load engagement for finding")?;
+    let finding = ToolFinding::new(
+        SSRF_FINDING_TOOL,
+        "Server-side request forgery confirmed",
+        FindingSeverity::High,
+    )
+    .evidence(format!(
+        "candidate {} verdict {} evidence {}",
+        candidate.id,
+        verdict_class_name(verdict),
+        evidence_bundle
+    ))
+    .recommendation(
+        "Validate and allowlist outbound fetch targets; block internal and link-local addresses",
+    );
+    write_finding(&engagement, &finding).context("write ssrf finding")?;
+    Ok(())
+}
+
+// Append a plan hash to the resume ledger without duplicating entries
+fn append_tested_hash(engagement_root: &Path, plan_hash: &str) -> Result<()> {
+    let path = engagement_root.join(RESUME_RELATIVE_PATH);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create hunt state directory")?;
+    }
+    let mut ledger = std::fs::read_to_string(&path).unwrap_or_default();
+    if !ledger.lines().any(|line| line.trim() == plan_hash) {
+        ledger.push_str(plan_hash);
+        ledger.push('\n');
+        std::fs::write(&path, ledger).context("append tested plan hash")?;
+    }
+    Ok(())
+}
+
+// Render a semantic verdict class as its stable snake_case name
+fn verdict_class_name(verdict: &SemanticVerdict) -> String {
+    serde_json::to_value(verdict.classification)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 // Load stable JSONL candidates
 fn load_candidates(path: &Path) -> Result<Vec<CorpusCandidate>> {
     if !path.exists() {
@@ -497,6 +796,36 @@ mod tests {
             injection_params: Vec::new(),
             summary: format!("candidate {id}"),
         }
+    }
+
+    fn ssrf_candidate(id: &str) -> CorpusCandidate {
+        CorpusCandidate {
+            id: id.to_string(),
+            kind: CandidateKind::ServerSideRequestTarget,
+            source: CandidateSource::Traffic,
+            safety: CandidateSafety::RequiresApproval,
+            state_change: CandidateStateChange::ReadOnly,
+            autonomous_safe: false,
+            record_ids: vec![format!("record-{id}")],
+            observation_ids: Vec::new(),
+            injection_params: vec!["url".to_string()],
+            summary: format!("ssrf {id}"),
+        }
+    }
+
+    #[test]
+    fn select_ssrf_candidates_keeps_only_server_side_request_targets() {
+        let selected = select_ssrf_candidates(vec![
+            ssrf_candidate("ssrf-1"),
+            candidate("read-1", CandidateStateChange::ReadOnly),
+            ssrf_candidate("ssrf-2"),
+        ]);
+
+        let ids: Vec<&str> = selected
+            .iter()
+            .map(|candidate| candidate.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["ssrf-1", "ssrf-2"]);
     }
 
     #[test]

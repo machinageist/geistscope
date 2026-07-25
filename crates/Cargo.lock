@@ -2657,13 +2657,19 @@ name = "mg-hunt"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
+ "engagement",
  "evidence-core",
+ "http-client",
+ "oob-core",
  "replay-engine",
+ "replay-runner",
  "request-corpus",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

@@ -55,11 +55,11 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
 - [x] **6. Evidence with OOB artifact** (`evidence-core`) — optional `oob_hit.json` + `replay_io.json`
   slots written when an active test produces them; run-dir immutability guard; model still sees only
   the redacted summary. Gate: passed.
-- [~] **7. mg-hunt wiring** (`mg-hunt`) — replace fixture loader with the live runner for SSRF:
-  select → plan → policy gate (`--confirmed` + approval, HighActive) → OOB token → substitute →
-  live send → classify → evidence incl. OOB → ledger; add active/SSRF `RiskFilter`. Gate:
-  `cargo test -p mg-hunt` + clippy.
-- [ ] **8. Offline end-to-end acceptance** — local axum lab: `url=<oob-url>` triggers a server-side
+- [x] **7. mg-hunt wiring** (`mg-hunt`) — `run --risk active` branch + async `execute_ssrf_test`:
+  select → plan → bind approval (`--confirmed`) → mint OOB → inject → live send → correlate →
+  classify → evidence incl. OOB → engagement finding → ledger. Sync main + Tokio `block_on`. Gate:
+  passed (unit-tested selection/gating; live loop proven in Task 8).
+- [~] **8. Offline end-to-end acceptance** — local axum lab: `url=<oob-url>` triggers a server-side
   GET (blind SSRF); metadata-sentinel host reflects a marker (response-based). Full `mg-hunt run`
   → verified SSRF finding + evidence + ledger, no third party. Update the progress checklist.
   Gate: E2E passes; full `cargo test` from `crates/`; `git diff --check`.

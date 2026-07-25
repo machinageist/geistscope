@@ -12,9 +12,15 @@ anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
 request-corpus = { path = "../request-corpus" }
 replay-engine = { path = "../replay-engine" }
+replay-runner = { path = "../replay-runner" }
+oob-core = { path = "../oob-core" }
 evidence-core = { path = "../evidence-core" }
+engagement = { path = "../engagement" }
+http-client = { path = "../http-client" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3"
+axum = "0.7"
