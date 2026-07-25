@@ -44,6 +44,9 @@ pub enum SemanticVerdictClass {
     InterestingDiff,
     BoundaryViolationRead,
     InvalidTest,
+    SsrfOobConfirmed,
+    SsrfResponseLeak,
+    SsrfNoSignal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +224,45 @@ impl SemanticDiffEngine {
             reason: "response did not match a secure denial or controlled boundary marker".into(),
         }
     }
+
+    // Classify an SSRF replay from correlated OOB evidence and internal response markers
+    pub fn classify_ssrf(
+        &self,
+        outcome: &ReplayOutcome,
+        oob_confirmed: bool,
+        markers: &[&str],
+    ) -> SemanticVerdict {
+        // A correlated out-of-band callback is the strongest, evidence-backed proof
+        if oob_confirmed {
+            return SemanticVerdict {
+                classification: SemanticVerdictClass::SsrfOobConfirmed,
+                boundary_violation: true,
+                matched_markers: Vec::new(),
+                reason:
+                    "out-of-band callback correlated to this plan confirms a server-side request"
+                        .into(),
+            };
+        }
+        // Otherwise an internal-target marker reflected into the response proves the fetch
+        let matched = matched_response_markers(outcome, markers);
+        if !matched.is_empty() {
+            return SemanticVerdict {
+                classification: SemanticVerdictClass::SsrfResponseLeak,
+                boundary_violation: true,
+                matched_markers: matched,
+                reason:
+                    "response body reflected an internal-target marker from the injected request"
+                        .into(),
+            };
+        }
+        SemanticVerdict {
+            classification: SemanticVerdictClass::SsrfNoSignal,
+            boundary_violation: false,
+            matched_markers: Vec::new(),
+            reason: "no correlated out-of-band interaction and no internal marker in the response"
+                .into(),
+        }
+    }
 }
 
 impl ReplayPlanRequest {
@@ -338,6 +380,15 @@ fn matched_target_markers(outcome: &ReplayOutcome) -> Vec<String> {
         .iter()
         .filter(|marker| !marker.is_empty() && outcome.body.contains(marker.as_str()))
         .cloned()
+        .collect()
+}
+
+// Find internal-target markers that appear in the injected request's response body
+fn matched_response_markers(outcome: &ReplayOutcome, markers: &[&str]) -> Vec<String> {
+    markers
+        .iter()
+        .filter(|marker| !marker.is_empty() && outcome.body.contains(**marker))
+        .map(|marker| (*marker).to_string())
         .collect()
 }
 
@@ -469,6 +520,41 @@ mod tests {
     use request_corpus::{
         CandidateKind, CandidateSafety, CandidateSource, CandidateStateChange, CorpusCandidate,
     };
+
+    #[test]
+    fn ssrf_correlated_oob_hit_is_confirmed() {
+        let outcome = ReplayOutcome::http(200, "request accepted");
+        let verdict = SemanticDiffEngine.classify_ssrf(&outcome, true, &[]);
+
+        assert_eq!(
+            verdict.classification,
+            SemanticVerdictClass::SsrfOobConfirmed
+        );
+        assert!(verdict.boundary_violation);
+    }
+
+    #[test]
+    fn ssrf_internal_marker_in_response_is_leak() {
+        let outcome =
+            ReplayOutcome::http(200, "{\"ami-id\":\"ami-123\",\"instance-id\":\"i-abc\"}");
+        let verdict = SemanticDiffEngine.classify_ssrf(&outcome, false, &["instance-id"]);
+
+        assert_eq!(
+            verdict.classification,
+            SemanticVerdictClass::SsrfResponseLeak
+        );
+        assert!(verdict.boundary_violation);
+        assert_eq!(verdict.matched_markers, vec!["instance-id".to_string()]);
+    }
+
+    #[test]
+    fn ssrf_without_oob_or_marker_is_no_signal() {
+        let outcome = ReplayOutcome::http(200, "nothing interesting here");
+        let verdict = SemanticDiffEngine.classify_ssrf(&outcome, false, &["instance-id"]);
+
+        assert_eq!(verdict.classification, SemanticVerdictClass::SsrfNoSignal);
+        assert!(!verdict.boundary_violation);
+    }
 
     #[test]
     fn build_injected_request_replaces_only_target_param() {

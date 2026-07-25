@@ -201,3 +201,28 @@ not assumed. Both pass; clippy clean; `mg-hunt` (also a `PlanBuilder` consumer) 
 **Adjustment.** The executable-semantics fix means Task 7 must *bind an approval grant* to the SSRF
 plan (hash the plan, record operator approval, rebuild with the grant) before the runner will send
 — which is exactly the `--confirmed` + approval flow the plan already calls for.
+
+---
+
+## Task 5 — SSRF/OOB semantic verdict
+
+**Goal.** Turn a replay outcome (plus whatever the OOB listener correlated) into a deterministic
+SSRF verdict, where "confirmed" is only ever backed by real evidence.
+
+**Design choice.** Rather than overload the existing `classify` (which is IDOR/authz-shaped —
+tenant markers and auth-failure shapes), added a sibling `classify_ssrf(outcome, oob_confirmed,
+markers)`. The OOB result arrives as a plain `bool`, so `replay-engine` stays decoupled from
+`oob-core` — the orchestrator (Task 7) correlates the hit and passes the answer in. Three new
+verdict classes: `SsrfOobConfirmed` (a correlated out-of-band callback — the strongest proof),
+`SsrfResponseLeak` (an internal-target marker reflected into the response body), and
+`SsrfNoSignal`. The first two set `boundary_violation = true`; only these two are ever "confirmed",
+and both require real evidence — a correlated hit or a marker actually present in the real
+response. Nothing here is settable by an LLM.
+
+**RED → GREEN.** Three tests, one per branch (OOB hit → confirmed; marker in body → leak; neither →
+no-signal). 15/15 replay-engine tests pass; clippy clean. Adding the variants was safe because the
+only exhaustive-ish consumer, `mg-hunt`, already matches `classification` with a `_` arm.
+
+**Adjustment.** None. Task 7 will call `classify_ssrf` with `oob_confirmed` from
+`OobListener::wait_for_hit` and `markers` being the cloud-metadata / lab-sentinel strings to look
+for in the response.

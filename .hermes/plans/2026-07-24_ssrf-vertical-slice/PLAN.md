@@ -49,10 +49,10 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
   plans, via `http-client` GET, records exact I/O; refuses out-of-scope/unapproved with no send
   (proven via wiremock `expect(0)`). Also fixed replay-engine so a matching approval grant makes an
   approval-required plan executable. Gate: passed.
-- [~] **5. SSRF/OOB verdict** (`replay-engine`) — `SsrfOobConfirmed` / `SsrfResponseLeak` /
-  `SsrfNoSignal`; confirmed only when the evidence contract is satisfied. Gate:
-  `cargo test -p replay-engine` + clippy.
-- [ ] **6. Evidence with OOB artifact** (`evidence-core`) — correlated OOB hit + recorded I/O added
+- [x] **5. SSRF/OOB verdict** (`replay-engine`) — `classify_ssrf(outcome, oob_confirmed, markers)`
+  → `SsrfOobConfirmed` / `SsrfResponseLeak` / `SsrfNoSignal`; confirmed only from a real OOB hit or
+  a real response marker. OOB result passed as a bool (engine stays oob-core-free). Gate: passed.
+- [~] **6. Evidence with OOB artifact** (`evidence-core`) — correlated OOB hit + recorded I/O added
   to the bundle, redacted + immutable. Gate: `cargo test -p evidence-core` + clippy.
 - [ ] **7. mg-hunt wiring** (`mg-hunt`) — replace fixture loader with the live runner for SSRF:
   select → plan → policy gate (`--confirmed` + approval, HighActive) → OOB token → substitute →
