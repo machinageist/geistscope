@@ -45,10 +45,11 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
 - [x] **3. OOB core library** (`oob-core`) — std-only loopback listener; `mint(engagement,
   plan_hash, candidate_id)` (opaque, bound) · `oob_url` · `wait_for_hit`/`correlate -> OobHit`.
   Gate: passed (5x, no flake).
-- [~] **4. Live replay runner** (`replay-runner`) — sends only for `executable` (scope + approval)
-  plans, via `http-client`, records exact I/O; refuses out-of-scope/unapproved with no send.
-  `wiremock` dev-dep for local tests. Gate: `cargo test -p replay-runner` + clippy.
-- [ ] **5. SSRF/OOB verdict** (`replay-engine`) — `SsrfOobConfirmed` / `SsrfResponseLeak` /
+- [x] **4. Live replay runner** (`replay-runner`) — sends only for `executable` (scope + approval)
+  plans, via `http-client` GET, records exact I/O; refuses out-of-scope/unapproved with no send
+  (proven via wiremock `expect(0)`). Also fixed replay-engine so a matching approval grant makes an
+  approval-required plan executable. Gate: passed.
+- [~] **5. SSRF/OOB verdict** (`replay-engine`) — `SsrfOobConfirmed` / `SsrfResponseLeak` /
   `SsrfNoSignal`; confirmed only when the evidence contract is satisfied. Gate:
   `cargo test -p replay-engine` + clippy.
 - [ ] **6. Evidence with OOB artifact** (`evidence-core`) — correlated OOB hit + recorded I/O added

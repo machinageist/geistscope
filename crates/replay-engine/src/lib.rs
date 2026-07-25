@@ -300,7 +300,6 @@ impl PlanBuilder {
         }
 
         let approval_required = requires_approval(&request);
-        let executable = !approval_required && request.scope_decision == ScopeDecision::InScope;
         let plan_hash = plan_hash(&request);
         if request
             .approval_grant_hash
@@ -309,6 +308,13 @@ impl PlanBuilder {
         {
             return Err(ReplayPlanError::ApprovalHashMismatch);
         }
+        // An approval-required plan only executes once a matching approval grant is bound
+        let approval_satisfied = request
+            .approval_grant_hash
+            .as_deref()
+            .is_some_and(|grant_hash| grant_hash == plan_hash);
+        let executable = request.scope_decision == ScopeDecision::InScope
+            && (!approval_required || approval_satisfied);
 
         Ok(ReplayPlan {
             plan_hash,
@@ -654,6 +660,39 @@ mod tests {
         let error = PlanBuilder.build(request).unwrap_err();
 
         assert_eq!(error, ReplayPlanError::ApprovalHashMismatch);
+    }
+
+    #[test]
+    fn approval_required_plan_becomes_executable_with_matching_grant() {
+        let base = ReplayPlanRequest::new(active_candidate(), ScopeDecision::InScope)
+            .with_evidence_output_dir("evidence/replay/ssrf-candidate");
+
+        // Without a grant the approval-required plan stays inert
+        let unapproved = PlanBuilder.build(base.clone()).unwrap();
+        assert!(unapproved.approval_required);
+        assert!(!unapproved.executable);
+
+        // Binding the matching grant hash makes the same plan executable
+        let approved = PlanBuilder
+            .build(base.with_approval_grant_hash(unapproved.plan_hash.clone()))
+            .unwrap();
+        assert!(approved.approval_required);
+        assert!(approved.executable);
+    }
+
+    fn active_candidate() -> CorpusCandidate {
+        CorpusCandidate {
+            id: "ssrf-candidate-001".into(),
+            kind: CandidateKind::ServerSideRequestTarget,
+            source: CandidateSource::Traffic,
+            safety: CandidateSafety::RequiresApproval,
+            state_change: CandidateStateChange::ReadOnly,
+            autonomous_safe: false,
+            record_ids: vec!["fetch-record".into()],
+            observation_ids: Vec::new(),
+            injection_params: vec!["url".into()],
+            summary: "server-side request sink pending approval".into(),
+        }
     }
 
     fn read_only_candidate() -> CorpusCandidate {

@@ -165,3 +165,39 @@ inheritance — never assume an accepted connection matches the listener you con
 **Adjustment.** None to the plan. `wait_for_hit(token, timeout)` (blocking, condvar-signalled) is
 the API Task 4/7's runner will call after sending an SSRF payload; `correlate(token)` is the
 non-blocking variant for after-the-fact checks.
+
+---
+
+## Task 4 — Live replay runner (the load-bearing piece)
+
+**Goal.** The first crate that actually sends a request. Given an approved, in-scope plan and a
+concrete request, send it through the shared HTTP client and record exactly what came back — and,
+critically, send *nothing* for a plan the engine did not mark executable.
+
+**Design gap surfaced (and fixed) before the runner could work.** Wiring the runner exposed a real
+hole in the replay engine's approval model: `requires_approval` is true for any `!autonomous_safe`
+candidate (all SSRF), and `executable` was computed as `!approval_required && InScope`. So an SSRF
+plan was **never executable — even with a valid approval grant**. The approval-grant hash was
+validated but never actually *enabled* execution; the approval mechanism was half-wired. Fixed
+`PlanBuilder::build` so `executable = InScope && (!approval_required || approval_satisfied)`, where
+`approval_satisfied` means a grant hash matching the plan hash is bound. This preserves every
+existing behavior (the only approval-required test uses `Ambiguous` scope, which still fails the
+`InScope` check; the mismatch test still errors) and adds the missing capability: an operator can
+approve a HighActive SSRF test and it becomes executable. Pinned with a new test.
+
+**Runner shape.** `ReplayRunner::run(plan, request)` gates first — out-of-scope → `OutOfScope`,
+not-executable → `NotExecutable`, both without touching the network — then sends via
+`http_client::Client::get` and records status, response headers, and body into the `ReplayOutcome`
+(with the sent request echoed). v1 replays GET requests whose SSRF payload rides in the URL query
+(matching the candidate detector, which flags query params); header/body injection is a documented
+later extension. Uses the shared client, never raw reqwest.
+
+**RED → GREEN, tested locally only.** Two `#[tokio::test]`s against a `wiremock` mock server bound
+to `127.0.0.1`: an executable (approved) SSRF plan sends exactly one request and records the 200 +
+custom header + body; a non-executable (unapproved) plan returns `NotExecutable` and the mock's
+`expect(0)` verifies on drop that **zero** requests were sent — the no-send safety property proven,
+not assumed. Both pass; clippy clean; `mg-hunt` (also a `PlanBuilder` consumer) stays 10/10.
+
+**Adjustment.** The executable-semantics fix means Task 7 must *bind an approval grant* to the SSRF
+plan (hash the plan, record operator approval, rebuild with the grant) before the runner will send
+— which is exactly the `--confirmed` + approval flow the plan already calls for.
