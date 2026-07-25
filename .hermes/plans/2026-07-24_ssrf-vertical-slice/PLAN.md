@@ -34,12 +34,12 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
 
 ## Tasks (strict TDD: RED → GREEN → REFACTOR; commit each verified task)
 
-- [~] **0. Scaffold** — repo PLAN.md + METHODOLOGY.md; create `oob-core` + `replay-runner`; add to
+- [x] **0. Scaffold** — repo PLAN.md + METHODOLOGY.md; create `oob-core` + `replay-runner`; add to
   `crates/Cargo.toml`. Gate: `cargo build` from `crates/`.
-- [ ] **1. SSRF candidate detector** (`request-corpus`) — `CandidateKind::ServerSideRequestTarget`
+- [x] **1. SSRF candidate detector** (`request-corpus`) — `CandidateKind::ServerSideRequestTarget`
   + analyzer flagging URL/host-valued or SSRF-prone-named params; `safety = RequiresApproval`,
-  `autonomous_safe = false`. Gate: `cargo test -p request-corpus` + clippy `-D warnings`.
-- [ ] **2. Payload substitution + ReplayOutcome extension** (`replay-engine`) — pure fn injects
+  `autonomous_safe = false`. Carries `injection_params` on the candidate. Gate: passed.
+- [~] **2. Payload substitution + ReplayOutcome extension** (`replay-engine`) — pure fn injects
   payload at the candidate location; `ReplayOutcome` carries sent-request echo + response
   status/headers/body. Gate: `cargo test -p replay-engine` + clippy.
 - [ ] **3. OOB core library** (`oob-core`) — `mint_token(engagement, plan_hash, candidate_id)`

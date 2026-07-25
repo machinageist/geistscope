@@ -494,6 +494,7 @@ mod tests {
             autonomous_safe: state_change != CandidateStateChange::StateChanging,
             record_ids: vec![format!("record-{id}")],
             observation_ids: Vec::new(),
+            injection_params: Vec::new(),
             summary: format!("candidate {id}"),
         }
     }

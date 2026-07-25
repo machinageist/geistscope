@@ -27,6 +27,8 @@ pub struct CorpusCandidate {
     pub record_ids: Vec<String>,
     #[serde(default)]
     pub observation_ids: Vec<String>,
+    #[serde(default)]
+    pub injection_params: Vec<String>,
     pub summary: String,
 }
 
@@ -37,6 +39,7 @@ pub enum CandidateKind {
     StateChangingOperation,
     DomXssCandidate,
     ClientSideOriginCandidate,
+    ServerSideRequestTarget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +85,10 @@ impl CandidateBuilder {
             } else {
                 candidates.push(state_changing_candidate(record));
             }
+            // Flag server-side request sinks regardless of method, gated behind approval
+            if let Some(candidate) = server_side_request_candidate(record) {
+                candidates.push(candidate);
+            }
         }
 
         for grouped_records in comparable_reads.values() {
@@ -112,6 +119,7 @@ impl CandidateBuilder {
                         autonomous_safe: true,
                         record_ids: Vec::new(),
                         observation_ids: vec![format!("observation-{index}")],
+                        injection_params: Vec::new(),
                         summary: format!(
                             "attacker-controllable {:?} reaches {:?} at {}",
                             dom.source_type, dom.sink_type, dom.selector_path
@@ -132,6 +140,7 @@ impl CandidateBuilder {
                         autonomous_safe: true,
                         record_ids: Vec::new(),
                         observation_ids: vec![format!("observation-{index}")],
+                        injection_params: Vec::new(),
                         summary: format!(
                             "postMessage target origin `{}` requires origin-bound validation",
                             message.target_origin
@@ -232,6 +241,7 @@ fn cross_tenant_read_candidate(records: &[&TrafficRecord]) -> CorpusCandidate {
         autonomous_safe: true,
         record_ids,
         observation_ids: Vec::new(),
+        injection_params: Vec::new(),
         summary: "comparable read-only traffic crosses controlled tenant labels".into(),
     }
 }
@@ -247,12 +257,114 @@ fn state_changing_candidate(record: &TrafficRecord) -> CorpusCandidate {
         autonomous_safe: false,
         record_ids: vec![record.id.clone()],
         observation_ids: Vec::new(),
+        injection_params: Vec::new(),
         summary: format!(
             "{} {} is state-changing and requires explicit approval before replay",
             record.method.to_ascii_uppercase(),
             record.path
         ),
     }
+}
+
+// Parameter names that commonly carry a server-fetched URL or host
+const SSRF_PRONE_PARAM_NAMES: &[&str] = &[
+    "url",
+    "uri",
+    "link",
+    "src",
+    "source",
+    "dest",
+    "destination",
+    "redirect",
+    "redirect_uri",
+    "redirect_url",
+    "return_url",
+    "returnto",
+    "next",
+    "continue",
+    "callback",
+    "webhook",
+    "fetch",
+    "feed",
+    "host",
+    "domain",
+    "site",
+    "target",
+    "remote",
+    "proxy",
+    "image",
+    "image_url",
+    "imageurl",
+    "img",
+    "load",
+    "file_url",
+];
+
+// Build a server-side request target candidate when a record exposes SSRF-prone input
+fn server_side_request_candidate(record: &TrafficRecord) -> Option<CorpusCandidate> {
+    let injection_params = ssrf_injection_params(record);
+    if injection_params.is_empty() {
+        return None;
+    }
+    // Mirror the record method so a mutating replay still surfaces as state-changing
+    let state_change = if is_read_only_method(&record.method) {
+        CandidateStateChange::ReadOnly
+    } else {
+        CandidateStateChange::StateChanging
+    };
+    let summary = format!(
+        "{} {} exposes server-fetched input on [{}]; requires approval before an SSRF probe",
+        record.method.to_ascii_uppercase(),
+        record.path,
+        injection_params.join(", ")
+    );
+    Some(CorpusCandidate {
+        id: format!("ssrf-{}", record.id),
+        kind: CandidateKind::ServerSideRequestTarget,
+        source: CandidateSource::Traffic,
+        safety: CandidateSafety::RequiresApproval,
+        state_change,
+        autonomous_safe: false,
+        record_ids: vec![record.id.clone()],
+        observation_ids: Vec::new(),
+        injection_params,
+        summary,
+    })
+}
+
+// Collect distinct SSRF-prone parameter names from a record's query and param names
+fn ssrf_injection_params(record: &TrafficRecord) -> Vec<String> {
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    // Query pairs expose values, so match on a prone name or a URL-shaped value
+    if let Ok(parsed) = url::Url::parse(&record.url) {
+        for (name, value) in parsed.query_pairs() {
+            if is_ssrf_prone_name(&name) || value_looks_like_url(&value) {
+                names.insert(name.into_owned());
+            }
+        }
+    }
+    // Param-name list also covers body parameters whose values were not captured
+    for name in &record.params {
+        if is_ssrf_prone_name(name) {
+            names.insert(name.clone());
+        }
+    }
+    names.into_iter().collect()
+}
+
+// Check whether a parameter name is a known server-side request sink
+fn is_ssrf_prone_name(name: &str) -> bool {
+    let lowered = name.to_ascii_lowercase();
+    SSRF_PRONE_PARAM_NAMES.contains(&lowered.as_str())
+}
+
+// Check whether a parameter value looks like an absolute or scheme-relative URL
+fn value_looks_like_url(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("//")
+        || trimmed.contains("://")
 }
 
 // Check whether a browser source can be controlled by an attacker/test marker
@@ -400,6 +512,76 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].kind, CandidateKind::ClientSideOriginCandidate);
         assert_eq!(candidates[0].safety, CandidateSafety::BrowserOnlyProof);
+    }
+
+    #[test]
+    fn ssrf_prone_url_param_becomes_server_side_request_target_candidate() {
+        let records = vec![traffic_record_with_params(
+            "fetch-image",
+            "GET",
+            "https://app.example.test/api/fetch?url=http://169.254.169.254/latest/meta-data/",
+            &["url"],
+        )];
+
+        let candidates = CandidateBuilder::default().from_traffic_records(&records);
+        let ssrf: Vec<_> = candidates
+            .iter()
+            .filter(|candidate| candidate.kind == CandidateKind::ServerSideRequestTarget)
+            .collect();
+
+        assert_eq!(ssrf.len(), 1);
+        assert_eq!(ssrf[0].safety, CandidateSafety::RequiresApproval);
+        assert!(!ssrf[0].autonomous_safe);
+        assert_eq!(ssrf[0].injection_params, vec!["url".to_string()]);
+        assert_eq!(ssrf[0].record_ids, vec!["fetch-image".to_string()]);
+    }
+
+    #[test]
+    fn ssrf_prone_param_detected_by_value_even_with_unremarkable_name() {
+        let records = vec![traffic_record_with_params(
+            "next-redirect",
+            "GET",
+            "https://app.example.test/go?next=https://internal.svc.local/admin",
+            &["next"],
+        )];
+
+        let candidates = CandidateBuilder::default().from_traffic_records(&records);
+        let ssrf: Vec<_> = candidates
+            .iter()
+            .filter(|candidate| candidate.kind == CandidateKind::ServerSideRequestTarget)
+            .collect();
+
+        assert_eq!(ssrf.len(), 1);
+        assert_eq!(ssrf[0].injection_params, vec!["next".to_string()]);
+    }
+
+    #[test]
+    fn benign_search_param_is_not_ssrf_candidate() {
+        let records = vec![traffic_record_with_params(
+            "search",
+            "GET",
+            "https://app.example.test/search?q=hello",
+            &["q"],
+        )];
+
+        let candidates = CandidateBuilder::default().from_traffic_records(&records);
+
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.kind != CandidateKind::ServerSideRequestTarget)
+        );
+    }
+
+    fn traffic_record_with_params(
+        id: &str,
+        method: &str,
+        url: &str,
+        params: &[&str],
+    ) -> TrafficRecord {
+        let mut record = traffic_record(id, method, url, None, None);
+        record.params = params.iter().map(|param| param.to_string()).collect();
+        record
     }
 
     fn traffic_record(

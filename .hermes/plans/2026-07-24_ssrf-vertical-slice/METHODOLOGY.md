@@ -50,3 +50,41 @@ the working directory. No behavior change anywhere else; the tree is green and r
 real RED test in Task 1.
 
 **Adjustment.** None. Plan unchanged.
+
+---
+
+## Task 1 — SSRF candidate detector
+
+**Goal.** Teach the corpus to notice server-side-request sinks: given captured traffic, emit a
+`ServerSideRequestTarget` candidate for any request that exposes a URL/host-shaped parameter — and
+emit nothing for benign inputs. This is the "hypothesize" step's raw material for SSRF.
+
+**RED.** Three tests: a `?url=http://169.254.169.254/...` request must yield exactly one SSRF
+candidate that `RequiresApproval`, is not `autonomous_safe`, and names `url` as the injection
+param; a `?next=https://internal.svc.local/...` request must be caught by its URL-shaped *value*
+even though `next` is an unremarkable name; and a `?q=hello` request must produce no SSRF
+candidate. Ran `cargo test -p request-corpus` → compile error (`no variant ServerSideRequestTarget`,
+`no field injection_params`). That is the RED: the tests encode an API that does not exist yet.
+
+**GREEN.** Added the `ServerSideRequestTarget` variant, a new `injection_params: Vec<String>` field
+on `CorpusCandidate` (so the candidate carries *which* parameter a later task will inject), and an
+analyzer that runs for every record: it flags a parameter when the name is in a curated
+SSRF-prone set (`url, uri, redirect, callback, webhook, fetch, host, …`) **or** its value looks
+like a URL. SSRF candidates are always `RequiresApproval` + `autonomous_safe = false`, matching the
+decision record's rule that OOB/internal-network tests need explicit approval. Tests pass 9/9;
+clippy clean.
+
+**What it revealed.** Two concrete facts that shaped the code:
+1. `TrafficRecord.params` holds parameter *names only* — values are not in it. So name-matching
+   alone can't see a URL-valued parameter with a boring name (`next=…`). The analyzer therefore
+   parses `record.url` query pairs to inspect values, and still consults `params` for name matches
+   (which also covers body parameters whose values weren't captured). This is why the crate gained
+   a real `url` dependency (previously dev-only).
+2. Adding a field to the shared `CorpusCandidate` struct is exactly the ripple the plan warned
+   about: two dependent crates construct it directly in test helpers (`replay-engine`,
+   `mg-hunt`) and stopped compiling until each got `injection_params: Vec::new()`. No production
+   code outside `request-corpus` builds candidates, and nothing matches `CandidateKind`
+   exhaustively, so the new variant was otherwise safe.
+
+**Adjustment.** None to the plan. Note for Task 2/4: the injection target now travels on the
+candidate as `injection_params`, so the substitution/runner do not need to re-derive it.

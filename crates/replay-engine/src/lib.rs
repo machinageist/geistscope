@@ -471,6 +471,7 @@ mod tests {
             autonomous_safe: true,
             record_ids: vec!["alice-read".into(), "bob-read".into()],
             observation_ids: Vec::new(),
+            injection_params: Vec::new(),
             summary: "compare controlled tenant reads".into(),
         }
     }
