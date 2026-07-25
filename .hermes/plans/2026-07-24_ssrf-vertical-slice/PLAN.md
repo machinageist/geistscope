@@ -42,10 +42,10 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
 - [x] **2. Payload substitution + ReplayOutcome extension** (`replay-engine`) — new `ReplayRequest`
   + pure `build_injected_request` (primitives, keeps engine engagement-free); `ReplayOutcome`
   carries `sent_request` + `response_headers`. Secret headers filtered at construction. Gate: passed.
-- [~] **3. OOB core library** (`oob-core`) — `mint_token(engagement, plan_hash, candidate_id)`
-  (opaque, bound) · `oob_url` · loopback listener · `correlate(token) -> Option<OobHit>`. Gate:
-  `cargo test -p oob-core` + clippy.
-- [ ] **4. Live replay runner** (`replay-runner`) — sends only for `executable` (scope + approval)
+- [x] **3. OOB core library** (`oob-core`) — std-only loopback listener; `mint(engagement,
+  plan_hash, candidate_id)` (opaque, bound) · `oob_url` · `wait_for_hit`/`correlate -> OobHit`.
+  Gate: passed (5x, no flake).
+- [~] **4. Live replay runner** (`replay-runner`) — sends only for `executable` (scope + approval)
   plans, via `http-client`, records exact I/O; refuses out-of-scope/unapproved with no send.
   `wiremock` dev-dep for local tests. Gate: `cargo test -p replay-runner` + clippy.
 - [ ] **5. SSRF/OOB verdict** (`replay-engine`) — `SsrfOobConfirmed` / `SsrfResponseLeak` /

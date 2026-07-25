@@ -127,3 +127,41 @@ instead be attached by the runner from the session vault (Task 4) — never from
 
 **Adjustment.** Plan wording for Task 4 updated in spirit: the runner maps `TrafficRecord` →
 primitive args for `build_injected_request`, then attaches session auth before sending.
+
+---
+
+## Task 3 — OOB core library
+
+**Goal.** Give the hunt a way to *prove blind SSRF*: mint an opaque token bound to a specific
+plan/candidate, embed it in a callback URL, and — when the target's server fetches that URL —
+correlate the inbound hit back to the plan that caused it. This is the deterministic-plane
+capability the decision record insists on: "correlate OOB interactions" is Rust's job, never the
+model's.
+
+**Design choice.** Salvaged the token/callback idea from the old `mg-oob` binary but rebuilt it as
+a **std-only synchronous listener** (loopback `TcpListener` + a worker thread), deliberately *not*
+pulling in tokio/axum. Reasons: the library stays tiny and dependency-light, it is trivially
+callable from synchronous test code, and the OOB listener's job (accept a request, read its path,
+record a token) needs nothing an async runtime would provide. The key upgrade over `mg-oob` is
+*binding*: `mint(engagement, plan_hash, candidate_id)` ties each token to its plan, so a hit
+resolves to a structured `OobHit { binding, ... }` instead of mere set-membership.
+
+**RED → GREEN.** Wrote four tests (a registered token's callback correlates to its binding; an
+unknown token is not a hit; tokens are 32 lowercase-hex; the OOB URL targets loopback), then the
+implementation. First run: 3 passed, **1 failed** — the correlation test timed out waiting for a
+hit.
+
+**What the failing test revealed (the useful part).** The correlation test passed when run alone
+but flaked under the default parallel test run. Root cause: the listener socket is set
+non-blocking (so the accept loop can poll for shutdown), and **on macOS/BSD a socket returned by
+`accept()` inherits the listener's non-blocking flag** (unlike Linux, where it does not). So the
+per-connection `read_line` intermittently hit `WouldBlock` before the request bytes arrived and
+the handler bailed *without recording the hit* — a race that only shows up when the machine is
+busy enough that the client's bytes haven't landed at read time. Fix: force the accepted stream
+back to blocking (`set_nonblocking(false)`) before reading. After that, 5/5 repeated runs pass.
+Lesson worth keeping: non-blocking-ness is a property of each socket and its platform-specific
+inheritance — never assume an accepted connection matches the listener you configured.
+
+**Adjustment.** None to the plan. `wait_for_hit(token, timeout)` (blocking, condvar-signalled) is
+the API Task 4/7's runner will call after sending an SSRF payload; `correlate(token)` is the
+non-blocking variant for after-the-fact checks.
