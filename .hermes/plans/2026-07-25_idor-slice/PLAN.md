@@ -22,10 +22,10 @@ unblocks SSRF against authenticated endpoints. Salvage source: `crates/mg-authz/
 - [x] **1. Session header resolver** (`session`) — `SessionProfile::resolve_headers(env_lookup)` +
   `auth_headers()`; kind→header mapping; rejects plaintext refs; fails on missing env. Gate: passed
   (11 tests).
-- [~] **2. Auth-aware runner** (`replay-runner`) — send `request.method` + `request.headers` and
-  attach a supplied identity's auth headers (today GET-only, headers ignored, no auth). Refusals
-  unchanged. Gate: `cargo test -p replay-runner` + clippy (local wiremock).
-- [ ] **3. Apply substitution + victim markers** (`replay-engine`) — apply `ReplaySubstitution`
+- [x] **2. Auth-aware runner** (`replay-runner` + `http-client`) — added `http_client::Client::send`
+  (method/headers/body, same retry/UA); runner sends the request verbatim (incl. auth headers).
+  Refusals unchanged; SSRF E2E still green. Gate: passed.
+- [~] **3. Apply substitution + victim markers** (`replay-engine`) — apply `ReplaySubstitution`
   (from_session/to_session → attacker/victim) when building the authenticated request; derive
   `target_tenant_markers` from the victim baseline so `classify` can fire. Gate:
   `cargo test -p replay-engine` + clippy.

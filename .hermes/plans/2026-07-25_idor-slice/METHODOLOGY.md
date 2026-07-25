@@ -46,3 +46,30 @@ credential can only ever reach the wire through an env reference — the resolve
 leak a stored plaintext value, mirroring the same defense the SSRF slice put in `build_injected_request`.
 
 **Adjustment.** None. Task 2's runner will call `resolve_headers` for the attacker identity.
+
+---
+
+## Task 2 — Auth-aware runner
+
+**Goal.** Let the runner send a request *as an identity* — arbitrary method, custom headers
+(including auth), and a body — instead of the SSRF slice's bare `GET url`.
+
+**Design.** The gap was in the shared client, not the runner: `http_client::Client` only exposed
+`get`/`post_json`. Rather than reach for raw reqwest in the runner (which the conventions forbid),
+extended the shared client with a general `send(method, url, headers, body)` carrying the same
+throttle/retry/UA behavior, plus an `InvalidMethod` error. `ReplayRunner::run` now calls `send` with
+the request's own method/headers/body. The runner stays identity-agnostic — it faithfully sends
+whatever request it's handed; assembling the attacker's auth into that request is Task 3/5's job.
+
+**RED → GREEN.** A wiremock test that only responds to `POST /api/resource/42` carrying
+`authorization: Bearer alice-jwt` — so a pass proves the method *and* the auth header were sent
+verbatim (the SSRF slice could never have sent either). Both existing runner tests (GET record,
+no-send refusal) still hold. http-client 3/3, replay-runner 3/3, and mg-hunt 12/12 (the SSRF E2E
+routes through the same `send` now) — no regression. Clippy clean.
+
+**What it revealed.** The "auth-aware runner" everyone said IDOR needed turned out to be a
+one-method extension to the shared client plus a one-line call-site change — because the SSRF slice
+had already built the plan/approval/record/refuse scaffolding around the send. The capability that
+unlocks a whole second vuln class (and authenticated SSRF) was mostly already there.
+
+**Adjustment.** None.

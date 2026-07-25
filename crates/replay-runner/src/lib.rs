@@ -6,9 +6,10 @@
  *                  for the adaptive hunt. Executes an already-approved,
  *                  in-scope replay plan and records exactly what was sent
  *                  and received; refuses anything not marked executable.
- * Notes:           v1 replays GET requests whose SSRF payload rides in the
- *                  URL query; header/body injection is a later extension.
- *                  Sends through the shared http_client, never raw reqwest.
+ * Notes:           Sends the request verbatim (method, headers incl. any
+ *                  identity auth, body) through the shared http_client, never
+ *                  raw reqwest. Refuses any plan the engine did not mark
+ *                  executable.
  *******************************************************************/
 
 use http_client::Client;
@@ -53,7 +54,12 @@ impl ReplayRunner {
 
         let response = self
             .client
-            .get(&request.url)
+            .send(
+                &request.method,
+                &request.url,
+                &request.headers,
+                request.body.as_deref(),
+            )
             .await
             .map_err(|error| ReplayRunError::Transport(error.to_string()))?;
         let status = response.status().as_u16();
@@ -86,7 +92,7 @@ mod tests {
     use request_corpus::{
         CandidateKind, CandidateSafety, CandidateSource, CandidateStateChange, CorpusCandidate,
     };
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -122,6 +128,32 @@ mod tests {
                 .any(|(name, value)| name == "x-test" && value == "yes")
         );
         assert_eq!(outcome.sent_request.unwrap().url, request.url);
+    }
+
+    #[tokio::test]
+    async fn executable_plan_sends_method_headers_and_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/resource/42"))
+            .and(header("authorization", "Bearer alice-jwt"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("victim data"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let request = ReplayRequest {
+            method: "POST".to_string(),
+            url: format!("{}/api/resource/42", server.uri()),
+            headers: vec![("authorization".to_string(), "Bearer alice-jwt".to_string())],
+            body: Some("{\"note\":\"x\"}".to_string()),
+        };
+        let runner = ReplayRunner::new(Client::new(ClientConfig::default()).unwrap());
+
+        let outcome = runner.run(&approved_ssrf_plan(), &request).await.unwrap();
+
+        // wiremock's method+auth-header matchers verify the request was sent as given
+        assert_eq!(outcome.status, 200);
+        assert_eq!(outcome.body, "victim data");
     }
 
     #[tokio::test]

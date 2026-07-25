@@ -30,6 +30,8 @@ pub enum HttpError {
     Network(#[from] reqwest::Error),
     #[error("HTTP {0}")]
     Status(u16),
+    #[error("invalid method: {0}")]
+    InvalidMethod(String),
 }
 
 pub struct ClientConfig {
@@ -121,6 +123,42 @@ impl Client {
                     let base_ms = 300u64 * (1u64 << attempt);
                     // Jitter in [0, 200)ms breaks up synchronized retries
                     // when many concurrent clients hit the same transient failure
+                    let jitter_ms = fastrand::u64(0..200);
+                    tokio::time::sleep(Duration::from_millis(base_ms + jitter_ms)).await;
+                }
+                Err(e) => return Err(HttpError::Network(e)),
+            }
+        }
+    }
+
+    // Issue an arbitrary-method request with custom headers and optional body
+    pub async fn send(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: Option<&str>,
+    ) -> Result<Response, HttpError> {
+        let http_method = reqwest::Method::from_bytes(method.as_bytes())
+            .map_err(|_| HttpError::InvalidMethod(method.to_string()))?;
+        self.throttle().await;
+        let mut attempt = 0u32;
+        loop {
+            let mut builder = self
+                .inner
+                .request(http_method.clone(), url)
+                .header("User-Agent", self.next_ua());
+            for (name, value) in headers {
+                builder = builder.header(name.as_str(), value.as_str());
+            }
+            if let Some(body) = body {
+                builder = builder.body(body.to_string());
+            }
+            match builder.send().await {
+                Ok(r) => return Ok(r),
+                Err(_) if attempt < self.config.max_retries => {
+                    attempt += 1;
+                    let base_ms = 300u64 * (1u64 << attempt);
                     let jitter_ms = fastrand::u64(0..200);
                     tokio::time::sleep(Duration::from_millis(base_ms + jitter_ms)).await;
                 }
