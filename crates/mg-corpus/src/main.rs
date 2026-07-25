@@ -259,7 +259,9 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["kind"], "cross_tenant_read");
         assert_eq!(items[0]["state_change"], "read_only");
-        assert_eq!(items[0]["autonomous_safe"], true);
+        // A live cross-tenant read is an approval-gated active test, not autonomous
+        assert_eq!(items[0]["autonomous_safe"], false);
+        assert_eq!(items[0]["safety"], "requires_approval");
     }
 
     fn test_engagement() -> Engagement {
