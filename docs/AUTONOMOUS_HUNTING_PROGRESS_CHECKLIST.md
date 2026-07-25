@@ -39,6 +39,27 @@ for SSRF (including blind/OOB), end to end, tested only against `127.0.0.1` fixt
 
 Next candidate slices per the decision log: broken access control / IDOR, then critical injection.
 
+## Status (2026-07-25) — IDOR / broken-access-control slice complete
+
+Slice 1 of the post-SSRF roadmap
+(`~/.claude/plans/start-working-on-making-synthetic-nest.md`). The adaptive loop now closes for
+**cross-tenant / broken object-level authorization (IDOR)** end to end, on `127.0.0.1` only. Plan +
+dev-log: `.hermes/plans/2026-07-25_idor-slice/{PLAN,METHODOLOGY}.md`.
+
+- `session`: `SessionProfile::resolve_headers` / `auth_headers` materialize env-backed auth refs into
+  request headers (plaintext never materialized).
+- `http-client` + `replay-runner`: `Client::send` (arbitrary method + headers + body); the runner now
+  sends a request verbatim including identity auth — also unblocks authenticated SSRF.
+- `replay-engine`: `build_swapped_request` (replay the victim request as the attacker); IDOR verdict
+  reuses `classify` → `BoundaryViolationRead`.
+- `request-corpus`: `CrossTenantRead` carries a structured `CrossTenantSwap` (attacker/victim record +
+  session + victim marker); reclassified as approval-gated HighActive.
+- `mg-hunt`: `run --risk authz` + async `execute_authz_test`; shared `write_replay_evidence` /
+  `emit_finding`. Proven by an end-to-end two-tenant axum-lab test.
+
+Roadmap remainder: SSRF hardening, input pipeline, harness wiring (+ registry honesty). AI `risk.rank`
+deferred.
+
 ## Current implementation status
 
 ### Phase 0: Scope and policy foundation

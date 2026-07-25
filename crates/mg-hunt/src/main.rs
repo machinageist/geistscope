@@ -964,6 +964,7 @@ mod tests {
     use super::*;
     use request_corpus::{
         CandidateKind, CandidateSafety, CandidateSource, CandidateStateChange, CorpusCandidate,
+        CrossTenantSwap,
     };
 
     fn candidate(id: &str, state_change: CandidateStateChange) -> CorpusCandidate {
@@ -1029,6 +1030,105 @@ mod tests {
             .map(|candidate| candidate.id.as_str())
             .collect();
         assert_eq!(ids, vec!["read-1"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn idor_cross_tenant_read_confirms_finding_end_to_end() {
+        use axum::Router;
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+        use engagement::EngagementMeta;
+
+        // Vulnerable lab: returns the victim's object to any caller, no ownership check
+        async fn victim_object() -> impl IntoResponse {
+            (
+                StatusCode::OK,
+                "{\"owner_tenant\":\"tenant-b\",\"data\":\"bob-private\"}",
+            )
+        }
+        let lab = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let lab_addr = lab.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = Router::new().route("/api/projects/bob-1", get(victim_object));
+            axum::serve(lab, app).await.unwrap();
+        });
+
+        // A real engagement so evidence and findings have a home
+        let parent = tempfile::tempdir().unwrap();
+        let engagement = Engagement::init(
+            parent.path(),
+            EngagementMeta {
+                name: "idor-lab".to_string(),
+                target: "127.0.0.1".to_string(),
+                created_at: String::new(),
+                platform: None,
+                url: None,
+                tags: Vec::new(),
+            },
+        )
+        .unwrap();
+        let root = engagement.root.clone();
+
+        // The victim's own captured request, and a candidate that swaps in the attacker
+        let victim_record: TrafficRecord = serde_json::from_value(serde_json::json!({
+            "id": "bob-req",
+            "source": "test",
+            "captured_at": "2026-07-25T00:00:00Z",
+            "imported_at": "2026-07-25T00:00:00Z",
+            "method": "GET",
+            "url": format!("http://{lab_addr}/api/projects/bob-1"),
+            "host": "127.0.0.1",
+            "path": "/api/projects/bob-1",
+            "scheme": "http",
+            "auth_state": "authenticated"
+        }))
+        .unwrap();
+        let candidate = CorpusCandidate {
+            id: "idor-bob-1".to_string(),
+            kind: CandidateKind::CrossTenantRead,
+            source: CandidateSource::Traffic,
+            safety: CandidateSafety::RequiresApproval,
+            state_change: CandidateStateChange::ReadOnly,
+            autonomous_safe: false,
+            record_ids: vec!["alice-req".to_string(), "bob-req".to_string()],
+            observation_ids: Vec::new(),
+            injection_params: Vec::new(),
+            cross_tenant: Some(CrossTenantSwap {
+                attacker_record_id: "alice-req".to_string(),
+                attacker_session: "alice".to_string(),
+                victim_record_id: "bob-req".to_string(),
+                victim_marker: "tenant-b".to_string(),
+            }),
+            summary: "cross-tenant read".to_string(),
+        };
+        let attacker_headers = vec![(
+            "authorization".to_string(),
+            "Bearer alice-token".to_string(),
+        )];
+
+        let runner = ReplayRunner::new(Client::new(ClientConfig::default()).unwrap());
+        let executed = execute_authz_test(
+            &root,
+            &candidate,
+            &victim_record,
+            &attacker_headers,
+            &runner,
+        )
+        .await
+        .unwrap();
+
+        // The attacker read the victim's marker: a confirmed broken-access-control finding
+        assert_eq!(executed.verdict_class, "boundary_violation_read");
+        assert!(executed.boundary_violation);
+
+        let bundle_dir = root.join(&executed.evidence_bundle);
+        assert!(bundle_dir.join("replay_io.json").exists());
+
+        let finding_count = std::fs::read_dir(root.join("findings")).unwrap().count();
+        assert!(finding_count > 0);
+        let ledger = std::fs::read_to_string(root.join(RESUME_RELATIVE_PATH)).unwrap();
+        assert!(ledger.contains(&executed.plan_hash));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

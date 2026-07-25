@@ -37,10 +37,15 @@ unblocks SSRF against authenticated endpoints. Salvage source: `crates/mg-authz/
   headers → swapped request → send → marker → classify → evidence → finding → ledger). Generalized
   evidence/finding helpers for reuse. Gate: passed (13 tests). *Adjustment: added a dedicated authz
   risk level rather than repurposing the read-only fixture path.*
-- [~] **6. Offline E2E + status** — local axum lab with per-identity resources (tenant A/B); attacker
-  session reaching a victim object → `BoundaryViolationRead` confirmed + evidence + High finding,
-  all on `127.0.0.1`. Update the progress checklist. Gate: E2E passes; full `cargo test`;
-  `git diff --check`.
+- [x] **6. Offline E2E + status** — vulnerable two-tenant axum lab; `execute_authz_test` confirms
+  `boundary_violation_read` + evidence + High finding + ledger, all on `127.0.0.1`. Checklist
+  updated. Gate: E2E passes (14/14 ×3 stable); clippy clean.
+
+## Slice complete
+
+All seven tasks landed as verified commits. Broken access control (IDOR) is now a second confirmed
+class, end to end. See `METHODOLOGY.md`. The auth-aware runner also unblocks authenticated SSRF (a
+Slice 2 dependency). Next roadmap slice: SSRF hardening.
 
 ## Reuse (do not rebuild)
 

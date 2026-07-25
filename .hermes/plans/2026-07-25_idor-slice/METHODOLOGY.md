@@ -166,3 +166,35 @@ less than the first because the first built the skeleton.
 
 **Adjustment.** None. Task 6 stands up a two-tenant lab and drives `execute_authz_test` directly with
 the attacker's headers (bypassing session env), proving the closed IDOR loop.
+
+---
+
+## Task 6 — Offline end-to-end acceptance
+
+**Goal.** One test that fails if any IDOR piece is wrong, against a local target only.
+
+**The lab.** An axum server on `127.0.0.1` with one deliberately *vulnerable* route,
+`GET /api/projects/bob-1`, that returns the victim's object (`owner_tenant: tenant-b`) to **any**
+caller — no ownership check. That single behavior is a faithful broken-object-level-authorization
+sink. The test builds bob's captured request, a `CrossTenantRead` candidate whose swap names alice as
+the attacker and `tenant-b` as the victim marker, and drives `execute_authz_test` with alice's
+headers.
+
+**What it proves.** The runner replays bob's request carrying alice's `Bearer` token; the vulnerable
+lab returns bob's data; the victim marker `tenant-b` is present in alice's response, so `classify`
+returns `boundary_violation_read`; an evidence bundle (`replay_io.json`) and a High finding are
+written and the plan hash is recorded. The test asserts each. Nothing leaves `127.0.0.1`.
+
+**Result.** mg-hunt 14/14, stable over three repeated runs (both the SSRF and IDOR E2Es); clippy
+clean.
+
+## Status: slice complete
+
+Broken access control is now a second confirmed-finding class, closed end to end. Seven tasks, each
+a committed RED→GREEN increment. The striking result: the IDOR slice was materially *cheaper* than
+SSRF — the verdict, evidence, plan/approval, and runner scaffolding all already existed, so the net-
+new work was one session-header resolver, one `Client::send`, one `build_swapped_request`, one
+candidate field, and the orchestration wiring. The engine's second vuln class rode almost entirely
+on the first one's bones. The one architectural note for later: `CorpusCandidate` now carries two
+per-class optional fields (`injection_params`, `cross_tenant`) — a third class should trigger a typed
+per-kind payload refactor rather than a third parallel `Option`.
