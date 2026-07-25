@@ -39,10 +39,10 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
 - [x] **1. SSRF candidate detector** (`request-corpus`) — `CandidateKind::ServerSideRequestTarget`
   + analyzer flagging URL/host-valued or SSRF-prone-named params; `safety = RequiresApproval`,
   `autonomous_safe = false`. Carries `injection_params` on the candidate. Gate: passed.
-- [~] **2. Payload substitution + ReplayOutcome extension** (`replay-engine`) — pure fn injects
-  payload at the candidate location; `ReplayOutcome` carries sent-request echo + response
-  status/headers/body. Gate: `cargo test -p replay-engine` + clippy.
-- [ ] **3. OOB core library** (`oob-core`) — `mint_token(engagement, plan_hash, candidate_id)`
+- [x] **2. Payload substitution + ReplayOutcome extension** (`replay-engine`) — new `ReplayRequest`
+  + pure `build_injected_request` (primitives, keeps engine engagement-free); `ReplayOutcome`
+  carries `sent_request` + `response_headers`. Secret headers filtered at construction. Gate: passed.
+- [~] **3. OOB core library** (`oob-core`) — `mint_token(engagement, plan_hash, candidate_id)`
   (opaque, bound) · `oob_url` · loopback listener · `correlate(token) -> Option<OobHit>`. Gate:
   `cargo test -p oob-core` + clippy.
 - [ ] **4. Live replay runner** (`replay-runner`) — sends only for `executable` (scope + approval)

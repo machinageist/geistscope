@@ -23,6 +23,10 @@ pub struct ReplayOutcome {
     pub target_tenant_markers: Vec<String>,
     pub auth_failure_shape: Option<AuthFailureShape>,
     pub graphql_errors: bool,
+    #[serde(default)]
+    pub response_headers: Vec<(String, String)>,
+    #[serde(default)]
+    pub sent_request: Option<ReplayRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +94,14 @@ pub struct ReplaySubstitution {
     pub to_session: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ReplayPlanError {
     #[error("out-of-scope candidates cannot produce replay plans")]
@@ -121,7 +133,29 @@ impl ReplayOutcome {
             target_tenant_markers: Vec::new(),
             auth_failure_shape: None,
             graphql_errors: false,
+            response_headers: Vec::new(),
+            sent_request: None,
         }
+    }
+
+    // Attach response headers recorded during a live replay
+    pub fn with_response_headers<I, K, V>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.response_headers = headers
+            .into_iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
+        self
+    }
+
+    // Attach the concrete request that produced this outcome for evidence
+    pub fn with_sent_request(mut self, request: ReplayRequest) -> Self {
+        self.sent_request = Some(request);
+        self
     }
 
     // Create a GraphQL outcome carrying error-shape context
@@ -354,12 +388,173 @@ fn is_safe_relative_path(value: &str) -> bool {
             .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
+// Header names whose values are secrets and must never travel into a replay
+const SENSITIVE_HEADER_NAMES: &[&str] = &[
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "proxy-authorization",
+    "x-api-key",
+    "x-auth-token",
+    "x-csrf-token",
+];
+
+// Build a concrete replay request that injects a payload into one query parameter
+pub fn build_injected_request(
+    method: &str,
+    url: &str,
+    headers: &[(String, String)],
+    body: Option<&str>,
+    param: &str,
+    payload: &str,
+) -> ReplayRequest {
+    // Drop secret-bearing headers so the record never reconstructs a credential
+    let safe_headers = headers
+        .iter()
+        .filter(|(name, _)| !is_sensitive_header(name))
+        .cloned()
+        .collect();
+    ReplayRequest {
+        method: method.to_string(),
+        url: inject_query_param(url, param, payload),
+        headers: safe_headers,
+        body: body.map(str::to_string),
+    }
+}
+
+// Replace one query parameter value or append it when absent, preserving the rest
+fn inject_query_param(url: &str, param: &str, payload: &str) -> String {
+    let mut parsed = match url::Url::parse(url) {
+        Ok(parsed) => parsed,
+        Err(_) => return url.to_string(),
+    };
+    let existing: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(name, value)| (name.into_owned(), value.into_owned()))
+        .collect();
+    let mut replaced = false;
+    {
+        let mut pairs = parsed.query_pairs_mut();
+        pairs.clear();
+        for (name, value) in &existing {
+            if name == param {
+                pairs.append_pair(name, payload);
+                replaced = true;
+            } else {
+                pairs.append_pair(name, value);
+            }
+        }
+        if !replaced {
+            pairs.append_pair(param, payload);
+        }
+    }
+    parsed.to_string()
+}
+
+// Check whether a header name carries a secret that must be redacted
+fn is_sensitive_header(name: &str) -> bool {
+    let lowered = name.to_ascii_lowercase();
+    SENSITIVE_HEADER_NAMES.contains(&lowered.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use request_corpus::{
         CandidateKind, CandidateSafety, CandidateSource, CandidateStateChange, CorpusCandidate,
     };
+
+    #[test]
+    fn build_injected_request_replaces_only_target_param() {
+        let request = build_injected_request(
+            "GET",
+            "https://app.example.test/api/fetch?url=https://orig.example&keep=1",
+            &[("Accept".to_string(), "application/json".to_string())],
+            None,
+            "url",
+            "http://127.0.0.1:9/x",
+        );
+
+        assert_eq!(request.method, "GET");
+        let parsed = url::Url::parse(&request.url).unwrap();
+        let pairs: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+            .collect();
+        assert!(pairs.contains(&("keep".to_string(), "1".to_string())));
+        assert!(pairs.contains(&("url".to_string(), "http://127.0.0.1:9/x".to_string())));
+        assert_eq!(
+            request.headers,
+            vec![("Accept".to_string(), "application/json".to_string())]
+        );
+    }
+
+    #[test]
+    fn build_injected_request_never_reconstructs_secret_headers() {
+        let request = build_injected_request(
+            "GET",
+            "https://app.example.test/api/fetch?url=https://orig.example",
+            &[
+                (
+                    "Authorization".to_string(),
+                    "Bearer super-secret".to_string(),
+                ),
+                ("Cookie".to_string(), "session=raw-secret".to_string()),
+                ("Accept".to_string(), "*/*".to_string()),
+            ],
+            None,
+            "url",
+            "http://127.0.0.1:9/x",
+        );
+
+        assert!(
+            request
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("authorization")
+                    && !name.eq_ignore_ascii_case("cookie"))
+        );
+        assert!(request.headers.iter().any(|(name, _)| name == "Accept"));
+        assert!(!request.url.contains("super-secret"));
+    }
+
+    #[test]
+    fn build_injected_request_appends_absent_query_param() {
+        let request = build_injected_request(
+            "GET",
+            "https://app.example.test/api/fetch",
+            &[],
+            None,
+            "url",
+            "http://oob.local/token",
+        );
+
+        let parsed = url::Url::parse(&request.url).unwrap();
+        let value = parsed
+            .query_pairs()
+            .find(|(name, _)| name == "url")
+            .map(|(_, value)| value.into_owned());
+        assert_eq!(value, Some("http://oob.local/token".to_string()));
+    }
+
+    #[test]
+    fn replay_outcome_carries_response_headers_and_sent_request() {
+        let request = ReplayRequest {
+            method: "GET".to_string(),
+            url: "http://target.local/".to_string(),
+            headers: Vec::new(),
+            body: None,
+        };
+        let outcome = ReplayOutcome::http(200, "{}")
+            .with_response_headers([("content-type".to_string(), "text/html".to_string())])
+            .with_sent_request(request.clone());
+
+        assert_eq!(
+            outcome.response_headers,
+            vec![("content-type".to_string(), "text/html".to_string())]
+        );
+        assert_eq!(outcome.sent_request, Some(request));
+    }
 
     #[test]
     fn semantic_diff_401_403_404_becomes_secure_denied() {

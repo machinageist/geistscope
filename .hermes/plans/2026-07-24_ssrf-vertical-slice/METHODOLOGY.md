@@ -88,3 +88,42 @@ clippy clean.
 
 **Adjustment.** None to the plan. Note for Task 2/4: the injection target now travels on the
 candidate as `injection_params`, so the substitution/runner do not need to re-derive it.
+
+---
+
+## Task 2 — Payload substitution + ReplayOutcome extension
+
+**Goal.** Turn an SSRF candidate into the concrete request a replay will send (payload injected
+into the right parameter, secrets stripped), and widen the outcome type so it can carry the
+request that was sent and the full response — the raw material Tasks 5–6 need for a verdict and
+evidence.
+
+**Plan adjustment (before writing code).** The plan said "make `ReplaySubstitution` real." Reading
+the type showed `ReplaySubstitution { name, from_session, to_session }` is a **session-swap**
+concept for IDOR/cross-tenant tests, not payload injection — overloading it would conflate two
+different ideas. So instead of mutating `ReplaySubstitution`, Task 2 introduces a new
+`ReplayRequest` type and a pure `build_injected_request(...)`. Second adjustment: to keep
+`replay-engine` free of the heavyweight `engagement` crate, `build_injected_request` takes
+**primitives** (`method, url, headers, body, param, payload`) rather than a `TrafficRecord`; the
+Task 4 runner will map a record into those. This keeps the engine a pure request/verdict library.
+
+**RED.** Four tests: injection replaces only the target query param and leaves siblings intact;
+secret headers (`Authorization`, `Cookie`) are never carried into the built request; an absent
+param is appended rather than dropped; and `ReplayOutcome` can carry `response_headers` +
+`sent_request`. `cargo test -p replay-engine` → compile errors (`cannot find ReplayRequest`,
+`build_injected_request`, `with_response_headers`, ...). RED as intended.
+
+**GREEN.** Added `ReplayRequest`, `build_injected_request` (URL-encoded query injection via the
+`url` crate, sensitive-header filtering against a `SENSITIVE_HEADER_NAMES` list), and two new
+`#[serde(default)]` fields on `ReplayOutcome` with builder methods. 11/11 tests pass; clippy clean.
+mg-hunt (the only external `ReplayOutcome` consumer, via `::http` + serde) still passes 10/10 —
+the `serde(default)` fields keep old replay-outcome fixtures deserializable.
+
+**What it revealed.** The secret-redaction property is best enforced *structurally* at the point of
+request construction, not assumed from upstream: even though the traffic store already strips
+`Authorization`/`Cookie` at import, `build_injected_request` filters them again, so a replay can
+never resurrect a credential regardless of how the record was populated. Auth for the replay will
+instead be attached by the runner from the session vault (Task 4) — never from the record.
+
+**Adjustment.** Plan wording for Task 4 updated in spirit: the runner maps `TrafficRecord` →
+primitive args for `build_injected_request`, then attaches session auth before sending.
