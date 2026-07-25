@@ -29,7 +29,18 @@ pub struct CorpusCandidate {
     pub observation_ids: Vec<String>,
     #[serde(default)]
     pub injection_params: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_tenant: Option<CrossTenantSwap>,
     pub summary: String,
+}
+
+// The attacker/victim pairing an IDOR test replays under a swapped identity
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrossTenantSwap {
+    pub attacker_record_id: String,
+    pub attacker_session: String,
+    pub victim_record_id: String,
+    pub victim_marker: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +131,7 @@ impl CandidateBuilder {
                         record_ids: Vec::new(),
                         observation_ids: vec![format!("observation-{index}")],
                         injection_params: Vec::new(),
+                        cross_tenant: None,
                         summary: format!(
                             "attacker-controllable {:?} reaches {:?} at {}",
                             dom.source_type, dom.sink_type, dom.selector_path
@@ -141,6 +153,7 @@ impl CandidateBuilder {
                         record_ids: Vec::new(),
                         observation_ids: vec![format!("observation-{index}")],
                         injection_params: Vec::new(),
+                        cross_tenant: None,
                         summary: format!(
                             "postMessage target origin `{}` requires origin-bound validation",
                             message.target_origin
@@ -232,16 +245,27 @@ fn cross_tenant_read_candidate(records: &[&TrafficRecord]) -> CorpusCandidate {
         .map(|record| record.id.clone())
         .collect::<Vec<_>>();
 
+    // The first grouped identity attacks; the second is the victim whose marker proves the read
+    let attacker = records[0];
+    let victim = records[1];
+    let cross_tenant = Some(CrossTenantSwap {
+        attacker_record_id: attacker.id.clone(),
+        attacker_session: attacker.identity_id.clone().unwrap_or_default(),
+        victim_record_id: victim.id.clone(),
+        victim_marker: victim.tenant_id.clone().unwrap_or_default(),
+    });
+
     CorpusCandidate {
         id: format!("cross-tenant-read-{}", stable_suffix(&record_ids)),
         kind: CandidateKind::CrossTenantRead,
         source: CandidateSource::Traffic,
-        safety: CandidateSafety::ReadOnlyProof,
+        safety: CandidateSafety::RequiresApproval,
         state_change: CandidateStateChange::ReadOnly,
-        autonomous_safe: true,
+        autonomous_safe: false,
         record_ids,
         observation_ids: Vec::new(),
         injection_params: Vec::new(),
+        cross_tenant,
         summary: "comparable read-only traffic crosses controlled tenant labels".into(),
     }
 }
@@ -258,6 +282,7 @@ fn state_changing_candidate(record: &TrafficRecord) -> CorpusCandidate {
         record_ids: vec![record.id.clone()],
         observation_ids: Vec::new(),
         injection_params: Vec::new(),
+        cross_tenant: None,
         summary: format!(
             "{} {} is state-changing and requires explicit approval before replay",
             record.method.to_ascii_uppercase(),
@@ -328,6 +353,7 @@ fn server_side_request_candidate(record: &TrafficRecord) -> Option<CorpusCandida
         record_ids: vec![record.id.clone()],
         observation_ids: Vec::new(),
         injection_params,
+        cross_tenant: None,
         summary,
     })
 }
@@ -419,10 +445,18 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].kind, CandidateKind::CrossTenantRead);
-        assert_eq!(candidates[0].safety, CandidateSafety::ReadOnlyProof);
+        // A live cross-tenant read is an approval-gated active test, not autonomous
+        assert_eq!(candidates[0].safety, CandidateSafety::RequiresApproval);
         assert_eq!(candidates[0].state_change, CandidateStateChange::ReadOnly);
+        assert!(!candidates[0].autonomous_safe);
         assert_eq!(candidates[0].source, CandidateSource::Traffic);
         assert_eq!(candidates[0].record_ids, vec!["alice-read", "bob-read"]);
+
+        let swap = candidates[0].cross_tenant.as_ref().expect("swap populated");
+        assert_eq!(swap.attacker_record_id, "alice-read");
+        assert_eq!(swap.attacker_session, "alice");
+        assert_eq!(swap.victim_record_id, "bob-read");
+        assert_eq!(swap.victim_marker, "tenant-b");
     }
 
     #[test]

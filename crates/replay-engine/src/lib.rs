@@ -838,6 +838,7 @@ mod tests {
             record_ids: vec!["fetch-record".into()],
             observation_ids: Vec::new(),
             injection_params: vec!["url".into()],
+            cross_tenant: None,
             summary: "server-side request sink pending approval".into(),
         }
     }
@@ -853,6 +854,7 @@ mod tests {
             record_ids: vec!["alice-read".into(), "bob-read".into()],
             observation_ids: Vec::new(),
             injection_params: Vec::new(),
+            cross_tenant: None,
             summary: "compare controlled tenant reads".into(),
         }
     }

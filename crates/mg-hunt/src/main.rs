@@ -794,6 +794,7 @@ mod tests {
             record_ids: vec![format!("record-{id}")],
             observation_ids: Vec::new(),
             injection_params: Vec::new(),
+            cross_tenant: None,
             summary: format!("candidate {id}"),
         }
     }
@@ -809,6 +810,7 @@ mod tests {
             record_ids: vec![format!("record-{id}")],
             observation_ids: Vec::new(),
             injection_params: vec!["url".to_string()],
+            cross_tenant: None,
             summary: format!("ssrf {id}"),
         }
     }

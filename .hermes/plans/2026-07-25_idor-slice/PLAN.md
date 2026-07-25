@@ -28,10 +28,11 @@ unblocks SSRF against authenticated endpoints. Salvage source: `crates/mg-authz/
 - [x] **3. Apply substitution + victim markers** (`replay-engine`) — `build_swapped_request` (victim
   request + attacker auth, victim auth stripped). Marker attachment reuses `with_target_tenant_markers`
   + `classify` (no new engine code). Gate: passed (16 tests).
-- [~] **4. Refine CrossTenantRead** (`request-corpus`) — designate attacker vs victim record on the
-  candidate and carry the victim marker + the two session labels. Gate:
-  `cargo test -p request-corpus` + clippy.
-- [ ] **5. mg-hunt authz path** (`mg-hunt`) — replace the fixture `load_replay_outcome` in the
+- [x] **4. Refine CrossTenantRead** (`request-corpus`) — added `cross_tenant: Option<CrossTenantSwap>`
+  (attacker/victim record + session + victim marker), populated from the A/B group; reclassified
+  CrossTenantRead as RequiresApproval/not-autonomous (HighActive). Gate: passed (9 tests + 6 rippled
+  construction sites fixed).
+- [~] **5. mg-hunt authz path** (`mg-hunt`) — replace the fixture `load_replay_outcome` in the
   read-only path with a live authz replay (attacker session vs victim resource) through the
   auth-aware runner, under `--confirmed` + approval; classify → evidence → finding → ledger. Gate:
   `cargo test -p mg-hunt` + clippy.

@@ -101,3 +101,34 @@ authorization work, Task 3 was a single pure function.
 
 **Adjustment.** None — confirmed that "derive target markers" is orchestration (Task 5) over existing
 primitives, not new engine code.
+
+---
+
+## Task 4 — Carry the swap on the candidate
+
+**Goal.** Make a `CrossTenantRead` candidate self-describing: which record is the attacker (whose
+session), which is the victim (whose resource + marker), so Task 5 isn't guessing from positional
+order.
+
+**Design.** Added a structured `cross_tenant: Option<CrossTenantSwap>` field
+(`{attacker_record_id, attacker_session, victim_record_id, victim_marker}`) populated in
+`cross_tenant_read_candidate` from the grouped A/B records (attacker = first identity, victim =
+second; marker = victim's `tenant_id`). Also **reclassified `CrossTenantRead` as
+`RequiresApproval` / not `autonomous_safe`** — a live cross-tenant read under a swapped identity is a
+HighActive test, exactly like SSRF, so it must be approval-gated, not auto-run by the old read-only
+fixture path.
+
+**RED → GREEN.** Updated the existing A/B test to expect the new safety and assert the populated
+swap. Adding the field rippled to seven construction sites (four in `request-corpus`, and the test
+helpers in `replay-engine`/`replay-runner`/`mg-hunt`) — each got `cross_tenant: None`. All four
+affected crates green (request-corpus 9, replay-engine 16, replay-runner 3, mg-hunt 12), clippy
+clean; the `serde(default)` keeps old `candidates.jsonl` deserializable.
+
+**What it revealed.** The shared `CorpusCandidate` struct is now accumulating per-class fields
+(`injection_params` for SSRF, `cross_tenant` for IDOR). That's a smell worth watching — a third
+class would argue for a typed per-kind payload enum instead of parallel `Option` fields. Noted for a
+future refactor; not worth churning now.
+
+**Adjustment.** The safety reclassification means Task 5 needs a new `select_authz_candidates`
+(kind == `CrossTenantRead`) path, mirroring `select_ssrf_candidates`; the old read-only fixture path
+will no longer pick these (they're not `autonomous_safe`), which is correct.

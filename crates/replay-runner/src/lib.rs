@@ -213,6 +213,7 @@ mod tests {
             record_ids: vec!["fetch-1".to_string()],
             observation_ids: Vec::new(),
             injection_params: vec!["url".to_string()],
+            cross_tenant: None,
             summary: "server-side request sink".to_string(),
         }
     }
