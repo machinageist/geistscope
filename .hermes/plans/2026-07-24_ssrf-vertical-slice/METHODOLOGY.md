@@ -286,3 +286,38 @@ oob-core, engagement, http-client, tokio).
 
 **Adjustment.** None. Task 8 stands up an axum lab on `127.0.0.1` whose fetch endpoint performs the
 server-side request, and drives `execute_ssrf_test` to prove the closed loop.
+
+---
+
+## Task 8 — Offline end-to-end acceptance
+
+**Goal.** Prove the whole loop with one test that would fail if any earlier piece were wrong —
+against a local target only.
+
+**The lab.** A tiny axum server bound to `127.0.0.1:0` with one route, `/fetch`, that performs a
+*server-side* GET of its `url` query parameter. That single behavior is a faithful, self-contained
+SSRF sink: whatever URL you get it to fetch, it fetches from the server side. The test also stands
+up the `oob-core` loopback listener and a real engagement (via `Engagement::init`), builds a
+`TrafficRecord` pointing at `/fetch?url=<benign>`, and calls `execute_ssrf_test`.
+
+**What it proves.** The runner injects the minted OOB URL into the `url` parameter and sends to the
+lab; the lab fetches that URL server-side; the OOB listener records the callback; the orchestrator
+correlates it, classifies `ssrf_oob_confirmed`, writes an evidence bundle containing `oob_hit.json`
+and `replay_io.json`, emits a High-severity finding, and appends the plan hash to the ledger. The
+test asserts every one of those. Nothing leaves `127.0.0.1`.
+
+**One design note.** The test uses `#[tokio::test(flavor = "multi_thread")]` on purpose:
+`execute_ssrf_test` finishes with a *blocking* `wait_for_hit`, and the lab runs as a spawned task —
+on a single-threaded runtime the blocking wait could starve the lab. Real worker threads keep them
+independent. Ran green 3× with no flake; clippy clean.
+
+## Status: slice complete
+
+The adaptive hunting loop now closes for SSRF end to end. Eight tasks, each a RED→GREEN→REFACTOR
+increment committed on its own, with three genuine mid-flight adjustments the tests forced —
+`ReplaySubstitution` was the wrong primitive to overload, the approval mechanism never actually
+enabled execution, and a macOS `accept()` non-blocking-inheritance race. The deterministic plane
+(scope, policy, plan hashing, approval, OOB correlation, evidence, verdicts) owns every safety
+decision; live traffic only ever leaves `replay-runner`, only for an approved, in-scope plan, only
+against a local fixture. Next slices per the decision log: broken access control / IDOR, then
+critical injection.

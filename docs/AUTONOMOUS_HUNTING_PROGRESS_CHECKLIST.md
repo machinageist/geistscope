@@ -21,6 +21,24 @@ access control / RCE, bounty-value scheduling, "expand around success" finding b
 explicit AI-vs-deterministic boundary. Use the decision log to scope the next slice and record it
 in a new dated `PLAN.md`.
 
+## Status (2026-07-24) — SSRF vertical slice complete
+
+The first vertical slice from the restructure is implemented and green. Plan + living dev-log:
+`.hermes/plans/2026-07-24_ssrf-vertical-slice/{PLAN,METHODOLOGY}.md`. The adaptive loop now closes
+for SSRF (including blind/OOB), end to end, tested only against `127.0.0.1` fixtures:
+
+- `request-corpus`: `CandidateKind::ServerSideRequestTarget` detector (URL/host-valued or
+  SSRF-prone-named params), carrying `injection_params`.
+- `replay-engine`: `build_injected_request` (payload substitution, secret-header stripping),
+  widened `ReplayOutcome`, `classify_ssrf` verdicts, and approval-grant execution semantics.
+- `oob-core` (new): loopback listener minting plan-bound tokens + `wait_for_hit`/`correlate`.
+- `replay-runner` (new): the only crate that sends live traffic; refuses non-executable plans.
+- `evidence-core`: optional `oob_hit.json` + `replay_io.json` bundle slots.
+- `mg-hunt`: `run --risk active` + async `execute_ssrf_test` (select → approve → mint → inject →
+  send → correlate → classify → evidence → finding → ledger), proven by an end-to-end axum-lab test.
+
+Next candidate slices per the decision log: broken access control / IDOR, then critical injection.
+
 ## Current implementation status
 
 ### Phase 0: Scope and policy foundation

@@ -828,6 +828,88 @@ mod tests {
         assert_eq!(ids, vec!["ssrf-1", "ssrf-2"]);
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ssrf_blind_callback_confirms_finding_end_to_end() {
+        use axum::Router;
+        use axum::extract::Query;
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+        use engagement::EngagementMeta;
+        use std::collections::HashMap;
+
+        // Loopback OOB listener the vulnerable lab will call back into
+        let listener = OobListener::bind().unwrap();
+
+        // Vulnerable lab: performs a server-side GET of the url parameter (the SSRF sink)
+        async fn lab_fetch(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+            if let Some(target) = params.get("url") {
+                let client = Client::new(ClientConfig::default()).unwrap();
+                let _ = client.get(target).await;
+            }
+            (StatusCode::OK, "fetched")
+        }
+        let lab = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let lab_addr = lab.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = Router::new().route("/fetch", get(lab_fetch));
+            axum::serve(lab, app).await.unwrap();
+        });
+
+        // A real engagement so evidence and findings have a home
+        let parent = tempfile::tempdir().unwrap();
+        let engagement = Engagement::init(
+            parent.path(),
+            EngagementMeta {
+                name: "ssrf-lab".to_string(),
+                target: "127.0.0.1".to_string(),
+                created_at: String::new(),
+                platform: None,
+                url: None,
+                tags: Vec::new(),
+            },
+        )
+        .unwrap();
+        let root = engagement.root.clone();
+
+        let candidate = ssrf_candidate("ssrf-fetch");
+        let record: TrafficRecord = serde_json::from_value(serde_json::json!({
+            "id": "fetch-1",
+            "source": "test",
+            "captured_at": "2026-07-24T00:00:00Z",
+            "imported_at": "2026-07-24T00:00:00Z",
+            "method": "GET",
+            "url": format!("http://{lab_addr}/fetch?url=http://benign.example/orig"),
+            "host": "127.0.0.1",
+            "path": "/fetch",
+            "scheme": "http",
+            "params": ["url"],
+            "auth_state": "anonymous"
+        }))
+        .unwrap();
+
+        let runner = ReplayRunner::new(Client::new(ClientConfig::default()).unwrap());
+        let executed =
+            execute_ssrf_test(&root, "ssrf-lab", &candidate, &record, &listener, &runner)
+                .await
+                .unwrap();
+
+        // The server-side callback was correlated into a confirmed finding
+        assert_eq!(executed.verdict_class, "ssrf_oob_confirmed");
+        assert!(executed.boundary_violation);
+
+        // Evidence carries the correlated OOB hit and the recorded replay I/O
+        let bundle_dir = root.join(&executed.evidence_bundle);
+        assert!(bundle_dir.join("oob_hit.json").exists());
+        assert!(bundle_dir.join("replay_io.json").exists());
+
+        // A finding was emitted and the plan hash was recorded in the hunt ledger
+        let finding_count = std::fs::read_dir(root.join("findings")).unwrap().count();
+        assert!(finding_count > 0);
+        let ledger = std::fs::read_to_string(root.join(RESUME_RELATIVE_PATH)).unwrap();
+        assert!(ledger.contains(&executed.plan_hash));
+    }
+
     #[test]
     fn dry_run_selects_only_read_only_candidates() {
         let plan = plan_dry_run(

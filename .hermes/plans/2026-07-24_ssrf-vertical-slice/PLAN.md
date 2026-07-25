@@ -59,10 +59,17 @@ redaction) · `replay-engine::PlanBuilder::build` (plan hashing + approval bindi
   select → plan → bind approval (`--confirmed`) → mint OOB → inject → live send → correlate →
   classify → evidence incl. OOB → engagement finding → ledger. Sync main + Tokio `block_on`. Gate:
   passed (unit-tested selection/gating; live loop proven in Task 8).
-- [~] **8. Offline end-to-end acceptance** — local axum lab: `url=<oob-url>` triggers a server-side
-  GET (blind SSRF); metadata-sentinel host reflects a marker (response-based). Full `mg-hunt run`
-  → verified SSRF finding + evidence + ledger, no third party. Update the progress checklist.
-  Gate: E2E passes; full `cargo test` from `crates/`; `git diff --check`.
+- [x] **8. Offline end-to-end acceptance** — local axum lab performs the server-side fetch; the full
+  `execute_ssrf_test` yields `ssrf_oob_confirmed` + evidence (`oob_hit.json` + `replay_io.json`) +
+  High-severity finding + ledger entry, all on `127.0.0.1`. Progress checklist updated. Gate: E2E
+  passes (3× stable); `git diff --check` clean; full-workspace test + clippy via pre-commit.
+
+## Slice complete
+
+All eight tasks landed as verified commits. The adaptive hunting loop closes for SSRF (incl.
+blind/OOB) end to end. See `METHODOLOGY.md` for the RED→GREEN narrative and the three mid-flight
+adjustments the tests forced. Next slices per the decision log: broken access control / IDOR, then
+critical injection.
 
 ## Likely adjustment points (watch during implementation)
 
