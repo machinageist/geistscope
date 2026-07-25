@@ -32,11 +32,12 @@ unblocks SSRF against authenticated endpoints. Salvage source: `crates/mg-authz/
   (attacker/victim record + session + victim marker), populated from the A/B group; reclassified
   CrossTenantRead as RequiresApproval/not-autonomous (HighActive). Gate: passed (9 tests + 6 rippled
   construction sites fixed).
-- [~] **5. mg-hunt authz path** (`mg-hunt`) — replace the fixture `load_replay_outcome` in the
-  read-only path with a live authz replay (attacker session vs victim resource) through the
-  auth-aware runner, under `--confirmed` + approval; classify → evidence → finding → ledger. Gate:
-  `cargo test -p mg-hunt` + clippy.
-- [ ] **6. Offline E2E + status** — local axum lab with per-identity resources (tenant A/B); attacker
+- [x] **5. mg-hunt authz path** (`mg-hunt`) — added `--risk authz` → `run_authz` + async
+  `execute_authz_test` (select CrossTenantRead → approve → resolve victim record + attacker session
+  headers → swapped request → send → marker → classify → evidence → finding → ledger). Generalized
+  evidence/finding helpers for reuse. Gate: passed (13 tests). *Adjustment: added a dedicated authz
+  risk level rather than repurposing the read-only fixture path.*
+- [~] **6. Offline E2E + status** — local axum lab with per-identity resources (tenant A/B); attacker
   session reaching a victim object → `BoundaryViolationRead` confirmed + evidence + High finding,
   all on `127.0.0.1`. Update the progress checklist. Gate: E2E passes; full `cargo test`;
   `git diff --check`.

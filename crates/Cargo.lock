@@ -2668,6 +2668,7 @@ dependencies = [
  "request-corpus",
  "serde",
  "serde_json",
+ "session",
  "tempfile",
  "tokio",
 ]

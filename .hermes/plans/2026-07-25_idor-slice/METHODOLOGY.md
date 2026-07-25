@@ -132,3 +132,37 @@ future refactor; not worth churning now.
 **Adjustment.** The safety reclassification means Task 5 needs a new `select_authz_candidates`
 (kind == `CrossTenantRead`) path, mirroring `select_ssrf_candidates`; the old read-only fixture path
 will no longer pick these (they're not `autonomous_safe`), which is correct.
+
+---
+
+## Task 5 — mg-hunt authz path
+
+**Goal.** Wire the IDOR loop into `mg-hunt`, reusing everything the SSRF path built.
+
+**Design decision (adjustment).** The plan said "point the *read-only* path at the live runner." In
+practice it was cleaner to add a dedicated `--risk authz` path than to rip out the tested read-only
+fixture logic — so `RiskFilter::Authz` → `run_authz`, mirroring `run_ssrf`. `run_authz` selects
+`CrossTenantRead` candidates, requires `--confirmed`, resolves the victim record
+(`swap.victim_record_id`) and the attacker's headers (load the named session profile named by
+`swap.attacker_session` → `auth_headers()`), and drives `execute_authz_test`, which: approves the
+plan, builds the swapped request (victim URL + attacker auth via `build_swapped_request`), sends it,
+attaches the victim marker to the outcome, classifies (`BoundaryViolationRead` if the marker leaks),
+writes evidence, emits a finding, and records the ledger hash.
+
+**Refactor for reuse.** The SSRF-specific `write_ssrf_evidence`/`emit_ssrf_finding` became generic
+`write_replay_evidence(kind_label, …)` and `emit_finding(tool, title, recommendation, …)`, so both
+classes share one evidence/finding path. Clippy's `too_many_arguments` (8/7) then forced dropping the
+`run_id` parameter — it's always `run-{plan_hash}`, so the helper derives it. A good nudge: the
+signature was carrying a value it could compute.
+
+**RED → GREEN.** Unit test pins that `select_authz_candidates` keeps only `CrossTenantRead`. The live
+loop is deferred to Task 6's E2E (needs a running multi-identity lab). mg-hunt 13/13; clippy clean;
+the SSRF path still routes through the now-generic evidence/finding helpers unchanged.
+
+**What it revealed.** The whole IDOR orchestration is structurally identical to SSRF minus the OOB
+half — same plan/approve/send/classify/evidence/finding/ledger spine, with `classify` (not
+`classify_ssrf`) and a session-swap request (not a payload injection). The second vuln class cost far
+less than the first because the first built the skeleton.
+
+**Adjustment.** None. Task 6 stands up a two-tenant lab and drives `execute_authz_test` directly with
+the attacker's headers (bypassing session env), proving the closed IDOR loop.

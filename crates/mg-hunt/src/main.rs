@@ -17,7 +17,7 @@ use http_client::{Client, ClientConfig};
 use oob_core::{OobHit, OobListener};
 use replay_engine::{
     PlanBuilder, ReplayOutcome, ReplayPlan, ReplayPlanRequest, ScopeDecision, SemanticDiffEngine,
-    SemanticVerdict, SemanticVerdictClass, build_injected_request,
+    SemanticVerdict, SemanticVerdictClass, build_injected_request, build_swapped_request,
 };
 use replay_runner::ReplayRunner;
 use request_corpus::{CandidateKind, CandidateStateChange, CorpusCandidate};
@@ -33,6 +33,7 @@ const ESTIMATED_TEST_BYTES: u64 = 1024;
 const ESTIMATED_TEST_DURATION_SECS: u64 = 1;
 const SSRF_OOB_WAIT_MS: u64 = 1500;
 const SSRF_FINDING_TOOL: &str = "mg-hunt-ssrf";
+const AUTHZ_FINDING_TOOL: &str = "mg-hunt-authz";
 const SSRF_RESPONSE_MARKERS: &[&str] = &[
     "instance-id",
     "ami-id",
@@ -98,6 +99,7 @@ enum HuntMode {
 enum RiskFilter {
     ReadOnly,
     Active,
+    Authz,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,6 +245,7 @@ fn run(args: Args) -> Result<String> {
                     run_read_only(&engagement, budget, resume, dry_run, confirmed, json)
                 }
                 RiskFilter::Active => run_ssrf(&engagement, budget, dry_run, confirmed, json),
+                RiskFilter::Authz => run_authz(&engagement, budget, dry_run, confirmed, json),
             }
         }
     }
@@ -342,6 +345,82 @@ fn run_ssrf(
     }
     render(json, &plan, || {
         format!("executed {} ssrf tests", plan.executed.len())
+    })
+}
+
+// Plan and, with approval, execute live authorization (IDOR) tests end to end
+fn run_authz(
+    engagement_root: &Path,
+    budget: HuntBudget,
+    dry_run: bool,
+    confirmed: bool,
+    json: bool,
+) -> Result<String> {
+    let candidates = load_candidates(&engagement_root.join(CANDIDATES_RELATIVE_PATH))?;
+    let selected: Vec<PlannedTest> = select_authz_candidates(candidates)
+        .into_iter()
+        .take(budget.max_tests)
+        .map(planned_authz_test)
+        .collect::<Result<Vec<_>>>()?;
+    let mut plan = HuntPlan {
+        selected,
+        skipped_by_policy: 0,
+        skipped_by_resume: 0,
+        executed: Vec::new(),
+        stop_reason: None,
+    };
+
+    // A cross-tenant read is HighActive; without dry-run and explicit approval it stays inert
+    if dry_run || !confirmed {
+        plan.stop_reason = Some(StopReason::ApprovalRequired);
+        return render(json, &plan, || {
+            format!(
+                "planned {} authz tests; approval required before execution",
+                plan.selected.len()
+            )
+        });
+    }
+
+    let engagement = Engagement::load(engagement_root).context("load engagement")?;
+    let runner = ReplayRunner::new(Client::new(ClientConfig::default()).context("build client")?);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build async runtime")?;
+
+    for test in &plan.selected {
+        let swap = test
+            .candidate
+            .cross_tenant
+            .as_ref()
+            .context("authz candidate has no cross-tenant swap")?;
+        let victim = find_traffic_record(&engagement, &swap.victim_record_id)
+            .context("resolve victim record")?;
+        // Resolve the attacker identity's auth from its named session profile
+        let attacker_profile = session::load_session_profile(&engagement, &swap.attacker_session)
+            .context("load attacker session profile")?;
+        let attacker_headers: Vec<(String, String)> = attacker_profile
+            .auth_headers()
+            .context("resolve attacker auth headers")?
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+        let executed = runtime.block_on(execute_authz_test(
+            engagement_root,
+            &test.candidate,
+            &victim,
+            &attacker_headers,
+            &runner,
+        ))?;
+        plan.executed.push(executed);
+    }
+    render(json, &plan, || {
+        format!("executed {} authz tests", plan.executed.len())
     })
 }
 
@@ -608,11 +687,10 @@ async fn execute_ssrf_test(
     let hit = listener.wait_for_hit(&token, Duration::from_millis(SSRF_OOB_WAIT_MS));
     let verdict = SemanticDiffEngine.classify_ssrf(&outcome, hit.is_some(), SSRF_RESPONSE_MARKERS);
 
-    let run_id = format!("run-{}", plan.plan_hash);
-    let evidence_bundle = write_ssrf_evidence(
+    let evidence_bundle = write_replay_evidence(
         engagement_root,
         candidate,
-        &run_id,
+        "SSRF",
         &plan,
         &verdict,
         &outcome,
@@ -620,7 +698,118 @@ async fn execute_ssrf_test(
     )?;
     // Emit the finding immediately on a boundary violation, then record the plan hash
     if verdict.boundary_violation {
-        emit_ssrf_finding(engagement_root, candidate, &verdict, &evidence_bundle)?;
+        emit_finding(
+            engagement_root,
+            candidate,
+            SSRF_FINDING_TOOL,
+            "Server-side request forgery confirmed",
+            "Validate and allowlist outbound fetch targets; block internal and link-local addresses",
+            &verdict,
+            &evidence_bundle,
+        )?;
+    }
+    append_tested_hash(engagement_root, &plan.plan_hash)?;
+
+    Ok(ExecutedTest {
+        candidate_id: candidate.id.clone(),
+        plan_hash: plan.plan_hash.clone(),
+        verdict_class: verdict_class_name(&verdict),
+        boundary_violation: verdict.boundary_violation,
+        evidence_bundle,
+    })
+}
+
+// Keep only cross-tenant read (IDOR) candidates for authorization testing
+fn select_authz_candidates(candidates: Vec<CorpusCandidate>) -> Vec<CorpusCandidate> {
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.kind == CandidateKind::CrossTenantRead)
+        .collect()
+}
+
+// Describe the immutable authorization replay plan request for a candidate
+fn authz_plan_request(candidate: &CorpusCandidate) -> ReplayPlanRequest {
+    ReplayPlanRequest::new(candidate.clone(), ScopeDecision::InScope)
+        .with_expected_secure_result("attacker identity is denied the victim resource")
+        .with_stop_conditions([
+            "rate_limited",
+            "waf_detected",
+            "server_error",
+            "scope_drift",
+        ])
+        .with_evidence_output_dir(format!("evidence/{}", candidate.id))
+}
+
+// Build a planned test record carrying the authz plan hash for display
+fn planned_authz_test(candidate: CorpusCandidate) -> Result<PlannedTest> {
+    let plan = PlanBuilder
+        .build(authz_plan_request(&candidate))
+        .context("build authz plan")?;
+    Ok(PlannedTest {
+        candidate_id: candidate.id.clone(),
+        plan_hash: plan.plan_hash,
+        summary: candidate.summary.clone(),
+        candidate,
+    })
+}
+
+// Run one approved authorization (IDOR) test: replay the victim request as the attacker
+async fn execute_authz_test(
+    engagement_root: &Path,
+    candidate: &CorpusCandidate,
+    victim_record: &TrafficRecord,
+    attacker_headers: &[(String, String)],
+    runner: &ReplayRunner,
+) -> Result<ExecutedTest> {
+    let swap = candidate
+        .cross_tenant
+        .as_ref()
+        .context("authz candidate has no cross-tenant swap")?;
+
+    // Bind a matching approval grant so the engine marks the plan executable
+    let base = authz_plan_request(candidate);
+    let unapproved = PlanBuilder
+        .build(base.clone())
+        .context("build authz plan")?;
+    let plan = PlanBuilder
+        .build(base.with_approval_grant_hash(unapproved.plan_hash.clone()))
+        .context("bind authz approval")?;
+
+    // Replay the victim's own request carrying the attacker identity's auth
+    let request = build_swapped_request(
+        &victim_record.method,
+        &victim_record.url,
+        &header_pairs(victim_record),
+        attacker_headers,
+        None,
+    );
+    let outcome = runner
+        .run(&plan, &request)
+        .await
+        .context("send authz replay")?;
+    // A victim marker appearing in the attacker's response proves a cross-tenant read
+    let outcome = outcome.with_target_tenant_markers([swap.victim_marker.clone()]);
+    let verdict = SemanticDiffEngine.classify(&outcome);
+
+    let evidence_bundle = write_replay_evidence(
+        engagement_root,
+        candidate,
+        "authorization",
+        &plan,
+        &verdict,
+        &outcome,
+        None,
+    )?;
+    if verdict.boundary_violation {
+        emit_finding(
+            engagement_root,
+            candidate,
+            AUTHZ_FINDING_TOOL,
+            "Broken object-level authorization (IDOR) confirmed",
+            "Enforce per-object ownership checks server-side for every identity",
+            &verdict,
+            &evidence_bundle,
+        )?;
     }
     append_tested_hash(engagement_root, &plan.plan_hash)?;
 
@@ -642,17 +831,18 @@ fn header_pairs(record: &TrafficRecord) -> Vec<(String, String)> {
         .collect()
 }
 
-// Write an immutable SSRF evidence bundle and return its engagement-relative path
-fn write_ssrf_evidence(
+// Write an immutable replay evidence bundle and return its engagement-relative path
+fn write_replay_evidence(
     engagement_root: &Path,
     candidate: &CorpusCandidate,
-    run_id: &str,
+    kind_label: &str,
     plan: &ReplayPlan,
     verdict: &SemanticVerdict,
     outcome: &ReplayOutcome,
     hit: Option<&OobHit>,
 ) -> Result<String> {
-    let plan_json = serde_json::to_string_pretty(plan).context("serialize ssrf plan")?;
+    let run_id = format!("run-{}", plan.plan_hash);
+    let plan_json = serde_json::to_string_pretty(plan).context("serialize plan")?;
     let semantic_diff_json = serde_json::to_string_pretty(verdict).context("serialize verdict")?;
     let replay_io_json = serde_json::to_string_pretty(outcome).context("serialize replay io")?;
     let approvals_json =
@@ -663,7 +853,7 @@ fn write_ssrf_evidence(
         .with_semantic_diff_json(semantic_diff_json)
         .with_replay_io_json(replay_io_json)
         .with_summary(format!(
-            "SSRF {} on candidate {}",
+            "{kind_label} {} on candidate {}",
             verdict_class_name(verdict),
             candidate.id
         ));
@@ -673,7 +863,7 @@ fn write_ssrf_evidence(
     }
     let bundle = EvidenceBundleWriter
         .write(request)
-        .context("write ssrf evidence bundle")?;
+        .context("write evidence bundle")?;
     Ok(bundle
         .bundle_dir
         .strip_prefix(engagement_root)
@@ -682,29 +872,26 @@ fn write_ssrf_evidence(
         .to_string())
 }
 
-// Emit a high-severity SSRF finding into the engagement immediately on confirmation
-fn emit_ssrf_finding(
+// Emit a high-severity finding into the engagement immediately on confirmation
+fn emit_finding(
     engagement_root: &Path,
     candidate: &CorpusCandidate,
+    tool: &str,
+    title: &str,
+    recommendation: &str,
     verdict: &SemanticVerdict,
     evidence_bundle: &str,
 ) -> Result<()> {
     let engagement = Engagement::load(engagement_root).context("load engagement for finding")?;
-    let finding = ToolFinding::new(
-        SSRF_FINDING_TOOL,
-        "Server-side request forgery confirmed",
-        FindingSeverity::High,
-    )
-    .evidence(format!(
-        "candidate {} verdict {} evidence {}",
-        candidate.id,
-        verdict_class_name(verdict),
-        evidence_bundle
-    ))
-    .recommendation(
-        "Validate and allowlist outbound fetch targets; block internal and link-local addresses",
-    );
-    write_finding(&engagement, &finding).context("write ssrf finding")?;
+    let finding = ToolFinding::new(tool, title, FindingSeverity::High)
+        .evidence(format!(
+            "candidate {} verdict {} evidence {}",
+            candidate.id,
+            verdict_class_name(verdict),
+            evidence_bundle
+        ))
+        .recommendation(recommendation);
+    write_finding(&engagement, &finding).context("write finding")?;
     Ok(())
 }
 
@@ -828,6 +1015,20 @@ mod tests {
             .map(|candidate| candidate.id.as_str())
             .collect();
         assert_eq!(ids, vec!["ssrf-1", "ssrf-2"]);
+    }
+
+    #[test]
+    fn select_authz_candidates_keeps_only_cross_tenant_reads() {
+        let selected = select_authz_candidates(vec![
+            candidate("read-1", CandidateStateChange::ReadOnly),
+            ssrf_candidate("ssrf-1"),
+        ]);
+
+        let ids: Vec<&str> = selected
+            .iter()
+            .map(|candidate| candidate.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["read-1"]);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
