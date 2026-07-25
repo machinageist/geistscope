@@ -123,6 +123,45 @@ impl SessionProfile {
             auth_kinds.join(",")
         )
     }
+
+    // Materialize env-backed auth refs into request headers with an injectable lookup
+    pub fn resolve_headers<F>(&self, env_lookup: F) -> Result<HeaderMap, SessionError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        let mut headers = HeaderMap::new();
+        for auth_ref in &self.auth_refs {
+            // Only env references are resolvable; plaintext material is never sent from here
+            let env_var = auth_ref
+                .env_var
+                .as_deref()
+                .ok_or(SessionError::PlaintextSecretRejected)?;
+            let secret =
+                env_lookup(env_var).ok_or_else(|| SessionError::MissingEnv(env_var.to_string()))?;
+            let (name, value) = header_for_ref(&auth_ref.kind, &secret)?;
+            headers.insert(name, value);
+        }
+        Ok(headers)
+    }
+
+    // Materialize auth headers using the process environment
+    pub fn auth_headers(&self) -> Result<HeaderMap, SessionError> {
+        self.resolve_headers(|name| env::var(name).ok())
+    }
+}
+
+// Map a secret ref kind and resolved value to a concrete request header
+fn header_for_ref(kind: &str, secret: &str) -> Result<(HeaderName, HeaderValue), SessionError> {
+    let (name, value) = match kind.to_ascii_lowercase().as_str() {
+        "token" | "bearer" => ("authorization".to_string(), format!("Bearer {secret}")),
+        "authorization" => ("authorization".to_string(), secret.to_string()),
+        "cookie" => ("cookie".to_string(), secret.to_string()),
+        // Any other kind is treated as a literal header name
+        _ => (kind.to_string(), secret.to_string()),
+    };
+    let header_name = HeaderName::from_bytes(name.as_bytes())?;
+    let header_value = HeaderValue::from_str(&value)?;
+    Ok((header_name, header_value))
 }
 
 // Session errors for callers
@@ -487,6 +526,63 @@ mod tests {
         let err = require_active_session_profile(&engagement, "expired").unwrap_err();
 
         assert!(matches!(err, SessionError::Expired));
+    }
+
+    #[test]
+    fn profile_resolves_env_auth_refs_into_headers() {
+        let profile = SessionProfile {
+            name: "alice".into(),
+            username: None,
+            login_url: None,
+            auth_refs: vec![
+                SecretRef::env("token", "MG_ALICE_TOKEN"),
+                SecretRef::env("X-Tenant", "MG_ALICE_TENANT"),
+            ],
+            valid_until: None,
+        };
+
+        let headers = profile
+            .resolve_headers(|name| match name {
+                "MG_ALICE_TOKEN" => Some("alice-jwt".into()),
+                "MG_ALICE_TENANT" => Some("tenant-a".into()),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(headers["authorization"], "Bearer alice-jwt");
+        assert_eq!(headers["X-Tenant"], "tenant-a");
+    }
+
+    #[test]
+    fn profile_resolution_fails_when_env_missing() {
+        let profile = SessionProfile {
+            name: "alice".into(),
+            username: None,
+            login_url: None,
+            auth_refs: vec![SecretRef::env("token", "MG_MISSING")],
+            valid_until: None,
+        };
+
+        let err = profile.resolve_headers(|_| None).unwrap_err();
+
+        assert!(matches!(err, SessionError::MissingEnv(_)));
+    }
+
+    #[test]
+    fn profile_resolution_never_materializes_plaintext_ref() {
+        let profile = SessionProfile {
+            name: "alice".into(),
+            username: None,
+            login_url: None,
+            auth_refs: vec![SecretRef::plaintext("token", "raw-secret")],
+            valid_until: None,
+        };
+
+        let err = profile
+            .resolve_headers(|_| Some("ignored".into()))
+            .unwrap_err();
+
+        assert!(matches!(err, SessionError::PlaintextSecretRejected));
     }
 
     #[test]
