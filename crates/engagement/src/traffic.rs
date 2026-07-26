@@ -820,9 +820,11 @@ fn build_pending_record(
     let port = parsed.port_or_known_default();
     let query = parsed.query().map(str::to_string);
     let session_id = header_value(&request_headers, "x-mg-session-id");
-    let identity_id = header_value(&request_headers, "x-mg-identity-id");
+    let identity_id = header_value(&request_headers, "x-mg-identity-id")
+        .or_else(|| infer_identity_fingerprint(&request_headers));
     let role_id = header_value(&request_headers, "x-mg-role-id");
-    let tenant_id = header_value(&request_headers, "x-mg-tenant-id");
+    let tenant_id =
+        header_value(&request_headers, "x-mg-tenant-id").or_else(|| identity_id.clone());
     let operation = header_value(&request_headers, "x-mg-operation");
     let scope_decision = header_value(&request_headers, "x-mg-scope-decision");
     let risk_class = header_value(&request_headers, "x-mg-risk-class")
@@ -1366,6 +1368,16 @@ fn content_type(headers: &[(String, String)]) -> Option<String> {
     header_value(headers, "content-type")
 }
 
+// Derive a stable identity label from auth material without storing the secret
+fn infer_identity_fingerprint(headers: &[(String, String)]) -> Option<String> {
+    let material =
+        header_value(headers, "authorization").or_else(|| header_value(headers, "cookie"))?;
+    if material.trim().is_empty() {
+        return None;
+    }
+    Some(format!("id-{}", &sha256_hex(material.as_bytes())[..12]))
+}
+
 fn header_value(headers: &[(String, String)], name: &str) -> Option<String> {
     headers
         .iter()
@@ -1518,6 +1530,25 @@ mod tests {
     use super::*;
     use crate::EngagementMeta;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn identity_fingerprint_is_stable_distinct_and_secret_free() {
+        let alice = vec![(
+            "Authorization".to_string(),
+            "Bearer alice-token".to_string(),
+        )];
+        let bob = vec![("Authorization".to_string(), "Bearer bob-token".to_string())];
+
+        let a1 = infer_identity_fingerprint(&alice).unwrap();
+        let a2 = infer_identity_fingerprint(&alice).unwrap();
+        let b = infer_identity_fingerprint(&bob).unwrap();
+
+        assert_eq!(a1, a2); // same credential yields the same identity label
+        assert_ne!(a1, b); // distinct credentials yield distinct identities
+        assert!(a1.starts_with("id-"));
+        assert!(!a1.contains("alice-token")); // the secret never appears in the label
+        assert!(infer_identity_fingerprint(&[]).is_none()); // no auth, no fingerprint
+    }
 
     fn tmp_parent() -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
