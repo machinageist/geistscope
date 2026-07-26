@@ -32,3 +32,30 @@ payload (exactly one copy), preserves benign headers, and leaves the URL untouch
 17/17, clippy clean.
 
 **Adjustment.** None. Task 2 loops this over the salvaged `INJECTABLE_HEADERS`.
+
+---
+
+## Task 2 — Multi-probe SSRF execution
+
+**Goal.** Turn the single OOB-into-first-param probe into a bounded probe set that also reaches the
+response-leak verdict and header positions.
+
+**Design.** `execute_ssrf_test` now mints one plan-bound token and runs **blind probes** — the OOB URL
+into every `injection_param` and every `SSRF_INJECTABLE_HEADER` — then waits once for a callback. If
+none arrives, it runs **response probes**: each param injected with a real internal-metadata URL
+(`SSRF_METADATA_PAYLOADS`), inspecting the body for cloud-metadata markers via the existing
+`classify_ssrf`. Verdict priority: a correlated callback → `SsrfOobConfirmed`; else a metadata marker
+in a response → `SsrfResponseLeak`; else `SsrfNoSignal`. The decisive probe's outcome is what the
+evidence bundle records. Two small helpers (`ssrf_blind_probes`, `ssrf_response_probe`) keep the
+orchestrator readable.
+
+**RED → GREEN.** The existing SSRF blind E2E still passes unchanged (its param probe triggers the
+callback; the four header probes don't, since that lab only fetches the `url` param) — so no
+regression, 14/14. `SsrfResponseLeak` is now reachable in the live path; Task 3's E2E exercises it.
+
+**What it revealed.** Sending five probes made the blind E2E slow (~20s): the header probes leave the
+`url` param pointed at a benign host the lab tries to fetch, and the shared client's retry/backoff
+turns each failed fetch into seconds. Real signal that a hardened probe set needs fast-failing test
+targets — Task 3 points the benign URL at a closed loopback port and/or a no-retry client.
+
+**Adjustment.** Task 3 must make lab fetches fail fast to keep the suite quick.

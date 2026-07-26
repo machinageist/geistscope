@@ -18,7 +18,7 @@ headers), `crates/payload-engine`. Local-only tests.
 - [ ] **1. Header-injection builder** (`replay-engine`) — `build_header_injected_request` (payload into
   a named header, secrets stripped), sibling to `build_injected_request`. Gate: `cargo test -p
   replay-engine` + clippy.
-- [ ] **2. Multi-probe SSRF execution** (`mg-hunt`) — per candidate, run a bounded probe set: OOB URL
+- [x] **2. Multi-probe SSRF execution** (`mg-hunt`) — per candidate, run a bounded probe set: OOB URL
   into each `injection_param` and each injectable header (blind), plus a metadata-URL probe per param
   inspecting the body for cloud-metadata markers (reaches `SsrfResponseLeak`). Aggregate the strongest
   verdict; evidence records the decisive probe. Constants salvaged from `mg-webscan`. Gate: `cargo

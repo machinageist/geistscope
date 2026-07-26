@@ -16,8 +16,9 @@ use evidence_core::{EvidenceBundleRequest, EvidenceBundleWriter};
 use http_client::{Client, ClientConfig};
 use oob_core::{OobHit, OobListener};
 use replay_engine::{
-    PlanBuilder, ReplayOutcome, ReplayPlan, ReplayPlanRequest, ScopeDecision, SemanticDiffEngine,
-    SemanticVerdict, SemanticVerdictClass, build_injected_request, build_swapped_request,
+    PlanBuilder, ReplayOutcome, ReplayPlan, ReplayPlanRequest, ReplayRequest, ScopeDecision,
+    SemanticDiffEngine, SemanticVerdict, SemanticVerdictClass, build_header_injected_request,
+    build_injected_request, build_swapped_request,
 };
 use replay_runner::ReplayRunner;
 use request_corpus::{CandidateKind, CandidateStateChange, CorpusCandidate};
@@ -35,11 +36,23 @@ const SSRF_OOB_WAIT_MS: u64 = 1500;
 const SSRF_FINDING_TOOL: &str = "mg-hunt-ssrf";
 const AUTHZ_FINDING_TOOL: &str = "mg-hunt-authz";
 const SSRF_RESPONSE_MARKERS: &[&str] = &[
-    "instance-id",
     "ami-id",
-    "security-credentials",
+    "instance-id",
     "computeMetadata",
+    "imdsv2",
+    "instanceId",
+    "local-ipv4",
+    "security-credentials",
     "meta-data",
+];
+// Header positions probed for server-side request forgery in addition to query params
+const SSRF_INJECTABLE_HEADERS: &[&str] = &["X-Forwarded-For", "X-Real-IP", "Referer", "Host"];
+// Internal-metadata targets injected to elicit a response-based leak
+const SSRF_METADATA_PAYLOADS: &[&str] = &[
+    "http://169.254.169.254/latest/meta-data/",
+    "http://metadata.google.internal/computeMetadata/v1/",
+    "http://169.254.169.254/metadata/instance?api-version=2021-02-01",
+    "http://100.100.100.200/latest/meta-data/",
 ];
 
 #[derive(Debug, Parser)]
@@ -660,32 +673,52 @@ async fn execute_ssrf_test(
         .build(base.with_approval_grant_hash(unapproved.plan_hash.clone()))
         .context("bind ssrf approval")?;
 
-    // Mint a plan-bound OOB token and inject its callback URL into the target parameter
+    // Mint one plan-bound OOB token shared across every blind probe
     let token = listener.mint(
         engagement_name,
         plan.plan_hash.clone(),
         candidate.id.clone(),
     );
-    let injection_param = candidate
-        .injection_params
-        .first()
-        .context("ssrf candidate has no injection parameter")?;
-    let request = build_injected_request(
-        &record.method,
-        &record.url,
-        &header_pairs(record),
-        None,
-        injection_param,
-        &listener.oob_url(&token),
-    );
+    let oob_url = listener.oob_url(&token);
+    let base_headers = header_pairs(record);
 
-    // Send the approved request, then correlate any server-side callback it triggered
-    let outcome = runner
-        .run(&plan, &request)
-        .await
-        .context("send ssrf replay")?;
+    // Blind probes: the OOB URL in each injectable query param and header position
+    let mut representative = ReplayOutcome::http(0, String::new());
+    let mut sent_any = false;
+    for request in ssrf_blind_probes(record, &base_headers, &candidate.injection_params, &oob_url) {
+        let probe_outcome = runner
+            .run(&plan, &request)
+            .await
+            .context("send ssrf blind probe")?;
+        if !sent_any {
+            representative = probe_outcome;
+            sent_any = true;
+        }
+    }
     let hit = listener.wait_for_hit(&token, Duration::from_millis(SSRF_OOB_WAIT_MS));
-    let verdict = SemanticDiffEngine.classify_ssrf(&outcome, hit.is_some(), SSRF_RESPONSE_MARKERS);
+
+    // A correlated callback confirms blind SSRF; otherwise probe for a response-based leak
+    let (verdict, outcome) = if hit.is_some() {
+        (
+            SemanticDiffEngine.classify_ssrf(&representative, true, SSRF_RESPONSE_MARKERS),
+            representative,
+        )
+    } else {
+        ssrf_response_probe(
+            record,
+            &base_headers,
+            &candidate.injection_params,
+            &plan,
+            runner,
+        )
+        .await?
+        .unwrap_or_else(|| {
+            (
+                SemanticDiffEngine.classify_ssrf(&representative, false, SSRF_RESPONSE_MARKERS),
+                representative,
+            )
+        })
+    };
 
     let evidence_bundle = write_replay_evidence(
         engagement_root,
@@ -717,6 +750,70 @@ async fn execute_ssrf_test(
         boundary_violation: verdict.boundary_violation,
         evidence_bundle,
     })
+}
+
+// Build the blind SSRF probe set: the OOB URL in each query param and each injectable header
+fn ssrf_blind_probes(
+    record: &TrafficRecord,
+    base_headers: &[(String, String)],
+    params: &[String],
+    oob_url: &str,
+) -> Vec<ReplayRequest> {
+    let mut probes = Vec::new();
+    for param in params {
+        probes.push(build_injected_request(
+            &record.method,
+            &record.url,
+            base_headers,
+            None,
+            param,
+            oob_url,
+        ));
+    }
+    for header in SSRF_INJECTABLE_HEADERS {
+        probes.push(build_header_injected_request(
+            &record.method,
+            &record.url,
+            base_headers,
+            None,
+            header,
+            oob_url,
+        ));
+    }
+    probes
+}
+
+// Probe each param with internal-metadata targets, returning the first response-based leak
+async fn ssrf_response_probe(
+    record: &TrafficRecord,
+    base_headers: &[(String, String)],
+    params: &[String],
+    plan: &ReplayPlan,
+    runner: &ReplayRunner,
+) -> Result<Option<(SemanticVerdict, ReplayOutcome)>> {
+    let mut last = None;
+    for param in params {
+        for payload in SSRF_METADATA_PAYLOADS {
+            let request = build_injected_request(
+                &record.method,
+                &record.url,
+                base_headers,
+                None,
+                param,
+                payload,
+            );
+            let outcome = runner
+                .run(plan, &request)
+                .await
+                .context("send ssrf metadata probe")?;
+            let verdict = SemanticDiffEngine.classify_ssrf(&outcome, false, SSRF_RESPONSE_MARKERS);
+            if verdict.classification == SemanticVerdictClass::SsrfResponseLeak {
+                return Ok(Some((verdict, outcome)));
+            }
+            last = Some((verdict, outcome));
+        }
+    }
+    Ok(last)
 }
 
 // Keep only cross-tenant read (IDOR) candidates for authorization testing
