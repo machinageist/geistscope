@@ -456,6 +456,30 @@ const SENSITIVE_HEADER_NAMES: &[&str] = &[
     "x-csrf-token",
 ];
 
+// Build a request that injects a payload into one named request header
+pub fn build_header_injected_request(
+    method: &str,
+    url: &str,
+    base_headers: &[(String, String)],
+    body: Option<&str>,
+    header_name: &str,
+    payload: &str,
+) -> ReplayRequest {
+    // Drop secrets and any existing copy of the target header, then set the injected value
+    let mut headers: Vec<(String, String)> = base_headers
+        .iter()
+        .filter(|(name, _)| !is_sensitive_header(name) && !name.eq_ignore_ascii_case(header_name))
+        .cloned()
+        .collect();
+    headers.push((header_name.to_string(), payload.to_string()));
+    ReplayRequest {
+        method: method.to_string(),
+        url: url.to_string(),
+        headers,
+        body: body.map(str::to_string),
+    }
+}
+
 // Build a cross-identity request: replay a captured request under a different identity's auth
 pub fn build_swapped_request(
     method: &str,
@@ -577,6 +601,37 @@ mod tests {
 
         assert_eq!(verdict.classification, SemanticVerdictClass::SsrfNoSignal);
         assert!(!verdict.boundary_violation);
+    }
+
+    #[test]
+    fn build_header_injected_request_sets_target_header() {
+        let request = build_header_injected_request(
+            "GET",
+            "https://app.example.test/api/fetch",
+            &[
+                ("Accept".to_string(), "application/json".to_string()),
+                ("X-Forwarded-For".to_string(), "10.0.0.9".to_string()),
+            ],
+            None,
+            "X-Forwarded-For",
+            "http://oob.local/token",
+        );
+
+        // The target header is overwritten with the payload, only once
+        let xff: Vec<&String> = request
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("x-forwarded-for"))
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(xff, vec!["http://oob.local/token"]);
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| name == "Accept" && value == "application/json")
+        );
+        assert_eq!(request.url, "https://app.example.test/api/fetch");
     }
 
     #[test]
