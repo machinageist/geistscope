@@ -85,7 +85,7 @@ pub async fn analyze_function(config: &AnalyzeConfig) -> Result<AnalyzeOutput, R
     let binary_dir = eng.re_dir().join(&config.binary);
     let raw_path = binary_dir
         .join("raw")
-        .join(format!("{}.c", &config.function));
+        .join(format!("{}.c", config.function));
     if !raw_path.exists() {
         return Err(RecopilotError::MissingInput(format!(
             "pseudocode file not found at {}",
@@ -94,8 +94,8 @@ pub async fn analyze_function(config: &AnalyzeConfig) -> Result<AnalyzeOutput, R
     }
     fs::create_dir_all(&binary_dir)?;
 
-    let markdown_path = binary_dir.join(format!("{}.md", &config.function));
-    let json_path = binary_dir.join(format!("{}.json", &config.function));
+    let markdown_path = binary_dir.join(format!("{}.md", config.function));
+    let json_path = binary_dir.join(format!("{}.json", config.function));
     if markdown_path.exists() && json_path.exists() && !config.force {
         return Ok(AnalyzeOutput {
             binary: config.binary.clone(),

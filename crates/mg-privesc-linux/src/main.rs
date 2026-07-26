@@ -101,9 +101,9 @@ fn main() -> Result<()> {
         Some(p) => format!(
             "{}/privesc-linux-{}.json",
             p.trim_end_matches('/'),
-            &ts[..19].replace(':', "-")
+            ts[..19].replace(':', "-")
         ),
-        None => format!("./privesc-linux-{}.json", &ts[..19].replace(':', "-")),
+        None => format!("./privesc-linux-{}.json", ts[..19].replace(':', "-")),
     };
 
     let mut findings: Vec<Finding> = Vec::new();
