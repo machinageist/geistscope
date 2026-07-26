@@ -23,7 +23,7 @@ headers), `crates/payload-engine`. Local-only tests.
   inspecting the body for cloud-metadata markers (reaches `SsrfResponseLeak`). Aggregate the strongest
   verdict; evidence records the decisive probe. Constants salvaged from `mg-webscan`. Gate: `cargo
   test -p mg-hunt` + clippy.
-- [ ] **3. E2E + status** — local axum lab: (a) a fetch endpoint reflecting metadata body for an
+- [x] **3. E2E + status** — local axum lab: (a) a fetch endpoint reflecting metadata body for an
   internal-metadata sentinel → `SsrfResponseLeak`; (b) header-position (`X-Forwarded-For`) SSRF →
   `SsrfOobConfirmed`. Update checklist. Gate: E2E passes; full `cargo test`; `git diff --check`.
 

@@ -686,11 +686,10 @@ async fn execute_ssrf_test(
     let mut representative = ReplayOutcome::http(0, String::new());
     let mut sent_any = false;
     for request in ssrf_blind_probes(record, &base_headers, &candidate.injection_params, &oob_url) {
-        let probe_outcome = runner
-            .run(&plan, &request)
-            .await
-            .context("send ssrf blind probe")?;
-        if !sent_any {
+        // A probe the target rejects is not fatal to the hunt; keep going
+        if let Ok(probe_outcome) = runner.run(&plan, &request).await
+            && !sent_any
+        {
             representative = probe_outcome;
             sent_any = true;
         }
@@ -802,10 +801,10 @@ async fn ssrf_response_probe(
                 param,
                 payload,
             );
-            let outcome = runner
-                .run(plan, &request)
-                .await
-                .context("send ssrf metadata probe")?;
+            // A rejected metadata probe is not fatal; try the next target
+            let Ok(outcome) = runner.run(plan, &request).await else {
+                continue;
+            };
             let verdict = SemanticDiffEngine.classify_ssrf(&outcome, false, SSRF_RESPONSE_MARKERS);
             if verdict.classification == SemanticVerdictClass::SsrfResponseLeak {
                 return Ok(Some((verdict, outcome)));
@@ -1244,8 +1243,7 @@ mod tests {
         // Vulnerable lab: performs a server-side GET of the url parameter (the SSRF sink)
         async fn lab_fetch(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
             if let Some(target) = params.get("url") {
-                let client = Client::new(ClientConfig::default()).unwrap();
-                let _ = client.get(target).await;
+                let _ = fast_client().get(target).await;
             }
             (StatusCode::OK, "fetched")
         }
@@ -1279,7 +1277,7 @@ mod tests {
             "captured_at": "2026-07-24T00:00:00Z",
             "imported_at": "2026-07-24T00:00:00Z",
             "method": "GET",
-            "url": format!("http://{lab_addr}/fetch?url=http://benign.example/orig"),
+            "url": format!("http://{lab_addr}/fetch?url=http://127.0.0.1:1/orig"),
             "host": "127.0.0.1",
             "path": "/fetch",
             "scheme": "http",
@@ -1308,6 +1306,180 @@ mod tests {
         assert!(finding_count > 0);
         let ledger = std::fs::read_to_string(root.join(RESUME_RELATIVE_PATH)).unwrap();
         assert!(ledger.contains(&executed.plan_hash));
+    }
+
+    // A no-retry, short-timeout client so labs fail fast on unreachable probe targets
+    fn fast_client() -> Client {
+        Client::new(ClientConfig {
+            max_retries: 0,
+            timeout_ms: 500,
+            ..ClientConfig::default()
+        })
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ssrf_metadata_reflection_confirms_response_leak_end_to_end() {
+        use axum::Router;
+        use axum::extract::Query;
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+        use engagement::EngagementMeta;
+        use std::collections::HashMap;
+
+        // Listener that never gets called: this path is response-based, not blind
+        let listener = OobListener::bind().unwrap();
+
+        // Vulnerable lab: reflects internal-metadata content when pointed at a metadata host
+        async fn reflect(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+            let target = params.get("url").cloned().unwrap_or_default();
+            if target.contains("169.254.169.254")
+                || target.contains("metadata")
+                || target.contains("100.100.100.200")
+            {
+                return (
+                    StatusCode::OK,
+                    "{\"instance-id\":\"i-abc\",\"ami-id\":\"ami-1\"}",
+                );
+            }
+            (StatusCode::OK, "ok")
+        }
+        let lab = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let lab_addr = lab.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = Router::new().route("/render", get(reflect));
+            axum::serve(lab, app).await.unwrap();
+        });
+
+        let parent = tempfile::tempdir().unwrap();
+        let engagement = Engagement::init(
+            parent.path(),
+            EngagementMeta {
+                name: "ssrf-leak-lab".to_string(),
+                target: "127.0.0.1".to_string(),
+                created_at: String::new(),
+                platform: None,
+                url: None,
+                tags: Vec::new(),
+            },
+        )
+        .unwrap();
+        let root = engagement.root.clone();
+
+        let candidate = ssrf_candidate("ssrf-render");
+        let record: TrafficRecord = serde_json::from_value(serde_json::json!({
+            "id": "render-1",
+            "source": "test",
+            "captured_at": "2026-07-25T00:00:00Z",
+            "imported_at": "2026-07-25T00:00:00Z",
+            "method": "GET",
+            "url": format!("http://{lab_addr}/render?url=http://127.0.0.1:1/orig"),
+            "host": "127.0.0.1",
+            "path": "/render",
+            "scheme": "http",
+            "params": ["url"],
+            "auth_state": "anonymous"
+        }))
+        .unwrap();
+
+        let runner = ReplayRunner::new(fast_client());
+        let executed = execute_ssrf_test(
+            &root,
+            "ssrf-leak-lab",
+            &candidate,
+            &record,
+            &listener,
+            &runner,
+        )
+        .await
+        .unwrap();
+
+        // No callback correlated, but the metadata marker leaked into a response
+        assert_eq!(executed.verdict_class, "ssrf_response_leak");
+        assert!(executed.boundary_violation);
+        let bundle_dir = root.join(&executed.evidence_bundle);
+        assert!(bundle_dir.join("replay_io.json").exists());
+        assert!(!bundle_dir.join("oob_hit.json").exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ssrf_header_position_confirms_finding_end_to_end() {
+        use axum::Router;
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+        use engagement::EngagementMeta;
+
+        let listener = OobListener::bind().unwrap();
+
+        // Vulnerable lab: fetches the X-Forwarded-For header value server-side (header SSRF)
+        async fn header_ssrf(headers: HeaderMap) -> impl IntoResponse {
+            if let Some(xff) = headers.get("x-forwarded-for")
+                && let Ok(target) = xff.to_str()
+            {
+                let _ = fast_client().get(target).await;
+            }
+            (StatusCode::OK, "ok")
+        }
+        let lab = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let lab_addr = lab.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = Router::new().route("/fetch", get(header_ssrf));
+            axum::serve(lab, app).await.unwrap();
+        });
+
+        let parent = tempfile::tempdir().unwrap();
+        let engagement = Engagement::init(
+            parent.path(),
+            EngagementMeta {
+                name: "ssrf-hdr-lab".to_string(),
+                target: "127.0.0.1".to_string(),
+                created_at: String::new(),
+                platform: None,
+                url: None,
+                tags: Vec::new(),
+            },
+        )
+        .unwrap();
+        let root = engagement.root.clone();
+
+        let candidate = ssrf_candidate("ssrf-hdr");
+        let record: TrafficRecord = serde_json::from_value(serde_json::json!({
+            "id": "hdr-1",
+            "source": "test",
+            "captured_at": "2026-07-25T00:00:00Z",
+            "imported_at": "2026-07-25T00:00:00Z",
+            "method": "GET",
+            "url": format!("http://{lab_addr}/fetch"),
+            "host": "127.0.0.1",
+            "path": "/fetch",
+            "scheme": "http",
+            "params": ["url"],
+            "auth_state": "anonymous"
+        }))
+        .unwrap();
+
+        let runner = ReplayRunner::new(fast_client());
+        let executed = execute_ssrf_test(
+            &root,
+            "ssrf-hdr-lab",
+            &candidate,
+            &record,
+            &listener,
+            &runner,
+        )
+        .await
+        .unwrap();
+
+        // The X-Forwarded-For header probe triggered the server-side callback
+        assert_eq!(executed.verdict_class, "ssrf_oob_confirmed");
+        assert!(executed.boundary_violation);
+        assert!(
+            root.join(&executed.evidence_bundle)
+                .join("oob_hit.json")
+                .exists()
+        );
     }
 
     #[test]

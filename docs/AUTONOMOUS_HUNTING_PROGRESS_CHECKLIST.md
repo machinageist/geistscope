@@ -60,6 +60,19 @@ dev-log: `.hermes/plans/2026-07-25_idor-slice/{PLAN,METHODOLOGY}.md`.
 Roadmap remainder: SSRF hardening, input pipeline, harness wiring (+ registry honesty). AI `risk.rank`
 deferred.
 
+## Status (2026-07-25) — SSRF hardening slice complete
+
+Slice 2 of the post-SSRF roadmap. Plan + dev-log: `.hermes/plans/2026-07-25_ssrf-hardening/`. The SSRF
+class now covers three confirmed verdict paths, each with a loopback E2E:
+- **Blind** (`SsrfOobConfirmed`): OOB URL injected into every `injection_param` and every injectable
+  header (`X-Forwarded-For`/`X-Real-IP`/`Referer`/`Host`) — header-position SSRF now works.
+- **Response-based** (`SsrfResponseLeak`, previously dead): internal-metadata URLs injected per param,
+  response body inspected for cloud-metadata markers.
+- `replay-engine::build_header_injected_request`; `mg-hunt` multi-probe `execute_ssrf_test` with
+  per-probe error tolerance. Payloads/headers/keywords salvaged from `mg-webscan`.
+
+Roadmap remainder: input pipeline, harness wiring (+ registry honesty).
+
 ## Current implementation status
 
 ### Phase 0: Scope and policy foundation

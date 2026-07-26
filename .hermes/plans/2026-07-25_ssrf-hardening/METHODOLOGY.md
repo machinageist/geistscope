@@ -59,3 +59,33 @@ turns each failed fetch into seconds. Real signal that a hardened probe set need
 targets — Task 3 points the benign URL at a closed loopback port and/or a no-retry client.
 
 **Adjustment.** Task 3 must make lab fetches fail fast to keep the suite quick.
+
+---
+
+## Task 3 — E2E (response-leak + header-position) + robustness
+
+**Goal.** Prove the two newly-reachable paths against local labs, and fix the slowness Task 2
+introduced.
+
+**Two new labs, both on `127.0.0.1`.** (a) A *reflection* lab returns cloud-metadata content
+(`instance-id`, `ami-id`) only when the `url` param points at an internal-metadata host — so the
+blind probes see nothing (no callback) and the metadata probe's response carries the marker →
+`SsrfResponseLeak`. (b) A *header-SSRF* lab performs a server-side fetch of the `X-Forwarded-For`
+header value — so the header probe's OOB URL triggers a callback → `SsrfOobConfirmed`, proving header
+positions work.
+
+**Robustness fix the tests forced.** The `Host` header probe (a URL-valued Host) is the kind of
+weird request a real server may reject — and one rejected probe was aborting the whole hunt. Made
+both probe loops **tolerate per-probe transport errors and continue**, which is also correct for real
+targets (WAFs reject odd probes routinely). Plus a `fast_client` (no retries, 500ms timeout) for lab
+fetches and a fast-failing `127.0.0.1:1` benign URL: the SSRF E2Es dropped from ~20s to ~3s.
+
+**RED → GREEN.** Both new E2Es assert their verdict, evidence shape (response-leak has
+`replay_io.json` but *no* `oob_hit.json`; header-position has `oob_hit.json`), and finding. mg-hunt
+16/16, clippy clean.
+
+## Status: slice complete
+
+SSRF now covers blind (query + header positions), response-based metadata leak, and the full
+cloud-metadata payload set — three confirmed verdict paths, each with an end-to-end test, all on
+loopback. The dead `SsrfResponseLeak` branch is alive. Next roadmap slice: input pipeline.
