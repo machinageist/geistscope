@@ -1,0 +1,22 @@
+[package]
+name = "hunt-engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+action-policy = { path = "../action-policy" }
+engagement = { path = "../engagement" }
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+time = { version = "0.3", features = ["serde"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+axum = "0.7"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
