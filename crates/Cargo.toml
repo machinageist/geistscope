@@ -2,6 +2,7 @@
 members = [
     "action-policy",
     "browser-lab",
+    "hunt-engine",
     "lab-model",
     "mg-lab",
     "mg-scan",
