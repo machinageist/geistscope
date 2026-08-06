@@ -312,8 +312,57 @@ fn public_plan_uses_source_pointer_and_opaque_insertion_identity_without_key_nam
         "traffic/records/request-1.json"
     );
     assert_eq!(plan.source_reference().sha256(), "a".repeat(64));
-    assert!(view.contains("traffic/records/request-1.json"));
-    assert!(view.contains(&"a".repeat(64)));
+    assert!(!view.contains("traffic/records/request-1.json"));
+    assert!(!view.contains(&"a".repeat(64)));
+    assert!(view.contains("source_evidence_pointer"));
+}
+
+#[test]
+fn public_plan_never_serializes_path_carried_source_identifiers() {
+    const SECRET_SOURCE_PATH: &str = "traffic/tenant-42/session-secret-456/request.json";
+    let observation = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        url_with_value(SUSPECTED_VALUE),
+        reference(
+            "source",
+            EvidenceKind::RequestResponse,
+            SECRET_SOURCE_PATH,
+            'a',
+        ),
+    )
+    .unwrap();
+    let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
+    let plan =
+        SsrfProbePlanBuilder::new(CampaignCallbackOrigin::new("http://127.0.0.1:43123").unwrap())
+            .build(
+                &observation,
+                &candidate,
+                ScopeDisposition::InScope,
+                reference(
+                    "scope",
+                    EvidenceKind::PolicyDecision,
+                    "policy/scope.json",
+                    'b',
+                ),
+                reference(
+                    "rules",
+                    EvidenceKind::PolicyDecision,
+                    "policy/rules.json",
+                    'c',
+                ),
+                CallbackLease::new(
+                    CallbackToken::parse(RAW_TOKEN).unwrap(),
+                    OBSERVATION_WINDOW_MS,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    let serialized = serde_json::to_string(plan.view()).unwrap();
+
+    assert!(!serialized.contains(SECRET_SOURCE_PATH));
+    assert!(!serialized.contains("tenant-42"));
+    assert!(!serialized.contains("session-secret-456"));
 }
 
 #[test]

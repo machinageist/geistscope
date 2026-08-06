@@ -68,9 +68,9 @@ pub struct PolicyDecisionRecord {
     verdict: PolicyVerdict,
     target: String,
     reason: String,
-    source_reference: EvidenceReference,
-    scope_evidence_path: String,
-    rules_evidence_path: String,
+    source_evidence_pointer: String,
+    scope_evidence_pointer: String,
+    rules_evidence_pointer: String,
     approval_id: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     evaluated_at: OffsetDateTime,
@@ -92,9 +92,9 @@ impl PolicyDecisionRecord {
         &self.reason
     }
 
-    // Return the immutable captured-request evidence pointer
-    pub fn source_reference(&self) -> &EvidenceReference {
-        &self.source_reference
+    // Return the opaque captured-request evidence pointer
+    pub fn source_evidence_pointer(&self) -> &str {
+        &self.source_evidence_pointer
     }
 
     // Return the recorded approval identifier when one authorized the action
@@ -158,6 +158,29 @@ impl SsrfPolicyGate {
                 );
             }
         };
+
+        // Verify captured-request provenance before any policy path can grant authority
+        if let Err(error) = read_validated(&store, plan.source_reference()) {
+            let reason = match error {
+                ArtifactReadError::Unavailable => "source evidence artifact is unavailable",
+                ArtifactReadError::NotRegularFile => {
+                    "source evidence artifact is not a regular file"
+                }
+                ArtifactReadError::HashMismatch => {
+                    "source evidence artifact hash does not match the plan"
+                }
+            };
+            return self.finalize(
+                &store,
+                &canonical_root,
+                plan,
+                context,
+                risk,
+                PolicyVerdict::Blocked,
+                reason,
+                None,
+            );
+        }
 
         // Obtain scope from the plan-bound artifact rather than trusting a caller string
         let scope_decision = match load_scope(&store, plan.scope_reference()) {
@@ -256,9 +279,9 @@ impl SsrfPolicyGate {
             verdict,
             target: target.clone(),
             reason: reason.to_string(),
-            source_reference: plan.source_reference().clone(),
-            scope_evidence_path: plan.scope_reference().artifact_path().to_string(),
-            rules_evidence_path: plan.rules_reference().artifact_path().to_string(),
+            source_evidence_pointer: plan.view().source_evidence_pointer().to_string(),
+            scope_evidence_pointer: plan.view().scope_evidence_pointer().to_string(),
+            rules_evidence_pointer: plan.view().rules_evidence_pointer().to_string(),
             approval_id,
             evaluated_at: context.evaluated_at,
         };
@@ -278,12 +301,7 @@ impl SsrfPolicyGate {
             decision: audit_decision(verdict),
             target,
             reason: reason.to_string(),
-            evidence_paths: vec![
-                record.source_reference.artifact_path().to_string(),
-                record.scope_evidence_path.clone(),
-                record.rules_evidence_path.clone(),
-                decision_relative,
-            ],
+            evidence_paths: vec![decision_relative],
         };
         append_audit_event(canonical_root, &event)
             .map_err(|_| PolicyGateError::AuditWriteFailed)?;
@@ -353,7 +371,9 @@ fn load_scope(
     reference: &EvidenceReference,
 ) -> Result<ScopeDecision, &'static str> {
     let bytes = read_validated(store, reference).map_err(|error| match error {
-        ArtifactReadError::Unavailable => "scope evidence artifact is unavailable",
+        ArtifactReadError::Unavailable | ArtifactReadError::NotRegularFile => {
+            "scope evidence artifact is unavailable"
+        }
         ArtifactReadError::HashMismatch => "scope evidence artifact hash does not match the plan",
     })?;
     serde_json::from_slice::<ScopeDecision>(&bytes)
@@ -366,7 +386,9 @@ fn load_rules(
     reference: &EvidenceReference,
 ) -> Result<ProgramRulesSnapshot, &'static str> {
     let bytes = read_validated(store, reference).map_err(|error| match error {
-        ArtifactReadError::Unavailable => "rules evidence artifact is unavailable",
+        ArtifactReadError::Unavailable | ArtifactReadError::NotRegularFile => {
+            "rules evidence artifact is unavailable"
+        }
         ArtifactReadError::HashMismatch => "rules evidence artifact hash does not match the plan",
     })?;
     serde_json::from_slice::<ProgramRulesSnapshot>(&bytes)
@@ -381,6 +403,10 @@ fn read_validated(
     let path = store
         .resolve_relative(reference.artifact_path())
         .map_err(|_| ArtifactReadError::Unavailable)?;
+    let metadata = std::fs::metadata(&path).map_err(|_| ArtifactReadError::Unavailable)?;
+    if !metadata.is_file() {
+        return Err(ArtifactReadError::NotRegularFile);
+    }
     let bytes = std::fs::read(&path).map_err(|_| ArtifactReadError::Unavailable)?;
     if hex::encode(Sha256::digest(&bytes)) != reference.sha256() {
         return Err(ArtifactReadError::HashMismatch);
@@ -391,6 +417,7 @@ fn read_validated(
 // Distinguish a missing artifact from one whose content drifted from the plan
 enum ArtifactReadError {
     Unavailable,
+    NotRegularFile,
     HashMismatch,
 }
 

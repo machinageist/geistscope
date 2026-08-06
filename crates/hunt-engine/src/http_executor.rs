@@ -14,7 +14,6 @@ use crate::{ExecutionPermit, HttpMethod, SsrfInputLocation, SsrfProbePlan};
 
 const USER_AGENT: &str = "GeistScope/0.1 (+hunt-engine)";
 const MAX_RECORDED_HEADERS: usize = 32;
-const MAX_HEADER_VALUE_BYTES: usize = 256;
 const REDACTED_VALUE: &str = "<redacted>";
 
 // Classify the deterministic result of one bounded probe execution
@@ -243,27 +242,13 @@ fn capture_headers(headers: &reqwest::header::HeaderMap) -> Vec<TransactionHeade
         .take(MAX_RECORDED_HEADERS)
         .map(|(name, value)| {
             let name = name.as_str().to_ascii_lowercase();
-            let value = if is_sensitive_header(&name) {
-                REDACTED_VALUE.to_string()
-            } else {
-                value
-                    .to_str()
-                    .unwrap_or("")
-                    .chars()
-                    .take(MAX_HEADER_VALUE_BYTES)
-                    .collect()
-            };
-            TransactionHeader { name, value }
+            let _ = value;
+            TransactionHeader {
+                name,
+                value: REDACTED_VALUE.to_string(),
+            }
         })
         .collect()
-}
-
-// Identify response headers that can carry credentials or session material
-fn is_sensitive_header(name: &str) -> bool {
-    matches!(
-        name,
-        "set-cookie" | "authorization" | "www-authenticate" | "proxy-authenticate"
-    )
 }
 
 // Map a transport error to a deterministic stop outcome

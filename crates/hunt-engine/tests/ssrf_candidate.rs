@@ -5,8 +5,9 @@
 
 use hunt_engine::{
     EvidenceKind, EvidenceReference, HttpMethod, ObservedHttpRequest, SsrfCandidateGenerator,
-    SsrfInputLocation,
+    SsrfContractError, SsrfInputLocation,
 };
+use sha2::{Digest, Sha256};
 
 // Build a source reference without embedding captured request content
 fn source_reference() -> EvidenceReference {
@@ -37,7 +38,7 @@ fn absolute_http_query_value_produces_one_inert_ssrf_candidate() {
         candidates[0].input_location(),
         &SsrfInputLocation::QueryParameter { occurrence: 0 }
     );
-    assert_eq!(candidates[0].original_value_sha256().len(), 64);
+    assert_eq!(candidates[0].id().len(), 64);
 }
 
 #[test]
@@ -92,9 +93,76 @@ fn candidate_serialization_uses_opaque_identity_and_never_exposes_parameter_name
     let serialized = serde_json::to_string(&candidate).unwrap();
 
     assert!(!serialized.contains(SECRET_KEY_NAME));
+    assert!(!serialized.contains("original_value_sha256"));
+    assert!(!serialized.contains(&hex::encode(Sha256::digest(
+        b"https://remote.example.test/"
+    ))));
     assert!(serialized.contains(candidate.id()));
     assert!(serialized.contains("query_parameter"));
     assert!(serialized.contains("\"occurrence\":0"));
+}
+
+#[test]
+fn candidate_id_is_not_a_dictionary_oracle_for_guessable_query_material() {
+    const SECRET_KEY_NAME: &str = "api_key_SECRET_987";
+    const VALUE: &str = "https://remote.example.test/";
+    let observation = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        format!("https://target.example.test/fetch?{SECRET_KEY_NAME}=https%3A%2F%2Fremote.example.test%2F"),
+        source_reference(),
+    )
+    .unwrap();
+
+    let first = SsrfCandidateGenerator.generate(&observation).remove(0);
+    let second = SsrfCandidateGenerator.generate(&observation).remove(0);
+    let value_hash = hex::encode(Sha256::digest(VALUE.as_bytes()));
+    let prior_public_formula = hex::encode(Sha256::digest(
+        format!("request-1\n{SECRET_KEY_NAME}\n0\n{value_hash}").as_bytes(),
+    ));
+
+    assert_eq!(first.id(), second.id());
+    assert_ne!(first.id(), prior_public_formula);
+}
+
+#[test]
+fn invalid_utf8_query_names_are_rejected_without_stale_candidate_collisions() {
+    let ff = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        "https://target.example.test/fetch?%FF=http://a.test/",
+        source_reference(),
+    );
+    let fe = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        "https://target.example.test/fetch?%FE=http://a.test/",
+        source_reference(),
+    );
+
+    assert_eq!(
+        ff.unwrap_err(),
+        SsrfContractError::InvalidQueryParameterName
+    );
+    assert_eq!(
+        fe.unwrap_err(),
+        SsrfContractError::InvalidQueryParameterName
+    );
+}
+
+#[test]
+fn semicolon_bearing_candidate_query_segments_are_rejected() {
+    let result = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        "https://target.example.test/fetch?url=http://a.test/;admin=true",
+        source_reference(),
+    );
+
+    assert_eq!(
+        result.unwrap_err(),
+        SsrfContractError::SemicolonQuerySegmentUnsupported
+    );
 }
 
 #[test]

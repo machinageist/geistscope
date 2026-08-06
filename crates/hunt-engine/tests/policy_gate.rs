@@ -20,13 +20,25 @@ const TARGET_URL: &str =
     "https://target.example.test/fetch?url=https%3A%2F%2Foriginal.example.test%2Fimage.png";
 const NORMALIZED_TARGET: &str = "https://target.example.test/fetch";
 
-// Build the immutable observation source reference the gate does not re-validate
-fn source_reference() -> EvidenceReference {
+// Persist immutable request evidence and return its hash-accurate private reference
+fn source_reference(root: &Path) -> EvidenceReference {
+    source_reference_at(
+        root,
+        "traffic/records/request-1.json",
+        b"captured request evidence",
+    )
+}
+
+// Persist request evidence at an explicit relative path for secrecy regressions
+fn source_reference_at(root: &Path, relative: &str, bytes: &[u8]) -> EvidenceReference {
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, bytes).unwrap();
     EvidenceReference::new(
         "source",
         EvidenceKind::RequestResponse,
-        "traffic/records/request-1.json",
-        "a".repeat(64),
+        relative,
+        hex::encode(Sha256::digest(bytes)),
     )
     .unwrap()
 }
@@ -99,10 +111,18 @@ fn valid_rules(now: OffsetDateTime) -> ProgramRulesSnapshot {
 }
 
 // Build an immutable SSRF probe plan bound to the supplied policy artifact references
-fn build_plan(scope: EvidenceReference, rules: EvidenceReference) -> SsrfProbePlan {
+fn build_plan(root: &Path, scope: EvidenceReference, rules: EvidenceReference) -> SsrfProbePlan {
+    build_plan_with_source(source_reference(root), scope, rules)
+}
+
+// Build a plan with an explicit source reference for authorization regressions
+fn build_plan_with_source(
+    source: EvidenceReference,
+    scope: EvidenceReference,
+    rules: EvidenceReference,
+) -> SsrfProbePlan {
     let observation =
-        ObservedHttpRequest::new("request-1", HttpMethod::Get, TARGET_URL, source_reference())
-            .unwrap();
+        ObservedHttpRequest::new("request-1", HttpMethod::Get, TARGET_URL, source).unwrap();
     let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
     SsrfProbePlanBuilder::new(CampaignCallbackOrigin::new("http://127.0.0.1:43123").unwrap())
         .build(
@@ -128,6 +148,7 @@ fn valid_policy_yields_one_permit_bound_to_the_plan_hash() {
     let root = tempfile::tempdir().unwrap();
     let now = OffsetDateTime::now_utc();
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         rules_reference(root.path(), &valid_rules(now)),
     );
@@ -153,9 +174,118 @@ fn valid_policy_yields_one_permit_bound_to_the_plan_hash() {
     )
     .unwrap();
     assert!(decision.contains(plan.plan_hash()));
-    assert!(decision.contains("traffic/records/request-1.json"));
-    assert!(decision.contains(&"a".repeat(64)));
-    assert!(audit.contains("traffic/records/request-1.json"));
+    assert!(!decision.contains("traffic/records/request-1.json"));
+    assert!(!audit.contains("traffic/records/request-1.json"));
+    assert!(decision.contains("source_evidence_pointer"));
+}
+
+#[test]
+fn missing_mismatched_and_non_regular_source_evidence_yield_no_permit() {
+    let now = OffsetDateTime::now_utc();
+    for source in [
+        EvidenceReference::new(
+            "source",
+            EvidenceKind::RequestResponse,
+            "traffic/missing.json",
+            "a".repeat(64),
+        )
+        .unwrap(),
+        EvidenceReference::new(
+            "source",
+            EvidenceKind::RequestResponse,
+            "traffic/request.json",
+            "b".repeat(64),
+        )
+        .unwrap(),
+        EvidenceReference::new(
+            "source",
+            EvidenceKind::RequestResponse,
+            "traffic/not-a-file",
+            hex::encode(Sha256::digest([])),
+        )
+        .unwrap(),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("traffic/not-a-file")).unwrap();
+        fs::write(root.path().join("traffic/request.json"), b"different bytes").unwrap();
+        let plan = build_plan_with_source(
+            source,
+            scope_reference(root.path(), &in_scope_decision()),
+            rules_reference(root.path(), &valid_rules(now)),
+        );
+        let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+
+        assert!(matches!(
+            SsrfPolicyGate.evaluate(&plan, &context).unwrap(),
+            PolicyGateOutcome::Blocked(_)
+        ));
+        assert_eq!(audit_line_count(root.path()), 1);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_evidence_symlink_escape_yields_no_permit() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let bytes = b"outside captured request";
+    fs::write(outside.path().join("request.json"), bytes).unwrap();
+    fs::create_dir_all(root.path().join("traffic")).unwrap();
+    symlink(
+        outside.path().join("request.json"),
+        root.path().join("traffic/source.json"),
+    )
+    .unwrap();
+    let source = EvidenceReference::new(
+        "source",
+        EvidenceKind::RequestResponse,
+        "traffic/source.json",
+        hex::encode(Sha256::digest(bytes)),
+    )
+    .unwrap();
+    let plan = build_plan_with_source(
+        source,
+        scope_reference(root.path(), &in_scope_decision()),
+        rules_reference(root.path(), &valid_rules(now)),
+    );
+    let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+
+    assert!(matches!(
+        SsrfPolicyGate.evaluate(&plan, &context).unwrap(),
+        PolicyGateOutcome::Blocked(_)
+    ));
+    assert_eq!(audit_line_count(root.path()), 1);
+}
+
+#[test]
+fn model_and_audit_serialization_hide_source_path_identifiers() {
+    const SECRET_PATH: &str = "traffic/tenant-42/session-secret-456/request.json";
+    let root = tempfile::tempdir().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let source = source_reference_at(root.path(), SECRET_PATH, b"captured request evidence");
+    let plan = build_plan_with_source(
+        source,
+        scope_reference(root.path(), &in_scope_decision()),
+        rules_reference(root.path(), &valid_rules(now)),
+    );
+    let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+
+    let outcome = SsrfPolicyGate.evaluate(&plan, &context).unwrap();
+    assert!(matches!(outcome, PolicyGateOutcome::Allowed(_)));
+    let decision = fs::read_to_string(
+        root.path()
+            .join(format!("policy/decisions/{}.json", plan.plan_hash())),
+    )
+    .unwrap();
+    let audit = fs::read_to_string(root.path().join("audit/events.jsonl")).unwrap();
+    for serialized in [&decision, &audit] {
+        assert!(!serialized.contains(SECRET_PATH));
+        assert!(!serialized.contains("tenant-42"));
+        assert!(!serialized.contains("session-secret-456"));
+    }
 }
 
 #[test]
@@ -168,7 +298,7 @@ fn scope_policy_matches_normalized_origin_and_path_while_permits_bind_full_query
             "request-1",
             HttpMethod::Get,
             format!("{TARGET_URL}&admin={admin}"),
-            source_reference(),
+            source_reference(root),
         )
         .unwrap();
         let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
@@ -200,6 +330,7 @@ fn ambiguous_and_out_of_scope_decisions_yield_no_permit() {
         let root = tempfile::tempdir().unwrap();
         let now = OffsetDateTime::now_utc();
         let plan = build_plan(
+            root.path(),
             scope_reference(
                 root.path(),
                 &scope_decision(verdict, Some(true), NORMALIZED_TARGET),
@@ -228,6 +359,7 @@ fn missing_and_expired_rules_yield_no_permit() {
     )
     .unwrap();
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         dangling_rules,
     );
@@ -243,6 +375,7 @@ fn missing_and_expired_rules_yield_no_permit() {
     let mut expired = valid_rules(now);
     expired.expires_at = now - Duration::seconds(1);
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         rules_reference(root.path(), &expired),
     );
@@ -261,6 +394,7 @@ fn future_captured_rules_block_even_with_future_expiry() {
     future.captured_at = now + Duration::hours(1);
     future.expires_at = now + Duration::days(2);
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         rules_reference(root.path(), &future),
     );
@@ -279,6 +413,7 @@ fn automation_disallowed_yields_no_permit() {
     let mut rules = valid_rules(now);
     rules.automation_allowed = false;
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         rules_reference(root.path(), &rules),
     );
@@ -296,6 +431,7 @@ fn bounty_ineligible_blocks_and_unknown_requires_approval() {
     let root = tempfile::tempdir().unwrap();
     let now = OffsetDateTime::now_utc();
     let plan = build_plan(
+        root.path(),
         scope_reference(
             root.path(),
             &scope_decision(ScopeVerdict::InScope, Some(false), NORMALIZED_TARGET),
@@ -312,6 +448,7 @@ fn bounty_ineligible_blocks_and_unknown_requires_approval() {
     let root = tempfile::tempdir().unwrap();
     let now = OffsetDateTime::now_utc();
     let plan = build_plan(
+        root.path(),
         scope_reference(
             root.path(),
             &scope_decision(ScopeVerdict::InScope, None, NORMALIZED_TARGET),
@@ -330,6 +467,7 @@ fn granted_approval_permits_unknown_eligibility_and_records_approval_id() {
     let root = tempfile::tempdir().unwrap();
     let now = OffsetDateTime::now_utc();
     let plan = build_plan(
+        root.path(),
         scope_reference(
             root.path(),
             &scope_decision(ScopeVerdict::InScope, None, NORMALIZED_TARGET),
@@ -361,6 +499,7 @@ fn mismatched_target_or_artifact_hashes_yield_no_permit() {
     let root = tempfile::tempdir().unwrap();
     let now = OffsetDateTime::now_utc();
     let plan = build_plan(
+        root.path(),
         scope_reference(
             root.path(),
             &scope_decision(
@@ -389,6 +528,7 @@ fn mismatched_target_or_artifact_hashes_yield_no_permit() {
     )
     .unwrap();
     let plan = build_plan(
+        root.path(),
         tampered_scope,
         rules_reference(root.path(), &valid_rules(now)),
     );
@@ -410,6 +550,7 @@ fn mismatched_target_or_artifact_hashes_yield_no_permit() {
     )
     .unwrap();
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         tampered_rules,
     );
@@ -427,6 +568,7 @@ fn audit_write_failure_yields_no_permit() {
     // Occupy the audit directory path with a regular file so append fails
     fs::write(root.path().join("audit"), b"not a directory").unwrap();
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         rules_reference(root.path(), &valid_rules(now)),
     );
@@ -445,6 +587,7 @@ fn audit_directory_symlink_escape_yields_no_permit() {
     let now = OffsetDateTime::now_utc();
     symlink(outside.path(), root.path().join("audit")).unwrap();
     let plan = build_plan(
+        root.path(),
         scope_reference(root.path(), &in_scope_decision()),
         rules_reference(root.path(), &valid_rules(now)),
     );
