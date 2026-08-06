@@ -747,7 +747,7 @@ fn is_identifier(value: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }
 
-// Parse every query segment once, rejecting ambiguous raw delimiters before decoding
+// Parse every query segment once, rejecting ambiguous delimiters before and after decoding
 fn parse_query_segments(url: &Url) -> Result<Vec<ParsedQuerySegment>, SsrfContractError> {
     let Some(raw_query) = url.query() else {
         return Ok(Vec::new());
@@ -755,7 +755,7 @@ fn parse_query_segments(url: &Url) -> Result<Vec<ParsedQuerySegment>, SsrfContra
     let mut occurrences = std::collections::BTreeMap::<String, usize>::new();
     let mut parsed = Vec::new();
     for (raw_segment_index, segment) in raw_query.split('&').enumerate() {
-        if segment.contains(';') {
+        if segment.contains(';') || contains_percent_encoded_semicolon(segment) {
             return Err(SsrfContractError::SemicolonQuerySegmentUnsupported);
         }
         if segment.is_empty() {
@@ -764,6 +764,14 @@ fn parse_query_segments(url: &Url) -> Result<Vec<ParsedQuerySegment>, SsrfContra
         let (raw_name, raw_value) = split_query_segment(segment);
         let decoded_name = strict_form_decode(raw_name)
             .map_err(|_| SsrfContractError::InvalidQueryParameterName)?;
+        let decoded_value = strict_form_decode(raw_value.unwrap_or_default()).ok();
+        if decoded_name.contains(';')
+            || decoded_value
+                .as_deref()
+                .is_some_and(|value| value.contains(';'))
+        {
+            return Err(SsrfContractError::SemicolonQuerySegmentUnsupported);
+        }
         let occurrence = occurrences.entry(decoded_name.clone()).or_default();
         let current_occurrence = *occurrence;
         *occurrence += 1;
@@ -772,11 +780,18 @@ fn parse_query_segments(url: &Url) -> Result<Vec<ParsedQuerySegment>, SsrfContra
             raw_segment: segment.to_string(),
             raw_name: raw_name.to_string(),
             decoded_name,
-            decoded_value: strict_form_decode(raw_value.unwrap_or_default()).ok(),
+            decoded_value,
             occurrence: current_occurrence,
         });
     }
     Ok(parsed)
+}
+
+// Detect an encoded semicolon even when another malformed escape prevents full decoding
+fn contains_percent_encoded_semicolon(raw: &str) -> bool {
+    raw.as_bytes()
+        .windows(3)
+        .any(|window| window[0] == b'%' && window[1] == b'3' && matches!(window[2], b'b' | b'B'))
 }
 
 // Split one raw query segment without normalizing its encoded identity

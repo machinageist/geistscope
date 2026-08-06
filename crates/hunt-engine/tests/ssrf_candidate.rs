@@ -182,6 +182,27 @@ fn raw_semicolon_is_rejected_before_malformed_value_decoding() {
 }
 
 #[test]
+fn percent_encoded_semicolons_are_rejected_in_names_values_and_unselected_pairs() {
+    for query in [
+        "url=http%3A%2F%2Fa.test%2F%3Badmin%3Dtrue",
+        "ur%3Bl=http%3A%2F%2Fa.test%2F",
+        "keep=a%3Bb&url=http%3A%2F%2Fa.test%2F",
+        "url=http%3A%2F%2Fa.test%2F%3B%FF=x",
+    ] {
+        let result = ObservedHttpRequest::new(
+            "request-1",
+            HttpMethod::Get,
+            format!("https://target.example.test/fetch?{query}"),
+            source_reference(),
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            SsrfContractError::SemicolonQuerySegmentUnsupported
+        );
+    }
+}
+
+#[test]
 fn malformed_observation_urls_fail_before_candidate_generation() {
     let result = ObservedHttpRequest::new(
         "request-1",
