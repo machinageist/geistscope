@@ -404,6 +404,131 @@ fn source_evidence_in_root_final_symlink_yields_no_permit() {
     assert_eq!(audit_line_count(root.path()), 1);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn source_evidence_in_root_intermediate_symlink_yields_no_permit() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let bytes = captured_request_bytes("request-1", HttpMethod::Get, TARGET_URL);
+    fs::create_dir_all(root.path().join("actual")).unwrap();
+    fs::write(root.path().join("actual/source.json"), &bytes).unwrap();
+    fs::create_dir_all(root.path().join("traffic")).unwrap();
+    symlink("../actual", root.path().join("traffic/records")).unwrap();
+    let source = EvidenceReference::new(
+        "source",
+        EvidenceKind::RequestResponse,
+        "traffic/records/source.json",
+        hex::encode(Sha256::digest(&bytes)),
+    )
+    .unwrap();
+    let plan = build_plan_with_source(
+        source,
+        scope_reference(root.path(), &in_scope_decision()),
+        rules_reference(root.path(), &valid_rules(now)),
+    );
+    let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+
+    assert!(matches!(
+        SsrfPolicyGate.evaluate(&plan, &context).unwrap(),
+        PolicyGateOutcome::Blocked(_)
+    ));
+    assert_eq!(audit_line_count(root.path()), 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn source_evidence_external_intermediate_symlink_yields_no_permit() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let bytes = captured_request_bytes("request-1", HttpMethod::Get, TARGET_URL);
+    fs::write(outside.path().join("source.json"), &bytes).unwrap();
+    fs::create_dir_all(root.path().join("traffic")).unwrap();
+    symlink(outside.path(), root.path().join("traffic/records")).unwrap();
+    let source = EvidenceReference::new(
+        "source",
+        EvidenceKind::RequestResponse,
+        "traffic/records/source.json",
+        hex::encode(Sha256::digest(&bytes)),
+    )
+    .unwrap();
+    let plan = build_plan_with_source(
+        source,
+        scope_reference(root.path(), &in_scope_decision()),
+        rules_reference(root.path(), &valid_rules(now)),
+    );
+    let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+
+    assert!(matches!(
+        SsrfPolicyGate.evaluate(&plan, &context).unwrap(),
+        PolicyGateOutcome::Blocked(_)
+    ));
+    assert_eq!(audit_line_count(root.path()), 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn source_evidence_parent_swap_race_yields_no_permit() {
+    use std::os::unix::fs::symlink;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let valid_bytes = captured_request_bytes("request-1", HttpMethod::Get, TARGET_URL);
+    fs::create_dir(root.path().join("traffic")).unwrap();
+    fs::write(
+        root.path().join("traffic/source.json"),
+        b"invalid inside bytes",
+    )
+    .unwrap();
+    fs::write(outside.path().join("source.json"), &valid_bytes).unwrap();
+    symlink(outside.path(), root.path().join("swap")).unwrap();
+    let source = EvidenceReference::new(
+        "source",
+        EvidenceKind::RequestResponse,
+        "traffic/source.json",
+        hex::encode(Sha256::digest(&valid_bytes)),
+    )
+    .unwrap();
+    let plan = build_plan_with_source(
+        source,
+        scope_reference(root.path(), &in_scope_decision()),
+        rules_reference(root.path(), &valid_rules(now)),
+    );
+    let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    let traffic = root.path().join("traffic");
+    let swap = root.path().join("swap");
+    let worker = std::thread::spawn(move || {
+        while !worker_stop.load(Ordering::Relaxed) {
+            rustix::fs::renameat_with(
+                rustix::fs::CWD,
+                &traffic,
+                rustix::fs::CWD,
+                &swap,
+                rustix::fs::RenameFlags::EXCHANGE,
+            )
+            .unwrap();
+        }
+    });
+
+    for _ in 0..200 {
+        assert!(matches!(
+            SsrfPolicyGate.evaluate(&plan, &context).unwrap(),
+            PolicyGateOutcome::Blocked(_)
+        ));
+    }
+    stop.store(true, Ordering::Relaxed);
+    worker.join().unwrap();
+}
+
 #[test]
 fn model_and_audit_serialization_hide_source_path_identifiers() {
     const SECRET_PATH: &str = "traffic/tenant-42/session-secret-456/request.json";

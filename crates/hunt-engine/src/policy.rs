@@ -3,7 +3,6 @@
 // Description: Deterministic policy gate binding SSRF plans to action-policy and audit
 // Notes: The only path to an ExecutionPermit is current scope/rules policy plus an audit write
 
-use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::Path;
 
@@ -436,15 +435,9 @@ fn read_validated(
     store: &ArtifactStore,
     reference: &EvidenceReference,
 ) -> Result<Vec<u8>, ArtifactReadError> {
-    let path = store
-        .resolve_relative(reference.artifact_path())
+    let mut file = store
+        .open_relative_read(reference.artifact_path())
         .map_err(|_| ArtifactReadError::Unavailable)?;
-    let entry_metadata =
-        std::fs::symlink_metadata(&path).map_err(|_| ArtifactReadError::Unavailable)?;
-    if entry_metadata.file_type().is_symlink() || !entry_metadata.is_file() {
-        return Err(ArtifactReadError::NotRegularFile);
-    }
-    let mut file = open_no_follow(&path)?;
     let opened_metadata = file
         .metadata()
         .map_err(|_| ArtifactReadError::Unavailable)?;
@@ -461,24 +454,6 @@ fn read_validated(
         return Err(ArtifactReadError::HashMismatch);
     }
     Ok(bytes)
-}
-
-#[cfg(unix)]
-fn open_no_follow(path: &Path) -> Result<File, ArtifactReadError> {
-    use std::os::unix::fs::OpenOptionsExt;
-    OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|_| ArtifactReadError::Unavailable)
-}
-
-#[cfg(not(unix))]
-fn open_no_follow(path: &Path) -> Result<File, ArtifactReadError> {
-    OpenOptions::new()
-        .read(true)
-        .open(path)
-        .map_err(|_| ArtifactReadError::Unavailable)
 }
 
 enum SourceEvidenceError {
