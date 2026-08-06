@@ -40,9 +40,9 @@ pub use policy::{
     SsrfPolicyGate,
 };
 pub use ssrf::{
-    CallbackLease, CampaignCallbackOrigin, HttpMethod, ObservedHttpRequest, SsrfCandidate,
-    SsrfCandidateGenerator, SsrfContractError, SsrfInputLocation, SsrfProbePlan,
-    SsrfProbePlanBuilder, SsrfProbePlanView,
+    CallbackLease, CampaignCallbackOrigin, CapturedRequestEvidence, HttpMethod,
+    ObservedHttpRequest, SsrfCandidate, SsrfCandidateGenerator, SsrfContractError,
+    SsrfInputLocation, SsrfProbePlan, SsrfProbePlanBuilder, SsrfProbePlanView,
 };
 
 // Describe one deterministic evidence class required by a result

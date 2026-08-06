@@ -143,9 +143,108 @@ fn public_plan_view_hides_raw_token_and_original_query_value() {
     assert!(!serialized.contains(SUSPECTED_VALUE));
     assert!(!serialized.contains("original.example.test"));
     assert!(!serialized.contains("/callbacks/"));
-    // The redacted view still names the bare callback origin and target metadata
-    assert!(serialized.contains("http://127.0.0.1:43123/"));
+    assert!(!serialized.contains("http://127.0.0.1:43123/"));
+    assert!(serialized.contains("callback_service_pointer"));
     assert!(serialized.contains("https://target.example.test"));
+}
+
+#[test]
+fn public_plan_never_serializes_callback_origin_hostname() {
+    let plan = build_plan(
+        "https://callback.internal.test",
+        RAW_TOKEN,
+        OBSERVATION_WINDOW_MS,
+        'a',
+        'b',
+        'c',
+    )
+    .unwrap();
+    let serialized = serde_json::to_string(plan.view()).unwrap();
+    assert!(!serialized.contains("callback.internal.test"));
+}
+
+#[test]
+fn public_plan_debug_output_uses_only_the_redacted_view() {
+    let plan = baseline_plan();
+    let formatted = format!("{plan:?}");
+
+    assert!(!formatted.contains("127.0.0.1"));
+    assert!(!formatted.contains("traffic/records/request-1.json"));
+    assert!(!formatted.contains(&"a".repeat(64)));
+    assert!(!formatted.contains(SUSPECTED_VALUE));
+    assert!(!formatted.contains(RAW_TOKEN));
+}
+
+#[test]
+fn reconstructed_source_observation_has_stable_opaque_identity_and_plan_hash() {
+    let first = baseline_plan();
+    let second = baseline_plan();
+    assert_eq!(first.view().candidate_id(), second.view().candidate_id());
+    assert_eq!(
+        first.view().source_evidence_pointer(),
+        second.view().source_evidence_pointer()
+    );
+    assert_eq!(first.plan_hash(), second.plan_hash());
+
+    let different_source = build_plan(
+        "http://127.0.0.1:43123",
+        RAW_TOKEN,
+        OBSERVATION_WINDOW_MS,
+        'd',
+        'b',
+        'c',
+    )
+    .unwrap();
+    assert_ne!(
+        first.view().candidate_id(),
+        different_source.view().candidate_id()
+    );
+}
+
+#[test]
+fn malformed_earlier_value_still_counts_toward_candidate_occurrence() {
+    let observation = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        "https://target.example.test/fetch?url=%FF&url=http%3A%2F%2Fa.test%2F",
+        reference(
+            "source",
+            EvidenceKind::RequestResponse,
+            "traffic/records/request-1.json",
+            'a',
+        ),
+    )
+    .unwrap();
+    let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
+    assert_eq!(
+        candidate.input_location(),
+        &hunt_engine::SsrfInputLocation::QueryParameter { occurrence: 1 }
+    );
+    let plan =
+        SsrfProbePlanBuilder::new(CampaignCallbackOrigin::new("http://127.0.0.1:43123").unwrap())
+            .build(
+                &observation,
+                &candidate,
+                ScopeDisposition::InScope,
+                reference(
+                    "scope",
+                    EvidenceKind::PolicyDecision,
+                    "policy/scope.json",
+                    'b',
+                ),
+                reference(
+                    "rules",
+                    EvidenceKind::PolicyDecision,
+                    "policy/rules.json",
+                    'c',
+                ),
+                CallbackLease::new(
+                    CallbackToken::parse(RAW_TOKEN).unwrap(),
+                    OBSERVATION_WINDOW_MS,
+                )
+                .unwrap(),
+            );
+    assert!(plan.is_ok());
 }
 
 #[test]
@@ -307,11 +406,6 @@ fn public_plan_uses_source_pointer_and_opaque_insertion_identity_without_key_nam
     assert!(view.contains(plan.view().candidate_id()));
     assert!(view.contains("query_parameter"));
     assert!(view.contains("\"occurrence\":0"));
-    assert_eq!(
-        plan.source_reference().artifact_path(),
-        "traffic/records/request-1.json"
-    );
-    assert_eq!(plan.source_reference().sha256(), "a".repeat(64));
     assert!(!view.contains("traffic/records/request-1.json"));
     assert!(!view.contains(&"a".repeat(64)));
     assert!(view.contains("source_evidence_pointer"));

@@ -166,6 +166,22 @@ fn semicolon_bearing_candidate_query_segments_are_rejected() {
 }
 
 #[test]
+fn raw_semicolon_is_rejected_before_malformed_value_decoding() {
+    for query in ["url=http://a.test;%FF=x", "url=http://a.test;%=x"] {
+        let result = ObservedHttpRequest::new(
+            "request-1",
+            HttpMethod::Get,
+            format!("https://target.example.test/fetch?{query}"),
+            source_reference(),
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            SsrfContractError::SemicolonQuerySegmentUnsupported
+        );
+    }
+}
+
+#[test]
 fn malformed_observation_urls_fail_before_candidate_generation() {
     let result = ObservedHttpRequest::new(
         "request-1",

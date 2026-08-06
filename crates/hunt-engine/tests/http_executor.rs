@@ -15,10 +15,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use engagement::{ProgramRulesSnapshot, ScopeDecision, ScopeVerdict};
 use hunt_engine::{
-    CallbackLease, CallbackToken, CampaignCallbackOrigin, EvidenceKind, EvidenceReference,
-    ExecutionPermit, ExecutorError, ExecutorOutcome, HttpMethod, ObservedHttpRequest,
-    PolicyGateOutcome, ScopeDisposition, SsrfCandidateGenerator, SsrfHttpExecutor,
-    SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan, SsrfProbePlanBuilder,
+    CallbackLease, CallbackToken, CampaignCallbackOrigin, CapturedRequestEvidence, EvidenceKind,
+    EvidenceReference, ExecutionPermit, ExecutorError, ExecutorOutcome, HttpMethod,
+    ObservedHttpRequest, PolicyGateOutcome, ScopeDisposition, SsrfCandidateGenerator,
+    SsrfHttpExecutor, SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan, SsrfProbePlanBuilder,
 };
 use sha2::{Digest, Sha256};
 use support::{RequestCounter, SsrfBenchmark};
@@ -29,17 +29,24 @@ const DEFAULT_TOKEN: &str = "0123456789abcdef0123456789abcdef";
 const DUMMY_CALLBACK_ORIGIN: &str = "http://127.0.0.1:1";
 
 // Persist immutable request evidence for permit authorization
-fn source_reference(root: &Path) -> EvidenceReference {
+fn source_reference(root: &Path, observed_url: &str) -> EvidenceReference {
     let relative = "traffic/records/request-1.json";
-    let bytes = b"captured request evidence";
+    let evidence = CapturedRequestEvidence::new(
+        "0123456789abcdef0123456789abcdef",
+        "request-1",
+        HttpMethod::Get,
+        observed_url,
+    )
+    .unwrap();
+    let bytes = serde_json::to_vec(&evidence).unwrap();
     let path = root.join(relative);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, bytes).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
     EvidenceReference::new(
         "source",
         EvidenceKind::RequestResponse,
         relative,
-        hex::encode(Sha256::digest(bytes)),
+        hex::encode(Sha256::digest(&bytes)),
     )
     .unwrap()
 }
@@ -114,7 +121,7 @@ fn prepare(
         "request-1",
         HttpMethod::Get,
         observation_url,
-        source_reference(root),
+        source_reference(root, observation_url),
     )
     .unwrap();
     let candidate = SsrfCandidateGenerator

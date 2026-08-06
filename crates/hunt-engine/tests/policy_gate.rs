@@ -9,9 +9,9 @@ use std::path::Path;
 use action_policy::ApprovalState;
 use engagement::{ProgramRulesSnapshot, ScopeDecision, ScopeVerdict};
 use hunt_engine::{
-    CallbackLease, CallbackToken, CampaignCallbackOrigin, EvidenceKind, EvidenceReference,
-    HttpMethod, ObservedHttpRequest, PolicyGateOutcome, ScopeDisposition, SsrfCandidateGenerator,
-    SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan, SsrfProbePlanBuilder,
+    CallbackLease, CallbackToken, CampaignCallbackOrigin, CapturedRequestEvidence, EvidenceKind,
+    EvidenceReference, HttpMethod, ObservedHttpRequest, PolicyGateOutcome, ScopeDisposition,
+    SsrfCandidateGenerator, SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan, SsrfProbePlanBuilder,
 };
 use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
@@ -22,11 +22,24 @@ const NORMALIZED_TARGET: &str = "https://target.example.test/fetch";
 
 // Persist immutable request evidence and return its hash-accurate private reference
 fn source_reference(root: &Path) -> EvidenceReference {
-    source_reference_at(
-        root,
-        "traffic/records/request-1.json",
-        b"captured request evidence",
+    source_reference_for_url(root, TARGET_URL)
+}
+
+fn source_reference_for_url(root: &Path, observed_url: &str) -> EvidenceReference {
+    let bytes = captured_request_bytes("request-1", HttpMethod::Get, observed_url);
+    source_reference_at(root, "traffic/records/request-1.json", &bytes)
+}
+
+// Serialize typed captured-request provenance for authorization fixtures
+fn captured_request_bytes(request_id: &str, method: HttpMethod, observed_url: &str) -> Vec<u8> {
+    let evidence = CapturedRequestEvidence::new(
+        "0123456789abcdef0123456789abcdef",
+        request_id,
+        method,
+        observed_url,
     )
+    .unwrap();
+    serde_json::to_vec(&evidence).unwrap()
 }
 
 // Persist request evidence at an explicit relative path for secrecy regressions
@@ -176,11 +189,103 @@ fn valid_policy_yields_one_permit_bound_to_the_plan_hash() {
     assert!(decision.contains(plan.plan_hash()));
     assert!(!decision.contains("traffic/records/request-1.json"));
     assert!(!audit.contains("traffic/records/request-1.json"));
+    let source_sha = hex::encode(Sha256::digest(captured_request_bytes(
+        "request-1",
+        HttpMethod::Get,
+        TARGET_URL,
+    )));
+    for serialized in [&decision, &audit] {
+        assert!(!serialized.contains(&source_sha));
+        assert!(!serialized.contains("0123456789abcdef0123456789abcdef"));
+        assert!(!serialized.contains("127.0.0.1:43123"));
+    }
     assert!(decision.contains("source_evidence_pointer"));
 }
 
 #[test]
-fn missing_mismatched_and_non_regular_source_evidence_yield_no_permit() {
+fn wrong_source_requirement_and_kind_fail_closed() {
+    let now = OffsetDateTime::now_utc();
+    let cases = [
+        ("wrong_requirement", "other", EvidenceKind::RequestResponse),
+        ("wrong_kind", "source", EvidenceKind::PolicyDecision),
+    ];
+    for (case, requirement, kind) in cases {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = captured_request_bytes("request-1", HttpMethod::Get, TARGET_URL);
+        let relative = "traffic/records/request-1.json";
+        fs::create_dir_all(root.path().join("traffic/records")).unwrap();
+        fs::write(root.path().join(relative), &bytes).unwrap();
+        let source = EvidenceReference::new(
+            requirement,
+            kind,
+            relative,
+            hex::encode(Sha256::digest(&bytes)),
+        )
+        .unwrap();
+        let plan = build_plan_with_source(
+            source,
+            scope_reference(root.path(), &in_scope_decision()),
+            rules_reference(root.path(), &valid_rules(now)),
+        );
+        let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+        let outcome = SsrfPolicyGate.evaluate(&plan, &context).unwrap();
+        assert!(matches!(outcome, PolicyGateOutcome::Blocked(_)), "{case}");
+    }
+}
+
+#[test]
+fn malformed_schema_version_capture_request_method_and_url_fail_closed() {
+    let now = OffsetDateTime::now_utc();
+    let valid = serde_json::json!({
+        "schema": "geistscope.captured_request",
+        "version": 1,
+        "capture_id": "0123456789abcdef0123456789abcdef",
+        "request_id": "request-1",
+        "method": "GET",
+        "observed_url": TARGET_URL,
+    });
+    let mut cases = vec![("malformed_json", b"{not json".to_vec())];
+    for (case, field, value) in [
+        ("wrong_schema", "schema", serde_json::json!("wrong.schema")),
+        ("wrong_version", "version", serde_json::json!(2)),
+        (
+            "wrong_capture_id",
+            "capture_id",
+            serde_json::json!("not-a-capture"),
+        ),
+        (
+            "wrong_request_id",
+            "request_id",
+            serde_json::json!("request-2"),
+        ),
+        ("wrong_method", "method", serde_json::json!("POST")),
+        (
+            "wrong_url",
+            "observed_url",
+            serde_json::json!("https://target.example.test/other?url=http://a.test/"),
+        ),
+    ] {
+        let mut payload = valid.clone();
+        payload[field] = value;
+        cases.push((case, serde_json::to_vec(&payload).unwrap()));
+    }
+
+    for (case, bytes) in cases {
+        let root = tempfile::tempdir().unwrap();
+        let source = source_reference_at(root.path(), "traffic/records/request-1.json", &bytes);
+        let plan = build_plan_with_source(
+            source,
+            scope_reference(root.path(), &in_scope_decision()),
+            rules_reference(root.path(), &valid_rules(now)),
+        );
+        let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+        let outcome = SsrfPolicyGate.evaluate(&plan, &context).unwrap();
+        assert!(matches!(outcome, PolicyGateOutcome::Blocked(_)), "{case}");
+    }
+}
+
+#[test]
+fn missing_hash_mismatched_and_non_regular_source_evidence_yield_no_permit() {
     let now = OffsetDateTime::now_utc();
     for source in [
         EvidenceReference::new(
@@ -225,14 +330,21 @@ fn missing_mismatched_and_non_regular_source_evidence_yield_no_permit() {
 
 #[cfg(unix)]
 #[test]
-fn source_evidence_symlink_escape_yields_no_permit() {
+fn source_evidence_external_symlink_escape_yields_no_permit() {
     use std::os::unix::fs::symlink;
 
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let now = OffsetDateTime::now_utc();
-    let bytes = b"outside captured request";
-    fs::write(outside.path().join("request.json"), bytes).unwrap();
+    let evidence = CapturedRequestEvidence::new(
+        "0123456789abcdef0123456789abcdef",
+        "request-1",
+        HttpMethod::Get,
+        TARGET_URL,
+    )
+    .unwrap();
+    let bytes = serde_json::to_vec(&evidence).unwrap();
+    fs::write(outside.path().join("request.json"), &bytes).unwrap();
     fs::create_dir_all(root.path().join("traffic")).unwrap();
     symlink(
         outside.path().join("request.json"),
@@ -260,12 +372,55 @@ fn source_evidence_symlink_escape_yields_no_permit() {
     assert_eq!(audit_line_count(root.path()), 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn source_evidence_in_root_final_symlink_yields_no_permit() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let bytes = captured_request_bytes("request-1", HttpMethod::Get, TARGET_URL);
+    fs::create_dir_all(root.path().join("traffic")).unwrap();
+    fs::write(root.path().join("traffic/actual.json"), &bytes).unwrap();
+    symlink("actual.json", root.path().join("traffic/source.json")).unwrap();
+    let source = EvidenceReference::new(
+        "source",
+        EvidenceKind::RequestResponse,
+        "traffic/source.json",
+        hex::encode(Sha256::digest(&bytes)),
+    )
+    .unwrap();
+    let plan = build_plan_with_source(
+        source,
+        scope_reference(root.path(), &in_scope_decision()),
+        rules_reference(root.path(), &valid_rules(now)),
+    );
+    let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+
+    assert!(matches!(
+        SsrfPolicyGate.evaluate(&plan, &context).unwrap(),
+        PolicyGateOutcome::Blocked(_)
+    ));
+    assert_eq!(audit_line_count(root.path()), 1);
+}
+
 #[test]
 fn model_and_audit_serialization_hide_source_path_identifiers() {
     const SECRET_PATH: &str = "traffic/tenant-42/session-secret-456/request.json";
     let root = tempfile::tempdir().unwrap();
     let now = OffsetDateTime::now_utc();
-    let source = source_reference_at(root.path(), SECRET_PATH, b"captured request evidence");
+    let evidence = CapturedRequestEvidence::new(
+        "0123456789abcdef0123456789abcdef",
+        "request-1",
+        HttpMethod::Get,
+        TARGET_URL,
+    )
+    .unwrap();
+    let source = source_reference_at(
+        root.path(),
+        SECRET_PATH,
+        &serde_json::to_vec(&evidence).unwrap(),
+    );
     let plan = build_plan_with_source(
         source,
         scope_reference(root.path(), &in_scope_decision()),
@@ -294,11 +449,12 @@ fn scope_policy_matches_normalized_origin_and_path_while_permits_bind_full_query
     let first_root = tempfile::tempdir().unwrap();
     let second_root = tempfile::tempdir().unwrap();
     let build_for_query = |root: &Path, admin: bool| {
+        let observed_url = format!("{TARGET_URL}&admin={admin}");
         let observation = ObservedHttpRequest::new(
             "request-1",
             HttpMethod::Get,
-            format!("{TARGET_URL}&admin={admin}"),
-            source_reference(root),
+            &observed_url,
+            source_reference_for_url(root, &observed_url),
         )
         .unwrap();
         let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
