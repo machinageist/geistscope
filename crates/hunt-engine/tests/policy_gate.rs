@@ -153,6 +153,45 @@ fn valid_policy_yields_one_permit_bound_to_the_plan_hash() {
     )
     .unwrap();
     assert!(decision.contains(plan.plan_hash()));
+    assert!(decision.contains("traffic/records/request-1.json"));
+    assert!(decision.contains(&"a".repeat(64)));
+    assert!(audit.contains("traffic/records/request-1.json"));
+}
+
+#[test]
+fn scope_policy_matches_normalized_origin_and_path_while_permits_bind_full_query() {
+    let now = OffsetDateTime::now_utc();
+    let first_root = tempfile::tempdir().unwrap();
+    let second_root = tempfile::tempdir().unwrap();
+    let build_for_query = |root: &Path, admin: bool| {
+        let observation = ObservedHttpRequest::new(
+            "request-1",
+            HttpMethod::Get,
+            format!("{TARGET_URL}&admin={admin}"),
+            source_reference(),
+        )
+        .unwrap();
+        let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
+        SsrfProbePlanBuilder::new(CampaignCallbackOrigin::new("http://127.0.0.1:43123").unwrap())
+            .build(
+                &observation,
+                &candidate,
+                ScopeDisposition::InScope,
+                scope_reference(root, &in_scope_decision()),
+                rules_reference(root, &valid_rules(now)),
+                CallbackLease::new(CallbackToken::parse("1".repeat(32)).unwrap(), 60_000).unwrap(),
+            )
+            .unwrap()
+    };
+    let first = build_for_query(first_root.path(), false);
+    let second = build_for_query(second_root.path(), true);
+
+    assert_ne!(first.plan_hash(), second.plan_hash());
+    for (root, plan) in [(&first_root, &first), (&second_root, &second)] {
+        let context = SsrfPolicyContext::new(root.path(), ApprovalState::NotRequired, now);
+        let outcome = SsrfPolicyGate.evaluate(plan, &context).unwrap();
+        assert!(matches!(outcome, PolicyGateOutcome::Allowed(_)));
+    }
 }
 
 #[test]

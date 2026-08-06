@@ -21,6 +21,9 @@ const SSRF_MAX_REQUESTS: u32 = 1;
 const SSRF_MAX_DURATION_MS: u64 = 10_000;
 const SSRF_MAX_BYTES: u64 = 262_144;
 const SSRF_MAX_CONCURRENCY: u16 = 1;
+const SSRF_HASH_DOMAIN: &str = "geistscope.hunt-engine.ssrf";
+const SSRF_HASH_SCHEMA: &str = "ssrf_probe_plan";
+const SSRF_HASH_VERSION: u16 = 1;
 
 // Represent the normalized HTTP methods accepted from traffic adapters
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -60,6 +63,9 @@ impl ObservedHttpRequest {
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
             return Err(SsrfContractError::InvalidObservedUrl);
         }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(SsrfContractError::ObservedUrlContainsUserinfo);
+        }
 
         Ok(Self {
             id,
@@ -94,7 +100,7 @@ impl ObservedHttpRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SsrfInputLocation {
-    QueryParameter { name: String, occurrence: usize },
+    QueryParameter { occurrence: usize },
 }
 
 // Represent one deterministic inert SSRF hypothesis candidate
@@ -153,15 +159,15 @@ impl SsrfCandidateGenerator {
             }
 
             let original_value_sha256 = hex::encode(Sha256::digest(value.as_bytes()));
-            let id_material = format!(
-                "{}\n{}\n{}\n{}",
-                observation.id, name, current_occurrence, original_value_sha256
-            );
             candidates.push(SsrfCandidate {
-                id: hex::encode(Sha256::digest(id_material.as_bytes())),
+                id: candidate_id(
+                    &observation.id,
+                    &name,
+                    current_occurrence,
+                    &original_value_sha256,
+                ),
                 source_observation_id: observation.id.clone(),
                 input_location: SsrfInputLocation::QueryParameter {
-                    name: name.into_owned(),
                     occurrence: current_occurrence,
                 },
                 original_value_sha256,
@@ -232,20 +238,29 @@ impl CallbackLease {
     }
 }
 
-// Serialize only SSRF executable semantics into a named canonical hash structure
+// Serialize the exact HTTP request target the current executor can send
 #[derive(Serialize)]
-struct SsrfPlanHashMaterial<'a> {
-    observation_id: &'a str,
-    source_artifact_sha256: &'a str,
-    candidate_id: &'a str,
-    original_value_sha256: &'a str,
+struct SsrfExecutableRequestHashMaterial<'a> {
     method: HttpMethod,
     target_scheme: &'a str,
     target_host: &'a str,
     target_port: u16,
     target_path: &'a str,
-    query_parameter_name: &'a str,
-    query_parameter_occurrence: usize,
+    target_query: Option<&'a str>,
+}
+
+// Serialize only SSRF executable semantics into a named canonical hash structure
+#[derive(Serialize)]
+struct SsrfPlanHashMaterial<'a> {
+    hash_domain: &'static str,
+    hash_schema: &'static str,
+    hash_version: u16,
+    observation_id: &'a str,
+    source_artifact_sha256: &'a str,
+    candidate_id: &'a str,
+    original_value_sha256: &'a str,
+    executable_request: SsrfExecutableRequestHashMaterial<'a>,
+    input_location: &'a SsrfInputLocation,
     callback_origin: &'a str,
     callback_token_sha256: &'a str,
     scope_artifact_sha256: &'a str,
@@ -262,10 +277,10 @@ pub struct SsrfProbePlanView {
     method: HttpMethod,
     target_origin: String,
     target_path: String,
-    query_parameter_name: String,
-    query_parameter_occurrence: usize,
+    input_location: SsrfInputLocation,
     callback_origin: String,
     observation_window_ms: u64,
+    source_reference: EvidenceReference,
     scope_reference: EvidenceReference,
     rules_reference: EvidenceReference,
 }
@@ -296,19 +311,14 @@ impl SsrfProbePlanView {
         &self.target_origin
     }
 
-    // Return the target request path without query values
+    // Return a secret-safe placeholder for the target request path
     pub fn target_path(&self) -> &str {
         &self.target_path
     }
 
-    // Return the mutated query parameter name
-    pub fn query_parameter_name(&self) -> &str {
-        &self.query_parameter_name
-    }
-
-    // Return the mutated query parameter occurrence
-    pub fn query_parameter_occurrence(&self) -> usize {
-        self.query_parameter_occurrence
+    // Return the secret-safe kind and occurrence of the candidate insertion point
+    pub fn input_location(&self) -> &SsrfInputLocation {
+        &self.input_location
     }
 
     // Return the bare campaign callback origin without the token path
@@ -319,6 +329,11 @@ impl SsrfProbePlanView {
     // Return the callback observation-window duration in milliseconds
     pub fn observation_window_ms(&self) -> u64 {
         self.observation_window_ms
+    }
+
+    // Return the immutable captured-request evidence pointer
+    pub fn source_reference(&self) -> &EvidenceReference {
+        &self.source_reference
     }
 
     // Return the scope evidence bound into the plan
@@ -337,10 +352,10 @@ impl SsrfProbePlanView {
 pub(crate) struct SsrfExecutablePlan {
     plan_hash: String,
     method: HttpMethod,
-    observed_url: Url,
-    input_location: SsrfInputLocation,
+    request_url: Url,
+    scope_target: String,
+    query_parameter_name: String,
     callback_token: CallbackToken,
-    callback_url: String,
     observation_window_ms: u64,
 }
 
@@ -349,30 +364,7 @@ pub(crate) struct SsrfExecutablePlan {
 impl SsrfExecutablePlan {
     // Produce the exact one-occurrence mutated request the executor will send
     pub(crate) fn mutated_url(&self) -> Url {
-        let SsrfInputLocation::QueryParameter { name, occurrence } = &self.input_location;
-        let pairs = self
-            .observed_url
-            .query_pairs()
-            .map(|(key, value)| (key.into_owned(), value.into_owned()))
-            .collect::<Vec<_>>();
-        let mut seen = 0usize;
-        let mut mutated = Vec::with_capacity(pairs.len());
-        for (key, value) in pairs {
-            if &key == name {
-                if seen == *occurrence {
-                    mutated.push((key, self.callback_url.clone()));
-                } else {
-                    mutated.push((key, value));
-                }
-                seen += 1;
-            } else {
-                mutated.push((key, value));
-            }
-        }
-
-        let mut url = self.observed_url.clone();
-        url.query_pairs_mut().clear().extend_pairs(mutated);
-        url
+        self.request_url.clone()
     }
 
     // Return the normalized request method
@@ -398,6 +390,16 @@ impl SsrfExecutablePlan {
             issued_at_ms.saturating_add(self.observation_window_ms),
         )
     }
+
+    // Return the normalized origin and path used for deterministic scope matching
+    pub(crate) fn scope_target(&self) -> &str {
+        &self.scope_target
+    }
+
+    // Retain the exact decoded insertion name only inside executable engine state
+    pub(crate) fn query_parameter_name(&self) -> &str {
+        &self.query_parameter_name
+    }
 }
 
 // Bind the immutable SSRF plan, its redacted view, and engine-only executable state
@@ -422,6 +424,11 @@ impl SsrfProbePlan {
     // Return the immutable approval and audit hash
     pub fn plan_hash(&self) -> &str {
         self.action_plan.plan_hash()
+    }
+
+    // Return the captured request evidence that was bound into the plan
+    pub fn source_reference(&self) -> &EvidenceReference {
+        &self.view.source_reference
     }
 
     // Return the scope evidence that was bound into the plan
@@ -480,16 +487,15 @@ impl SsrfProbePlanBuilder {
             return Err(SsrfContractError::CandidateObservationMismatch);
         }
 
-        // Reject a candidate whose recorded value no longer matches the live observation
-        let SsrfInputLocation::QueryParameter { name, occurrence } = &candidate.input_location;
-        let current_value = query_value_at(&observation.url, name, *occurrence)
+        // Resolve and reject any candidate whose opaque identity no longer matches the observation
+        let (name, occurrence, current_value) = resolve_candidate_input(observation, candidate)
             .ok_or(SsrfContractError::CandidateObservationMismatch)?;
         if hex::encode(Sha256::digest(current_value.as_bytes())) != candidate.original_value_sha256
         {
             return Err(SsrfContractError::CandidateObservationMismatch);
         }
 
-        // Derive redacted target origin/path without retaining raw query values
+        // Derive the exact executable request before hashing or public redaction
         let target_host = observation
             .url
             .host_str()
@@ -498,23 +504,31 @@ impl SsrfProbePlanBuilder {
             .url
             .port_or_known_default()
             .ok_or(SsrfContractError::PlanBuildFailed)?;
-        let target_path = observation.url.path();
         let target_origin = observation.url.origin().ascii_serialization();
-
         let callback_url = self.callback_origin.callback_url(&token);
+        let request_url =
+            mutate_query_occurrence(&observation.url, &name, occurrence, &callback_url)?;
+        let target_path = request_url.path();
+        let scope_target = format!("{target_origin}{target_path}");
+
         let callback_token_sha256 = hex::encode(Sha256::digest(token.as_str().as_bytes()));
         let hash_material = SsrfPlanHashMaterial {
+            hash_domain: SSRF_HASH_DOMAIN,
+            hash_schema: SSRF_HASH_SCHEMA,
+            hash_version: SSRF_HASH_VERSION,
             observation_id: &observation.id,
             source_artifact_sha256: observation.source.sha256(),
             candidate_id: &candidate.id,
             original_value_sha256: &candidate.original_value_sha256,
-            method: observation.method,
-            target_scheme: observation.url.scheme(),
-            target_host,
-            target_port,
-            target_path,
-            query_parameter_name: name,
-            query_parameter_occurrence: *occurrence,
+            executable_request: SsrfExecutableRequestHashMaterial {
+                method: observation.method,
+                target_scheme: request_url.scheme(),
+                target_host,
+                target_port,
+                target_path,
+                target_query: request_url.query(),
+            },
+            input_location: &candidate.input_location,
             callback_origin: self.callback_origin.as_str(),
             callback_token_sha256: &callback_token_sha256,
             scope_artifact_sha256: scope_reference.sha256(),
@@ -531,7 +545,7 @@ impl SsrfProbePlanBuilder {
         let action = ActionDescriptor::new(
             "ssrf",
             "callback_probe",
-            format!("{target_origin}{target_path}"),
+            format!("{target_origin}/<redacted>"),
             executable_input_sha256,
         )
         .map_err(|_| SsrfContractError::PlanBuildFailed)?;
@@ -564,21 +578,21 @@ impl SsrfProbePlanBuilder {
             candidate_id: candidate.id.clone(),
             method: observation.method,
             target_origin,
-            target_path: target_path.to_string(),
-            query_parameter_name: name.clone(),
-            query_parameter_occurrence: *occurrence,
+            target_path: "/<redacted>".to_string(),
+            input_location: candidate.input_location.clone(),
             callback_origin: self.callback_origin.as_str().to_string(),
             observation_window_ms,
+            source_reference: observation.source.clone(),
             scope_reference,
             rules_reference,
         };
         let executable = SsrfExecutablePlan {
             plan_hash: action_plan.plan_hash().to_string(),
             method: observation.method,
-            observed_url: observation.url.clone(),
-            input_location: candidate.input_location.clone(),
+            request_url,
+            scope_target,
+            query_parameter_name: name,
             callback_token: token,
-            callback_url,
             observation_window_ms,
         };
 
@@ -597,6 +611,8 @@ pub enum SsrfContractError {
     InvalidObservationId,
     #[error("observed request URL must be an absolute HTTP(S) URL")]
     InvalidObservedUrl,
+    #[error("observed request URL must not contain credentials or userinfo")]
+    ObservedUrlContainsUserinfo,
     #[error("callback origin must be a bare absolute HTTP(S) origin")]
     InvalidCallbackOrigin,
     #[error("state-changing observations are not eligible for autonomous SSRF probes")]
@@ -622,12 +638,91 @@ fn is_identifier(value: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }
 
-// Return the decoded value at the zero-based occurrence of one query parameter name
-fn query_value_at(url: &Url, name: &str, occurrence: usize) -> Option<String> {
-    url.query_pairs()
-        .filter(|(key, _)| key == name)
-        .nth(occurrence)
-        .map(|(_, value)| value.into_owned())
+// Derive the opaque candidate identity while keeping the decoded name out of public state
+fn candidate_id(
+    observation_id: &str,
+    name: &str,
+    occurrence: usize,
+    original_value_sha256: &str,
+) -> String {
+    let material = format!("{observation_id}\n{name}\n{occurrence}\n{original_value_sha256}");
+    hex::encode(Sha256::digest(material.as_bytes()))
+}
+
+// Recover the exact decoded insertion name from the live observation using opaque identity
+fn resolve_candidate_input(
+    observation: &ObservedHttpRequest,
+    candidate: &SsrfCandidate,
+) -> Option<(String, usize, String)> {
+    let mut occurrences = BTreeMap::<String, usize>::new();
+    for (name, value) in observation.url.query_pairs() {
+        let occurrence = occurrences.entry(name.to_string()).or_default();
+        let current_occurrence = *occurrence;
+        *occurrence += 1;
+        let original_value_sha256 = hex::encode(Sha256::digest(value.as_bytes()));
+        let location = SsrfInputLocation::QueryParameter {
+            occurrence: current_occurrence,
+        };
+        if candidate.input_location == location
+            && candidate.original_value_sha256 == original_value_sha256
+            && candidate.id
+                == candidate_id(
+                    &observation.id,
+                    &name,
+                    current_occurrence,
+                    &original_value_sha256,
+                )
+        {
+            return Some((name.into_owned(), current_occurrence, value.into_owned()));
+        }
+    }
+    None
+}
+
+// Replace exactly one decoded query-name occurrence while preserving every other raw pair
+fn mutate_query_occurrence(
+    url: &Url,
+    name: &str,
+    occurrence: usize,
+    replacement: &str,
+) -> Result<Url, SsrfContractError> {
+    let raw_query = url
+        .query()
+        .ok_or(SsrfContractError::CandidateObservationMismatch)?;
+    let encoded_replacement =
+        url::form_urlencoded::byte_serialize(replacement.as_bytes()).collect::<String>();
+    let mut seen = 0usize;
+    let mut replaced = false;
+    let mut segments = Vec::new();
+
+    for segment in raw_query.split('&') {
+        let Some((decoded_name, _)) = url::form_urlencoded::parse(segment.as_bytes()).next() else {
+            segments.push(segment.to_string());
+            continue;
+        };
+        if decoded_name == name {
+            if seen == occurrence {
+                let raw_name = segment
+                    .split_once('=')
+                    .map_or(segment, |(raw_name, _)| raw_name);
+                segments.push(format!("{raw_name}={encoded_replacement}"));
+                replaced = true;
+            } else {
+                segments.push(segment.to_string());
+            }
+            seen += 1;
+        } else {
+            segments.push(segment.to_string());
+        }
+    }
+
+    if !replaced {
+        return Err(SsrfContractError::CandidateObservationMismatch);
+    }
+    let mut request_url = url.clone();
+    request_url.set_query(Some(&segments.join("&")));
+    request_url.set_fragment(None);
+    Ok(request_url)
 }
 
 // Fix the deterministic safety stop conditions bound into every SSRF probe plan
@@ -735,6 +830,111 @@ mod tests {
                     "http://127.0.0.1:43123/callbacks/11111111111111111111111111111111".to_string()
                 ),
             ]
+        );
+        assert_eq!(plan.executable().query_parameter_name(), "url");
+    }
+
+    #[test]
+    fn ssrf_hash_material_has_an_explicit_domain_schema_and_version() {
+        let request = SsrfExecutableRequestHashMaterial {
+            method: HttpMethod::Get,
+            target_scheme: "https",
+            target_host: "target.example.test",
+            target_port: 443,
+            target_path: "/private",
+            target_query: Some("url=callback"),
+        };
+        let location = SsrfInputLocation::QueryParameter { occurrence: 0 };
+        let material = SsrfPlanHashMaterial {
+            hash_domain: SSRF_HASH_DOMAIN,
+            hash_schema: SSRF_HASH_SCHEMA,
+            hash_version: SSRF_HASH_VERSION,
+            observation_id: "request-1",
+            source_artifact_sha256: "source",
+            candidate_id: "candidate",
+            original_value_sha256: "value",
+            executable_request: request,
+            input_location: &location,
+            callback_origin: "http://127.0.0.1:43123/",
+            callback_token_sha256: "token",
+            scope_artifact_sha256: "scope",
+            rules_artifact_sha256: "rules",
+            observation_window_ms: 60_000,
+        };
+        let serialized = serde_json::to_value(material).unwrap();
+
+        assert_eq!(serialized["hash_domain"], SSRF_HASH_DOMAIN);
+        assert_eq!(serialized["hash_schema"], SSRF_HASH_SCHEMA);
+        assert_eq!(serialized["hash_version"], SSRF_HASH_VERSION);
+    }
+
+    #[test]
+    fn exact_mutation_preserves_unselected_pair_order_duplicates_and_encoding() {
+        let url = Url::parse(
+            "https://target.example.test/fetch?keep=a%2fb&url=https%3A%2F%2Foriginal.example.test&keep=a%2Fb",
+        )
+        .unwrap();
+        let mutated = mutate_query_occurrence(
+            &url,
+            "url",
+            0,
+            "http://127.0.0.1:43123/callbacks/11111111111111111111111111111111",
+        )
+        .unwrap();
+
+        assert_eq!(
+            mutated.query(),
+            Some(
+                "keep=a%2fb&url=http%3A%2F%2F127.0.0.1%3A43123%2Fcallbacks%2F11111111111111111111111111111111&keep=a%2Fb"
+            )
+        );
+    }
+
+    #[test]
+    fn exact_mutation_does_not_count_parser_empty_segments_as_empty_name_parameters() {
+        let url = Url::parse("https://target.example.test/fetch?&&=http://original.example.test/")
+            .unwrap();
+        let candidates = url.query_pairs().collect::<Vec<_>>();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].0, "");
+        let mutated = mutate_query_occurrence(
+            &url,
+            &candidates[0].0,
+            0,
+            "http://127.0.0.1:43123/callbacks/11111111111111111111111111111111",
+        )
+        .unwrap();
+
+        assert_eq!(
+            mutated.query(),
+            Some(
+                "&&=http%3A%2F%2F127.0.0.1%3A43123%2Fcallbacks%2F11111111111111111111111111111111"
+            )
+        );
+    }
+
+    #[test]
+    fn exact_mutation_preserves_empty_segments_between_empty_name_parameters() {
+        let url = Url::parse(
+            "https://target.example.test/fetch?=http://one.example.test/&&=http://two.example.test/",
+        )
+        .unwrap();
+        let candidates = url.query_pairs().collect::<Vec<_>>();
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.iter().all(|(name, _)| name.is_empty()));
+        let mutated = mutate_query_occurrence(
+            &url,
+            &candidates[1].0,
+            1,
+            "http://127.0.0.1:43123/callbacks/11111111111111111111111111111111",
+        )
+        .unwrap();
+
+        assert_eq!(
+            mutated.query(),
+            Some(
+                "=http://one.example.test/&&=http%3A%2F%2F127.0.0.1%3A43123%2Fcallbacks%2F11111111111111111111111111111111"
+            )
         );
     }
 

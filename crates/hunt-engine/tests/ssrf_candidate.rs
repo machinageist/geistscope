@@ -35,10 +35,7 @@ fn absolute_http_query_value_produces_one_inert_ssrf_candidate() {
     assert_eq!(candidates[0].source_observation_id(), "request-1");
     assert_eq!(
         candidates[0].input_location(),
-        &SsrfInputLocation::QueryParameter {
-            name: "url".into(),
-            occurrence: 0,
-        }
+        &SsrfInputLocation::QueryParameter { occurrence: 0 }
     );
     assert_eq!(candidates[0].original_value_sha256().len(), 64);
 }
@@ -74,11 +71,30 @@ fn duplicate_query_parameter_occurrences_remain_distinct_and_deterministic() {
     assert_ne!(first[0].id(), first[1].id());
     assert_eq!(
         first[1].input_location(),
-        &SsrfInputLocation::QueryParameter {
-            name: "url".into(),
-            occurrence: 1,
-        }
+        &SsrfInputLocation::QueryParameter { occurrence: 1 }
     );
+}
+
+#[test]
+fn candidate_serialization_uses_opaque_identity_and_never_exposes_parameter_name() {
+    const SECRET_KEY_NAME: &str = "api_key_SECRET_987";
+    let observation = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        format!(
+            "https://target.example.test/fetch?{SECRET_KEY_NAME}=https%3A%2F%2Fremote.example.test%2F"
+        ),
+        source_reference(),
+    )
+    .unwrap();
+
+    let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
+    let serialized = serde_json::to_string(&candidate).unwrap();
+
+    assert!(!serialized.contains(SECRET_KEY_NAME));
+    assert!(serialized.contains(candidate.id()));
+    assert!(serialized.contains("query_parameter"));
+    assert!(serialized.contains("\"occurrence\":0"));
 }
 
 #[test]

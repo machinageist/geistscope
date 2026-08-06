@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
 
-use crate::{ExecutionPermit, HttpMethod, SsrfProbePlan};
+use crate::{ExecutionPermit, HttpMethod, SsrfInputLocation, SsrfProbePlan};
 
 const USER_AGENT: &str = "GeistScope/0.1 (+hunt-engine)";
 const MAX_RECORDED_HEADERS: usize = 32;
@@ -38,8 +38,7 @@ pub struct HttpTransactionRecord {
     method: HttpMethod,
     target_origin: String,
     target_path: String,
-    query_parameter_name: String,
-    query_parameter_occurrence: usize,
+    input_location: SsrfInputLocation,
     elapsed_ms: u64,
     status_code: Option<u16>,
     response_headers: Vec<TransactionHeader>,
@@ -180,8 +179,7 @@ impl SsrfHttpExecutor {
             method: HttpMethod::Get,
             target_origin: plan.view().target_origin().to_string(),
             target_path: plan.view().target_path().to_string(),
-            query_parameter_name: plan.view().query_parameter_name().to_string(),
-            query_parameter_occurrence: plan.view().query_parameter_occurrence(),
+            input_location: plan.view().input_location().clone(),
             elapsed_ms: elapsed_ms(started),
             status_code: Some(status.as_u16()),
             response_headers: headers,
@@ -208,8 +206,7 @@ impl SsrfHttpExecutor {
             method: HttpMethod::Get,
             target_origin: plan.view().target_origin().to_string(),
             target_path: plan.view().target_path().to_string(),
-            query_parameter_name: plan.view().query_parameter_name().to_string(),
-            query_parameter_occurrence: plan.view().query_parameter_occurrence(),
+            input_location: plan.view().input_location().clone(),
             elapsed_ms: elapsed_ms(started),
             status_code,
             response_headers: headers,

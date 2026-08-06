@@ -68,6 +68,7 @@ pub struct PolicyDecisionRecord {
     verdict: PolicyVerdict,
     target: String,
     reason: String,
+    source_reference: EvidenceReference,
     scope_evidence_path: String,
     rules_evidence_path: String,
     approval_id: Option<String>,
@@ -89,6 +90,11 @@ impl PolicyDecisionRecord {
     // Return the deterministic decision reason
     pub fn reason(&self) -> &str {
         &self.reason
+    }
+
+    // Return the immutable captured-request evidence pointer
+    pub fn source_reference(&self) -> &EvidenceReference {
+        &self.source_reference
     }
 
     // Return the recorded approval identifier when one authorized the action
@@ -250,6 +256,7 @@ impl SsrfPolicyGate {
             verdict,
             target: target.clone(),
             reason: reason.to_string(),
+            source_reference: plan.source_reference().clone(),
             scope_evidence_path: plan.scope_reference().artifact_path().to_string(),
             rules_evidence_path: plan.rules_reference().artifact_path().to_string(),
             approval_id,
@@ -272,6 +279,7 @@ impl SsrfPolicyGate {
             target,
             reason: reason.to_string(),
             evidence_paths: vec![
+                record.source_reference.artifact_path().to_string(),
                 record.scope_evidence_path.clone(),
                 record.rules_evidence_path.clone(),
                 decision_relative,
@@ -386,15 +394,10 @@ enum ArtifactReadError {
     HashMismatch,
 }
 
-// Confirm the trusted scope decision was made for the plan's normalized target
+// Match query-insensitive policy scope to normalized origin+path; the permit hash binds the query
 fn scope_target_matches(decision: &ScopeDecision, plan: &SsrfProbePlan) -> bool {
-    let target = format!(
-        "{}{}",
-        plan.view().target_origin(),
-        plan.view().target_path()
-    );
     match &decision.normalized_url {
-        Some(normalized_url) => normalized_url == &target,
+        Some(normalized_url) => normalized_url == plan.executable().scope_target(),
         None => match (&decision.normalized_host, plan_host(plan)) {
             (Some(scope_host), Some(plan_host)) => scope_host == &plan_host,
             _ => false,

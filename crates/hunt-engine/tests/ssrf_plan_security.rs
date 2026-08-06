@@ -93,6 +93,47 @@ fn baseline_plan() -> SsrfProbePlan {
     .unwrap()
 }
 
+// Build one plan from an exact observed URL for executable-identity assertions
+fn plan_for_url(url: &str) -> SsrfProbePlan {
+    let observation = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        url,
+        reference(
+            "source",
+            EvidenceKind::RequestResponse,
+            "traffic/records/request-1.json",
+            'a',
+        ),
+    )
+    .unwrap();
+    let candidate = SsrfCandidateGenerator.generate(&observation).remove(0);
+    SsrfProbePlanBuilder::new(CampaignCallbackOrigin::new("http://127.0.0.1:43123").unwrap())
+        .build(
+            &observation,
+            &candidate,
+            ScopeDisposition::InScope,
+            reference(
+                "scope",
+                EvidenceKind::PolicyDecision,
+                "policy/scope.json",
+                'b',
+            ),
+            reference(
+                "rules",
+                EvidenceKind::PolicyDecision,
+                "policy/rules.json",
+                'c',
+            ),
+            CallbackLease::new(
+                CallbackToken::parse(RAW_TOKEN).unwrap(),
+                OBSERVATION_WINDOW_MS,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+}
+
 #[test]
 fn public_plan_view_hides_raw_token_and_original_query_value() {
     let plan = baseline_plan();
@@ -188,6 +229,91 @@ fn executable_changes_alter_the_immutable_plan_hash() {
             .unwrap()
             .plan_hash()
     );
+}
+
+#[test]
+fn unrelated_query_value_changes_the_full_executable_request_identity() {
+    let first = plan_for_url(
+        "https://target.example.test/fetch?url=https%3A%2F%2Foriginal.example.test%2Fimage.png&admin=false",
+    );
+    let second = plan_for_url(
+        "https://target.example.test/fetch?url=https%3A%2F%2Foriginal.example.test%2Fimage.png&admin=true",
+    );
+
+    assert_ne!(first.plan_hash(), second.plan_hash());
+}
+
+#[test]
+fn query_order_duplicates_and_percent_encoding_are_bound_exactly() {
+    let ordered = plan_for_url(
+        "https://target.example.test/fetch?url=https%3A%2F%2Foriginal.example.test%2Fimage.png&keep=first&keep=second&note=a%2Fb",
+    );
+    let reordered = plan_for_url(
+        "https://target.example.test/fetch?url=https%3A%2F%2Foriginal.example.test%2Fimage.png&keep=second&keep=first&note=a%2Fb",
+    );
+    let encoding_changed = plan_for_url(
+        "https://target.example.test/fetch?url=https%3A%2F%2Foriginal.example.test%2Fimage.png&keep=first&keep=second&note=a%2fb",
+    );
+
+    assert_ne!(ordered.plan_hash(), reordered.plan_hash());
+    assert_ne!(ordered.plan_hash(), encoding_changed.plan_hash());
+}
+
+#[test]
+fn observed_target_userinfo_is_rejected_before_candidate_or_plan_construction() {
+    let result = ObservedHttpRequest::new(
+        "request-1",
+        HttpMethod::Get,
+        "https://user:password@target.example.test/fetch?url=https%3A%2F%2Foriginal.example.test%2F",
+        reference(
+            "source",
+            EvidenceKind::RequestResponse,
+            "traffic/records/request-1.json",
+            'a',
+        ),
+    );
+
+    assert_eq!(
+        result.unwrap_err(),
+        hunt_engine::SsrfContractError::ObservedUrlContainsUserinfo
+    );
+}
+
+#[test]
+fn path_carried_secrets_are_redacted_from_every_public_plan_serialization() {
+    let plan = plan_for_url(
+        "https://target.example.test/tenant/session-secret-123/fetch?url=https%3A%2F%2Foriginal.example.test%2Fimage.png",
+    );
+    let view = serde_json::to_string(plan.view()).unwrap();
+    let envelope = serde_json::to_string(plan.action_plan()).unwrap();
+
+    for serialized in [&view, &envelope] {
+        assert!(!serialized.contains("session-secret-123"));
+        assert!(!serialized.contains("/tenant/"));
+    }
+    assert_eq!(plan.view().target_path(), "/<redacted>");
+    assert!(!view.contains("target_path_sha256"));
+}
+
+#[test]
+fn public_plan_uses_source_pointer_and_opaque_insertion_identity_without_key_name() {
+    const SECRET_KEY_NAME: &str = "api_key_SECRET_987";
+    let plan = plan_for_url(&format!(
+        "https://target.example.test/fetch?{SECRET_KEY_NAME}=https%3A%2F%2Foriginal.example.test%2Fimage.png"
+    ));
+    let view = serde_json::to_string(plan.view()).unwrap();
+
+    assert!(!view.contains(SECRET_KEY_NAME));
+    assert!(view.contains(plan.view().candidate_id()));
+    assert!(view.contains("query_parameter"));
+    assert!(view.contains("\"occurrence\":0"));
+    assert_eq!(
+        plan.source_reference().artifact_path(),
+        "traffic/records/request-1.json"
+    );
+    assert_eq!(plan.source_reference().sha256(), "a".repeat(64));
+    assert!(view.contains("traffic/records/request-1.json"));
+    assert!(view.contains(&"a".repeat(64)));
 }
 
 #[test]

@@ -424,7 +424,7 @@ async fn serialized_record_never_leaks_secrets_or_body() {
     let server = serve(Router::new().route("/*path", any(secret_header_handler))).await;
     let root = tempfile::tempdir().unwrap();
     let observation_url = format!(
-        "{}/fetch?url=http%3A%2F%2Fsecret-origin.example.test%2F",
+        "{}/tenant/session-secret-123/fetch?api_key_SECRET_987=http%3A%2F%2Fsecret-origin.example.test%2F",
         server.origin()
     );
     let (plan, permit) = prepare(
@@ -447,6 +447,11 @@ async fn serialized_record_never_leaks_secrets_or_body() {
     assert!(!serialized.contains("super-secret-cookie"));
     assert!(!serialized.contains("Bearer leaked-token"));
     assert!(!serialized.contains("sensitive-response-body"));
+    assert!(!serialized.contains("api_key_SECRET_987"));
+    assert!(!serialized.contains("session-secret-123"));
+    assert!(!serialized.contains("target_path_sha256"));
+    assert!(serialized.contains("query_parameter"));
+    assert!(serialized.contains("\"occurrence\":0"));
     assert!(serialized.contains("<redacted>"));
 }
 
