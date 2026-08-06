@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
+use zeroize::Zeroizing;
 
 const DEFAULT_PROXY_PORT: u16 = 8080;
 const LABEL_PREFIX: &str = "x-mg-";
@@ -32,10 +33,12 @@ impl CaptureSigner {
         secret_key: &[u8],
     ) -> Result<Self, CaptureSigningError> {
         let key_id = key_id.into();
-        let secret_key: [u8; ED25519_SECRET_KEY_LENGTH] = secret_key
-            .try_into()
-            .map_err(|_| CaptureSigningError::MalformedSecretKey)?;
-        let signing_key = SigningKey::from_bytes(&secret_key);
+        if secret_key.len() != ED25519_SECRET_KEY_LENGTH {
+            return Err(CaptureSigningError::MalformedSecretKey);
+        }
+        let mut seed = Zeroizing::new([0_u8; ED25519_SECRET_KEY_LENGTH]);
+        seed.copy_from_slice(secret_key);
+        let signing_key = SigningKey::from_bytes(&seed);
         CaptureVerifier::from_bytes(&key_id, signing_key.verifying_key().as_bytes())?;
         Ok(Self {
             key_id,
