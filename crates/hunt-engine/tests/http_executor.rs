@@ -15,11 +15,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use engagement::{ProgramRulesSnapshot, ScopeDecision, ScopeVerdict};
 use hunt_engine::{
-    CallbackLease, CallbackToken, CampaignCallbackOrigin, CapturedRequestEvidence, EvidenceKind,
+    CallbackLease, CallbackToken, CampaignCallbackOrigin, CaptureTrustStore, EvidenceKind,
     EvidenceReference, ExecutionPermit, ExecutorError, ExecutorOutcome, HttpMethod,
-    ObservedHttpRequest, PolicyGateOutcome, ScopeDisposition, SsrfCandidateGenerator,
-    SsrfHttpExecutor, SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan, SsrfProbePlanBuilder,
+    ObservedHttpRequest, PolicyGateOutcome, ScopeDisposition, SignedCaptureClaims,
+    SsrfCandidateGenerator, SsrfHttpExecutor, SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan,
+    SsrfProbePlanBuilder,
 };
+use proxy_core::CaptureSigner;
 use sha2::{Digest, Sha256};
 use support::{RequestCounter, SsrfBenchmark};
 use time::{Duration, OffsetDateTime};
@@ -27,17 +29,32 @@ use tokio::task::JoinHandle;
 
 const DEFAULT_TOKEN: &str = "0123456789abcdef0123456789abcdef";
 const DUMMY_CALLBACK_ORIGIN: &str = "http://127.0.0.1:1";
+const ENGAGEMENT_ID: &str = "engagement-1";
+const CAPTURE_KEY_ID: &str = "capture-key-1";
+const CAPTURE_SECRET_KEY: [u8; 32] = [7; 32];
+
+// Recreate deterministic trusted capture authority for executor fixtures
+fn capture_signer() -> CaptureSigner {
+    CaptureSigner::from_bytes(CAPTURE_KEY_ID, &CAPTURE_SECRET_KEY).unwrap()
+}
+
+// Supply public-key-only capture trust to the policy gate
+fn capture_trust() -> CaptureTrustStore {
+    CaptureTrustStore::new([capture_signer().verifier().unwrap()]).unwrap()
+}
 
 // Persist immutable request evidence for permit authorization
 fn source_reference(root: &Path, observed_url: &str) -> EvidenceReference {
     let relative = "traffic/records/request-1.json";
-    let evidence = CapturedRequestEvidence::new(
+    let claims = SignedCaptureClaims::new(
+        ENGAGEMENT_ID,
+        CAPTURE_KEY_ID,
         "0123456789abcdef0123456789abcdef",
         "request-1",
-        HttpMethod::Get,
         observed_url,
     )
     .unwrap();
+    let evidence = capture_signer().sign_claims(claims).unwrap();
     let bytes = serde_json::to_vec(&evidence).unwrap();
     let path = root.join(relative);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -147,7 +164,13 @@ fn prepare(
         )
         .unwrap();
 
-    let context = SsrfPolicyContext::new(root, action_policy::ApprovalState::NotRequired, now);
+    let context = SsrfPolicyContext::new(
+        root,
+        ENGAGEMENT_ID,
+        capture_trust(),
+        action_policy::ApprovalState::NotRequired,
+        now,
+    );
     let permit = match SsrfPolicyGate.evaluate(&plan, &context).unwrap() {
         PolicyGateOutcome::Allowed(permit) => permit,
         other => panic!("expected allowed permit, got {other:?}"),

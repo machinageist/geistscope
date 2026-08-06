@@ -28,6 +28,10 @@ pub use callback::{
     CallbackContractError, CallbackCorrelation, CallbackHeader, CallbackRecord,
     CallbackRecordOutcome, CallbackRecorder, CallbackRegistration, CallbackRequest, CallbackToken,
 };
+pub use engagement::{
+    CaptureProvenanceError, CaptureTrustStore, CaptureVerifier, SignedCaptureClaims,
+    SignedCapturedRequestEvidence,
+};
 pub use http_executor::{
     ExecutorError, ExecutorOutcome, HttpTransactionRecord, SsrfHttpExecutor, TransactionHeader,
 };
@@ -40,9 +44,9 @@ pub use policy::{
     SsrfPolicyGate,
 };
 pub use ssrf::{
-    CallbackLease, CampaignCallbackOrigin, CapturedRequestEvidence, HttpMethod,
-    ObservedHttpRequest, SsrfCandidate, SsrfCandidateGenerator, SsrfContractError,
-    SsrfInputLocation, SsrfProbePlan, SsrfProbePlanBuilder, SsrfProbePlanView,
+    CallbackLease, CampaignCallbackOrigin, HttpMethod, ObservedHttpRequest, SsrfCandidate,
+    SsrfCandidateGenerator, SsrfContractError, SsrfInputLocation, SsrfProbePlan,
+    SsrfProbePlanBuilder, SsrfProbePlanView,
 };
 
 // Describe one deterministic evidence class required by a result

@@ -11,15 +11,15 @@ use action_policy::{
     SessionRequirement,
 };
 use engagement::{
-    ArtifactStore, AuditDecision, AuditEvent, AuditRisk, ProgramRulesSnapshot, ScopeDecision,
-    append_audit_event,
+    ArtifactStore, AuditDecision, AuditEvent, AuditRisk, CaptureProvenanceError, CaptureTrustStore,
+    ProgramRulesSnapshot, ScopeDecision, SignedCapturedRequestEvidence, append_audit_event,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
 
-use crate::{CapturedRequestEvidence, EvidenceKind, EvidenceReference, HuntRisk, SsrfProbePlan};
+use crate::{EvidenceKind, EvidenceReference, HuntRisk, SsrfProbePlan};
 
 const AUDIT_TOOL: &str = "hunt-engine";
 const SSRF_ACTION: &str = "ssrf.callback_probe";
@@ -29,6 +29,8 @@ const AUDIT_RELATIVE_PATH: &str = "audit/events.jsonl";
 #[derive(Debug, Clone)]
 pub struct SsrfPolicyContext<'a> {
     engagement_root: &'a Path,
+    engagement_id: &'a str,
+    capture_trust: CaptureTrustStore,
     approval: ApprovalState,
     evaluated_at: OffsetDateTime,
 }
@@ -37,11 +39,15 @@ impl<'a> SsrfPolicyContext<'a> {
     // Create one evaluation context bound to a canonical engagement root
     pub fn new(
         engagement_root: &'a Path,
+        engagement_id: &'a str,
+        capture_trust: CaptureTrustStore,
         approval: ApprovalState,
         evaluated_at: OffsetDateTime,
     ) -> Self {
         Self {
             engagement_root,
+            engagement_id,
+            capture_trust,
             approval,
             evaluated_at,
         }
@@ -170,18 +176,21 @@ impl SsrfPolicyGate {
             read_validated(&store, source)
                 .map_err(SourceEvidenceError::Artifact)
                 .and_then(|bytes| {
-                    serde_json::from_slice::<CapturedRequestEvidence>(&bytes)
+                    serde_json::from_slice::<SignedCapturedRequestEvidence>(&bytes)
                         .map_err(|_| SourceEvidenceError::Malformed)
                 })
                 .and_then(|evidence| {
-                    evidence
-                        .validate()
-                        .map_err(|_| SourceEvidenceError::Malformed)?;
-                    if plan.source_matches(&evidence) {
-                        Ok(())
-                    } else {
-                        Err(SourceEvidenceError::RequestMismatch)
-                    }
+                    let (request_id, method, canonical_url) = plan.source_observation();
+                    context
+                        .capture_trust
+                        .verify(
+                            &evidence,
+                            context.engagement_id,
+                            request_id,
+                            method,
+                            canonical_url,
+                        )
+                        .map_err(SourceEvidenceError::Provenance)
                 })
         };
         if let Err(error) = source_result {
@@ -192,9 +201,7 @@ impl SsrfPolicyGate {
                 SourceEvidenceError::Malformed => {
                     "source evidence artifact is not a valid captured request"
                 }
-                SourceEvidenceError::RequestMismatch => {
-                    "source evidence request does not match the plan observation"
-                }
+                SourceEvidenceError::Provenance(error) => provenance_failure_reason(error),
                 SourceEvidenceError::Artifact(ArtifactReadError::Unavailable) => {
                     "source evidence artifact is unavailable"
                 }
@@ -459,8 +466,32 @@ fn read_validated(
 enum SourceEvidenceError {
     WrongReferenceType,
     Malformed,
-    RequestMismatch,
+    Provenance(CaptureProvenanceError),
     Artifact(ArtifactReadError),
+}
+
+// Map cryptographic failures to stable audit-safe reasons without attacker-controlled values
+fn provenance_failure_reason(error: CaptureProvenanceError) -> &'static str {
+    match error {
+        CaptureProvenanceError::EngagementMismatch => {
+            "source evidence engagement does not match trusted context"
+        }
+        CaptureProvenanceError::ObservationMismatch => {
+            "source evidence request does not match the plan observation"
+        }
+        CaptureProvenanceError::UnknownKey | CaptureProvenanceError::RevokedKey => {
+            "source evidence capture authority is not trusted"
+        }
+        CaptureProvenanceError::InvalidSignature => "source evidence capture signature is invalid",
+        CaptureProvenanceError::MalformedClaims
+        | CaptureProvenanceError::MalformedEvidence
+        | CaptureProvenanceError::InvalidKeyId
+        | CaptureProvenanceError::MalformedPublicKey
+        | CaptureProvenanceError::MalformedSignature
+        | CaptureProvenanceError::DuplicateKeyId => {
+            "source evidence artifact is not a valid signed capture"
+        }
+    }
 }
 
 // Distinguish a missing artifact from one whose content drifted from the plan

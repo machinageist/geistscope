@@ -22,8 +22,6 @@ const SSRF_MAX_CONCURRENCY: u16 = 1;
 const SSRF_HASH_DOMAIN: &str = "geistscope.hunt-engine.ssrf";
 const SSRF_HASH_SCHEMA: &str = "ssrf_probe_plan";
 const SSRF_HASH_VERSION: u16 = 1;
-const CAPTURE_SCHEMA: &str = "geistscope.captured_request";
-const CAPTURE_VERSION: u16 = 1;
 
 // Represent the normalized HTTP methods accepted from traffic adapters
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,67 +34,6 @@ pub enum HttpMethod {
     Patch,
     Delete,
     Options,
-}
-
-// Persist the minimal typed request provenance required to authorize this slice
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CapturedRequestEvidence {
-    schema: String,
-    version: u16,
-    capture_id: String,
-    request_id: String,
-    method: HttpMethod,
-    observed_url: String,
-}
-
-impl CapturedRequestEvidence {
-    pub fn new(
-        capture_id: impl Into<String>,
-        request_id: impl Into<String>,
-        method: HttpMethod,
-        observed_url: impl Into<String>,
-    ) -> Result<Self, SsrfContractError> {
-        let evidence = Self {
-            schema: CAPTURE_SCHEMA.to_string(),
-            version: CAPTURE_VERSION,
-            capture_id: capture_id.into(),
-            request_id: request_id.into(),
-            method,
-            observed_url: observed_url.into(),
-        };
-        evidence.validate()?;
-        Ok(evidence)
-    }
-
-    pub(crate) fn validate(&self) -> Result<(), SsrfContractError> {
-        if self.schema != CAPTURE_SCHEMA
-            || self.version != CAPTURE_VERSION
-            || self.capture_id.len() != 32
-            || !self.capture_id.bytes().all(|byte| byte.is_ascii_hexdigit())
-            || self
-                .capture_id
-                .bytes()
-                .any(|byte| byte.is_ascii_uppercase())
-            || !is_identifier(&self.request_id)
-            || self.method != HttpMethod::Get
-        {
-            return Err(SsrfContractError::InvalidCapturedRequestEvidence);
-        }
-        let url = Url::parse(&self.observed_url)
-            .map_err(|_| SsrfContractError::InvalidCapturedRequestEvidence)?;
-        if !matches!(url.scheme(), "http" | "https")
-            || url.host_str().is_none()
-            || url.as_str() != self.observed_url
-        {
-            return Err(SsrfContractError::InvalidCapturedRequestEvidence);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn matches(&self, id: &str, method: HttpMethod, url: &str) -> bool {
-        self.request_id == id && self.method == method && self.observed_url == url
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -519,12 +456,17 @@ impl SsrfProbePlan {
         &self.rules_reference
     }
 
-    pub(crate) fn source_matches(&self, evidence: &CapturedRequestEvidence) -> bool {
-        evidence.matches(
-            &self.observed_request_id,
-            self.observed_method,
-            &self.observed_url,
-        )
+    pub(crate) fn source_observation(&self) -> (&str, &'static str, &str) {
+        let method = match self.observed_method {
+            HttpMethod::Get => "GET",
+            HttpMethod::Head => "HEAD",
+            HttpMethod::Post => "POST",
+            HttpMethod::Put => "PUT",
+            HttpMethod::Patch => "PATCH",
+            HttpMethod::Delete => "DELETE",
+            HttpMethod::Options => "OPTIONS",
+        };
+        (&self.observed_request_id, method, &self.observed_url)
     }
 
     // Access engine-only executable state for policy-gated execution
@@ -720,8 +662,7 @@ pub enum SsrfContractError {
     InvalidQueryParameterName,
     #[error("semicolon query segments are unsupported for SSRF candidates")]
     SemicolonQuerySegmentUnsupported,
-    #[error("captured request evidence schema or fields are invalid")]
-    InvalidCapturedRequestEvidence,
+
     #[error("callback origin must be a bare absolute HTTP(S) origin")]
     InvalidCallbackOrigin,
     #[error("state-changing observations are not eligible for autonomous SSRF probes")]
