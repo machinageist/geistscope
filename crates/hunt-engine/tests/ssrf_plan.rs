@@ -58,8 +58,17 @@ fn callback_probe_plan_binds_token_mutation_policy_references_and_safe_budgets()
         )
         .unwrap();
 
-    // The redacted view exposes the bare callback origin, never the token path
-    assert_eq!(plan.view().callback_origin(), "http://127.0.0.1:43123/");
+    // The redacted view exposes only an opaque callback-service identity
+    assert_eq!(plan.view().callback_service_pointer().len(), 64);
+    assert!(
+        plan.view()
+            .callback_service_pointer()
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    );
+    let serialized = serde_json::to_string(plan.view()).unwrap();
+    assert!(!serialized.contains("127.0.0.1"));
+    assert!(!serialized.contains("callback_origin"));
     assert_eq!(plan.action_plan().budget().max_requests(), 1);
     assert_eq!(plan.action_plan().budget().concurrency(), 1);
     assert_eq!(plan.action_plan().redirect_policy(), RedirectPolicy::Deny);

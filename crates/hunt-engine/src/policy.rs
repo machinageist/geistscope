@@ -3,6 +3,7 @@
 // Description: Deterministic policy gate binding SSRF plans to action-policy and audit
 // Notes: The only path to an ExecutionPermit is current scope/rules policy plus an audit write
 
+use std::io::Read;
 use std::path::Path;
 
 use action_policy::{
@@ -10,15 +11,15 @@ use action_policy::{
     SessionRequirement,
 };
 use engagement::{
-    ArtifactStore, AuditDecision, AuditEvent, AuditRisk, ProgramRulesSnapshot, ScopeDecision,
-    append_audit_event,
+    ArtifactStore, AuditDecision, AuditEvent, AuditRisk, CaptureProvenanceError, CaptureTrustStore,
+    ProgramRulesSnapshot, ScopeDecision, SignedCapturedRequestEvidence, append_audit_event,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
 
-use crate::{EvidenceReference, HuntRisk, SsrfProbePlan};
+use crate::{EvidenceKind, EvidenceReference, HuntRisk, SsrfProbePlan};
 
 const AUDIT_TOOL: &str = "hunt-engine";
 const SSRF_ACTION: &str = "ssrf.callback_probe";
@@ -28,6 +29,8 @@ const AUDIT_RELATIVE_PATH: &str = "audit/events.jsonl";
 #[derive(Debug, Clone)]
 pub struct SsrfPolicyContext<'a> {
     engagement_root: &'a Path,
+    engagement_id: &'a str,
+    capture_trust: CaptureTrustStore,
     approval: ApprovalState,
     evaluated_at: OffsetDateTime,
 }
@@ -36,11 +39,15 @@ impl<'a> SsrfPolicyContext<'a> {
     // Create one evaluation context bound to a canonical engagement root
     pub fn new(
         engagement_root: &'a Path,
+        engagement_id: &'a str,
+        capture_trust: CaptureTrustStore,
         approval: ApprovalState,
         evaluated_at: OffsetDateTime,
     ) -> Self {
         Self {
             engagement_root,
+            engagement_id,
+            capture_trust,
             approval,
             evaluated_at,
         }
@@ -68,8 +75,9 @@ pub struct PolicyDecisionRecord {
     verdict: PolicyVerdict,
     target: String,
     reason: String,
-    scope_evidence_path: String,
-    rules_evidence_path: String,
+    source_evidence_pointer: String,
+    scope_evidence_pointer: String,
+    rules_evidence_pointer: String,
     approval_id: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     evaluated_at: OffsetDateTime,
@@ -89,6 +97,11 @@ impl PolicyDecisionRecord {
     // Return the deterministic decision reason
     pub fn reason(&self) -> &str {
         &self.reason
+    }
+
+    // Return the opaque captured-request evidence pointer
+    pub fn source_evidence_pointer(&self) -> &str {
+        &self.source_evidence_pointer
     }
 
     // Return the recorded approval identifier when one authorized the action
@@ -152,6 +165,64 @@ impl SsrfPolicyGate {
                 );
             }
         };
+
+        // Verify typed captured-request provenance before any policy path can grant authority
+        let source = plan.source_reference();
+        let source_result = if source.requirement_id() != "source"
+            || source.kind() != EvidenceKind::RequestResponse
+        {
+            Err(SourceEvidenceError::WrongReferenceType)
+        } else {
+            read_validated(&store, source)
+                .map_err(SourceEvidenceError::Artifact)
+                .and_then(|bytes| {
+                    serde_json::from_slice::<SignedCapturedRequestEvidence>(&bytes)
+                        .map_err(|_| SourceEvidenceError::Malformed)
+                })
+                .and_then(|evidence| {
+                    let (request_id, method, canonical_url) = plan.source_observation();
+                    context
+                        .capture_trust
+                        .verify(
+                            &evidence,
+                            context.engagement_id,
+                            request_id,
+                            method,
+                            canonical_url,
+                        )
+                        .map_err(SourceEvidenceError::Provenance)
+                })
+        };
+        if let Err(error) = source_result {
+            let reason = match error {
+                SourceEvidenceError::WrongReferenceType => {
+                    "source evidence reference has the wrong requirement or kind"
+                }
+                SourceEvidenceError::Malformed => {
+                    "source evidence artifact is not a valid captured request"
+                }
+                SourceEvidenceError::Provenance(error) => provenance_failure_reason(error),
+                SourceEvidenceError::Artifact(ArtifactReadError::Unavailable) => {
+                    "source evidence artifact is unavailable"
+                }
+                SourceEvidenceError::Artifact(ArtifactReadError::NotRegularFile) => {
+                    "source evidence artifact is not a regular file"
+                }
+                SourceEvidenceError::Artifact(ArtifactReadError::HashMismatch) => {
+                    "source evidence artifact hash does not match the plan"
+                }
+            };
+            return self.finalize(
+                &store,
+                &canonical_root,
+                plan,
+                context,
+                risk,
+                PolicyVerdict::Blocked,
+                reason,
+                None,
+            );
+        }
 
         // Obtain scope from the plan-bound artifact rather than trusting a caller string
         let scope_decision = match load_scope(&store, plan.scope_reference()) {
@@ -250,8 +321,9 @@ impl SsrfPolicyGate {
             verdict,
             target: target.clone(),
             reason: reason.to_string(),
-            scope_evidence_path: plan.scope_reference().artifact_path().to_string(),
-            rules_evidence_path: plan.rules_reference().artifact_path().to_string(),
+            source_evidence_pointer: plan.view().source_evidence_pointer().to_string(),
+            scope_evidence_pointer: plan.view().scope_evidence_pointer().to_string(),
+            rules_evidence_pointer: plan.view().rules_evidence_pointer().to_string(),
             approval_id,
             evaluated_at: context.evaluated_at,
         };
@@ -271,11 +343,7 @@ impl SsrfPolicyGate {
             decision: audit_decision(verdict),
             target,
             reason: reason.to_string(),
-            evidence_paths: vec![
-                record.scope_evidence_path.clone(),
-                record.rules_evidence_path.clone(),
-                decision_relative,
-            ],
+            evidence_paths: vec![decision_relative],
         };
         append_audit_event(canonical_root, &event)
             .map_err(|_| PolicyGateError::AuditWriteFailed)?;
@@ -345,7 +413,9 @@ fn load_scope(
     reference: &EvidenceReference,
 ) -> Result<ScopeDecision, &'static str> {
     let bytes = read_validated(store, reference).map_err(|error| match error {
-        ArtifactReadError::Unavailable => "scope evidence artifact is unavailable",
+        ArtifactReadError::Unavailable | ArtifactReadError::NotRegularFile => {
+            "scope evidence artifact is unavailable"
+        }
         ArtifactReadError::HashMismatch => "scope evidence artifact hash does not match the plan",
     })?;
     serde_json::from_slice::<ScopeDecision>(&bytes)
@@ -358,7 +428,9 @@ fn load_rules(
     reference: &EvidenceReference,
 ) -> Result<ProgramRulesSnapshot, &'static str> {
     let bytes = read_validated(store, reference).map_err(|error| match error {
-        ArtifactReadError::Unavailable => "rules evidence artifact is unavailable",
+        ArtifactReadError::Unavailable | ArtifactReadError::NotRegularFile => {
+            "rules evidence artifact is unavailable"
+        }
         ArtifactReadError::HashMismatch => "rules evidence artifact hash does not match the plan",
     })?;
     serde_json::from_slice::<ProgramRulesSnapshot>(&bytes)
@@ -370,31 +442,69 @@ fn read_validated(
     store: &ArtifactStore,
     reference: &EvidenceReference,
 ) -> Result<Vec<u8>, ArtifactReadError> {
-    let path = store
-        .resolve_relative(reference.artifact_path())
+    let mut file = store
+        .open_relative_read(reference.artifact_path())
         .map_err(|_| ArtifactReadError::Unavailable)?;
-    let bytes = std::fs::read(&path).map_err(|_| ArtifactReadError::Unavailable)?;
+    let opened_metadata = file
+        .metadata()
+        .map_err(|_| ArtifactReadError::Unavailable)?;
+    if !opened_metadata.is_file() {
+        return Err(ArtifactReadError::NotRegularFile);
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|_| ArtifactReadError::Unavailable)?;
+    if opened_metadata.len() != bytes.len() as u64 {
+        return Err(ArtifactReadError::Unavailable);
+    }
     if hex::encode(Sha256::digest(&bytes)) != reference.sha256() {
         return Err(ArtifactReadError::HashMismatch);
     }
     Ok(bytes)
 }
 
+enum SourceEvidenceError {
+    WrongReferenceType,
+    Malformed,
+    Provenance(CaptureProvenanceError),
+    Artifact(ArtifactReadError),
+}
+
+// Map cryptographic failures to stable audit-safe reasons without attacker-controlled values
+fn provenance_failure_reason(error: CaptureProvenanceError) -> &'static str {
+    match error {
+        CaptureProvenanceError::EngagementMismatch => {
+            "source evidence engagement does not match trusted context"
+        }
+        CaptureProvenanceError::ObservationMismatch => {
+            "source evidence request does not match the plan observation"
+        }
+        CaptureProvenanceError::UnknownKey | CaptureProvenanceError::RevokedKey => {
+            "source evidence capture authority is not trusted"
+        }
+        CaptureProvenanceError::InvalidSignature => "source evidence capture signature is invalid",
+        CaptureProvenanceError::MalformedClaims
+        | CaptureProvenanceError::MalformedEvidence
+        | CaptureProvenanceError::InvalidKeyId
+        | CaptureProvenanceError::MalformedPublicKey
+        | CaptureProvenanceError::MalformedSignature
+        | CaptureProvenanceError::DuplicateKeyId => {
+            "source evidence artifact is not a valid signed capture"
+        }
+    }
+}
+
 // Distinguish a missing artifact from one whose content drifted from the plan
 enum ArtifactReadError {
     Unavailable,
+    NotRegularFile,
     HashMismatch,
 }
 
-// Confirm the trusted scope decision was made for the plan's normalized target
+// Match query-insensitive policy scope to normalized origin+path; the permit hash binds the query
 fn scope_target_matches(decision: &ScopeDecision, plan: &SsrfProbePlan) -> bool {
-    let target = format!(
-        "{}{}",
-        plan.view().target_origin(),
-        plan.view().target_path()
-    );
     match &decision.normalized_url {
-        Some(normalized_url) => normalized_url == &target,
+        Some(normalized_url) => normalized_url == plan.executable().scope_target(),
         None => match (&decision.normalized_host, plan_host(plan)) {
             (Some(scope_host), Some(plan_host)) => scope_host == &plan_host,
             _ => false,

@@ -3,15 +3,103 @@
 // Description: Proxy capture library skeleton for autonomous hunting traffic collection
 // Notes: Safe scaffolding only; CONNECT/MITM behavior waits for CA lifecycle and policy gates
 
-use engagement::{ArtifactStore, ArtifactWriteRecord, Engagement, EngagementError};
+use ed25519_dalek::{Signer, SigningKey};
+use engagement::{
+    ArtifactStore, ArtifactWriteRecord, CaptureProvenanceError, CaptureVerifier, Engagement,
+    EngagementError, SignedCaptureClaims, SignedCapturedRequestEvidence,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
+use zeroize::Zeroizing;
 
 const DEFAULT_PROXY_PORT: u16 = 8080;
 const LABEL_PREFIX: &str = "x-mg-";
 const ARTIFACT_DIR: &str = "traffic/proxy-captures";
+const PROVENANCE_ARTIFACT_DIR: &str = "traffic/capture-provenance";
+const ED25519_SECRET_KEY_LENGTH: usize = 32;
+
+// Hold the private Ed25519 capability available only to trusted proxy capture integration
+pub struct CaptureSigner {
+    key_id: String,
+    signing_key: SigningKey,
+}
+
+impl CaptureSigner {
+    // Load one signing capability from trusted process configuration
+    pub fn from_bytes(
+        key_id: impl Into<String>,
+        secret_key: &[u8],
+    ) -> Result<Self, CaptureSigningError> {
+        let key_id = key_id.into();
+        if secret_key.len() != ED25519_SECRET_KEY_LENGTH {
+            return Err(CaptureSigningError::MalformedSecretKey);
+        }
+        let mut seed = Zeroizing::new([0_u8; ED25519_SECRET_KEY_LENGTH]);
+        seed.copy_from_slice(secret_key);
+        let signing_key = SigningKey::from_bytes(&seed);
+        CaptureVerifier::from_bytes(&key_id, signing_key.verifying_key().as_bytes())?;
+        Ok(Self {
+            key_id,
+            signing_key,
+        })
+    }
+
+    // Export only the public verification capability for trusted process configuration
+    pub fn verifier(&self) -> Result<CaptureVerifier, CaptureSigningError> {
+        Ok(CaptureVerifier::from_bytes(
+            &self.key_id,
+            self.signing_key.verifying_key().as_bytes(),
+        )?)
+    }
+
+    // Sign one newly captured exact GET request with a random 128-bit capture identifier
+    pub fn sign_request(
+        &self,
+        engagement_id: impl Into<String>,
+        request_id: impl Into<String>,
+        canonical_url: impl Into<String>,
+    ) -> Result<SignedCapturedRequestEvidence, CaptureSigningError> {
+        let capture_id = uuid::Uuid::new_v4().simple().to_string();
+        let claims = SignedCaptureClaims::new(
+            engagement_id,
+            &self.key_id,
+            capture_id,
+            request_id,
+            canonical_url,
+        )?;
+        self.sign_claims(claims)
+    }
+
+    // Sign validated claims deterministically for stable capture retries and test vectors
+    pub fn sign_claims(
+        &self,
+        claims: SignedCaptureClaims,
+    ) -> Result<SignedCapturedRequestEvidence, CaptureSigningError> {
+        if claims.authority_key_id() != self.key_id {
+            return Err(CaptureSigningError::AuthorityMismatch);
+        }
+        let signature = self.signing_key.sign(&claims.signing_bytes()?);
+        Ok(SignedCapturedRequestEvidence::from_signature(
+            claims,
+            signature.to_bytes(),
+        ))
+    }
+}
+
+// Report capture-signing failures without formatting private key material
+#[derive(Debug, thiserror::Error)]
+pub enum CaptureSigningError {
+    #[error("capture signing key is malformed")]
+    MalformedSecretKey,
+    #[error("capture claims authority does not match signer")]
+    AuthorityMismatch,
+    #[error("capture provenance is invalid")]
+    Provenance(#[from] CaptureProvenanceError),
+    #[error("capture provenance artifact could not be written")]
+    Artifact(#[from] EngagementError),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyConfig {
@@ -217,6 +305,24 @@ impl ProxyCapture {
 
         Ok(ProxyCaptureArtifacts { request, response })
     }
+
+    // Authenticate and persist one exact captured GET request beneath the engagement root
+    pub fn write_authenticated_request_evidence(
+        &self,
+        engagement: &Engagement,
+        signer: &CaptureSigner,
+        request_id: &str,
+    ) -> Result<ArtifactWriteRecord, CaptureSigningError> {
+        if self.request.method != "GET" {
+            return Err(CaptureProvenanceError::MalformedClaims.into());
+        }
+        let evidence = signer.sign_request(&engagement.meta.name, request_id, &self.request.url)?;
+        let relative = format!(
+            "{PROVENANCE_ARTIFACT_DIR}/{}.json",
+            evidence.claims().capture_id()
+        );
+        Ok(ArtifactStore::new(&engagement.root)?.atomic_json_write(&relative, &evidence)?)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -274,7 +380,8 @@ fn validate_capture_id(capture_id: &str) -> Result<(), EngagementError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engagement::{Engagement, EngagementMeta};
+    use engagement::{CaptureTrustStore, Engagement, EngagementMeta, SignedCaptureClaims};
+    use static_assertions::assert_not_impl_any;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     fn test_engagement() -> Engagement {
@@ -291,6 +398,103 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    assert_not_impl_any!(CaptureSigner: std::fmt::Debug, serde::Serialize, serde::de::DeserializeOwned);
+
+    #[test]
+    fn ed25519_signatures_are_deterministic_for_identical_versioned_claims() {
+        let signer = CaptureSigner::from_bytes("capture-key-1", &[7; 32]).unwrap();
+        let claims = SignedCaptureClaims::new(
+            "acme",
+            "capture-key-1",
+            "0123456789abcdef0123456789abcdef",
+            "request-1",
+            "https://app.example.com/fetch?url=https%3A%2F%2Fa.test%2F",
+        )
+        .unwrap();
+
+        let first = signer.sign_claims(claims.clone()).unwrap();
+        let second = signer.sign_claims(claims).unwrap();
+
+        assert_eq!(
+            serde_json::to_vec(&first).unwrap(),
+            serde_json::to_vec(&second).unwrap()
+        );
+        CaptureTrustStore::new([signer.verifier().unwrap()])
+            .unwrap()
+            .verify(
+                &first,
+                "acme",
+                "request-1",
+                "GET",
+                "https://app.example.com/fetch?url=https%3A%2F%2Fa.test%2F",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn trusted_capture_integration_writes_hash_bound_signed_evidence_without_signer_material() {
+        let engagement = test_engagement();
+        let signer = CaptureSigner::from_bytes("capture-key-1", &[7; 32]).unwrap();
+        let capture = ProxyCapture::new(
+            ProxyRequest::new(
+                "GET",
+                "https://app.example.com/fetch?url=https%3A%2F%2Fa.test%2F",
+                Vec::new(),
+                Vec::new(),
+                None,
+            ),
+            ProxyResponse::new(200, Vec::new(), Vec::new()),
+        );
+
+        let record = capture
+            .write_authenticated_request_evidence(&engagement, &signer, "request-1")
+            .unwrap();
+        let bytes = std::fs::read(&record.path).unwrap();
+        let evidence: SignedCapturedRequestEvidence = serde_json::from_slice(&bytes).unwrap();
+
+        assert!(record.path.starts_with(&engagement.root));
+        assert!(
+            record
+                .path
+                .to_string_lossy()
+                .contains("traffic/capture-provenance")
+        );
+        assert_eq!(record.sha256, hex::encode(Sha256::digest(&bytes)));
+        assert_eq!(record.bytes, bytes.len());
+        assert_eq!(evidence.claims().capture_id().len(), 32);
+        assert!(!String::from_utf8_lossy(&bytes).contains(&hex::encode([7; 32])));
+        CaptureTrustStore::new([signer.verifier().unwrap()])
+            .unwrap()
+            .verify(
+                &evidence,
+                "acme",
+                "request-1",
+                "GET",
+                "https://app.example.com/fetch?url=https%3A%2F%2Fa.test%2F",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn generated_capture_ids_are_high_entropy_and_distinct() {
+        let signer = CaptureSigner::from_bytes("capture-key-1", &[7; 32]).unwrap();
+        let first = signer
+            .sign_request("acme", "request-1", "https://app.example.com/")
+            .unwrap();
+        let second = signer
+            .sign_request("acme", "request-1", "https://app.example.com/")
+            .unwrap();
+
+        assert_ne!(first.claims().capture_id(), second.claims().capture_id());
+        assert!(
+            first
+                .claims()
+                .capture_id()
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        );
     }
 
     #[test]

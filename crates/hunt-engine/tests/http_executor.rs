@@ -15,11 +15,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use engagement::{ProgramRulesSnapshot, ScopeDecision, ScopeVerdict};
 use hunt_engine::{
-    CallbackLease, CallbackToken, CampaignCallbackOrigin, EvidenceKind, EvidenceReference,
-    ExecutionPermit, ExecutorError, ExecutorOutcome, HttpMethod, ObservedHttpRequest,
-    PolicyGateOutcome, ScopeDisposition, SsrfCandidateGenerator, SsrfHttpExecutor,
-    SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan, SsrfProbePlanBuilder,
+    CallbackLease, CallbackToken, CampaignCallbackOrigin, CaptureTrustStore, EvidenceKind,
+    EvidenceReference, ExecutionPermit, ExecutorError, ExecutorOutcome, HttpMethod,
+    ObservedHttpRequest, PolicyGateOutcome, ScopeDisposition, SignedCaptureClaims,
+    SsrfCandidateGenerator, SsrfHttpExecutor, SsrfPolicyContext, SsrfPolicyGate, SsrfProbePlan,
+    SsrfProbePlanBuilder,
 };
+use proxy_core::CaptureSigner;
 use sha2::{Digest, Sha256};
 use support::{RequestCounter, SsrfBenchmark};
 use time::{Duration, OffsetDateTime};
@@ -27,14 +29,41 @@ use tokio::task::JoinHandle;
 
 const DEFAULT_TOKEN: &str = "0123456789abcdef0123456789abcdef";
 const DUMMY_CALLBACK_ORIGIN: &str = "http://127.0.0.1:1";
+const ENGAGEMENT_ID: &str = "engagement-1";
+const CAPTURE_KEY_ID: &str = "capture-key-1";
+const CAPTURE_SECRET_KEY: [u8; 32] = [7; 32];
 
-// Build the immutable observation source reference the executor does not re-validate
-fn source_reference() -> EvidenceReference {
+// Recreate deterministic trusted capture authority for executor fixtures
+fn capture_signer() -> CaptureSigner {
+    CaptureSigner::from_bytes(CAPTURE_KEY_ID, &CAPTURE_SECRET_KEY).unwrap()
+}
+
+// Supply public-key-only capture trust to the policy gate
+fn capture_trust() -> CaptureTrustStore {
+    CaptureTrustStore::new([capture_signer().verifier().unwrap()]).unwrap()
+}
+
+// Persist immutable request evidence for permit authorization
+fn source_reference(root: &Path, observed_url: &str) -> EvidenceReference {
+    let relative = "traffic/records/request-1.json";
+    let claims = SignedCaptureClaims::new(
+        ENGAGEMENT_ID,
+        CAPTURE_KEY_ID,
+        "0123456789abcdef0123456789abcdef",
+        "request-1",
+        observed_url,
+    )
+    .unwrap();
+    let evidence = capture_signer().sign_claims(claims).unwrap();
+    let bytes = serde_json::to_vec(&evidence).unwrap();
+    let path = root.join(relative);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
     EvidenceReference::new(
         "source",
         EvidenceKind::RequestResponse,
-        "traffic/records/request-1.json",
-        "a".repeat(64),
+        relative,
+        hex::encode(Sha256::digest(&bytes)),
     )
     .unwrap()
 }
@@ -109,7 +138,7 @@ fn prepare(
         "request-1",
         HttpMethod::Get,
         observation_url,
-        source_reference(),
+        source_reference(root, observation_url),
     )
     .unwrap();
     let candidate = SsrfCandidateGenerator
@@ -135,7 +164,13 @@ fn prepare(
         )
         .unwrap();
 
-    let context = SsrfPolicyContext::new(root, action_policy::ApprovalState::NotRequired, now);
+    let context = SsrfPolicyContext::new(
+        root,
+        ENGAGEMENT_ID,
+        capture_trust(),
+        action_policy::ApprovalState::NotRequired,
+        now,
+    );
     let permit = match SsrfPolicyGate.evaluate(&plan, &context).unwrap() {
         PolicyGateOutcome::Allowed(permit) => permit,
         other => panic!("expected allowed permit, got {other:?}"),
@@ -424,7 +459,7 @@ async fn serialized_record_never_leaks_secrets_or_body() {
     let server = serve(Router::new().route("/*path", any(secret_header_handler))).await;
     let root = tempfile::tempdir().unwrap();
     let observation_url = format!(
-        "{}/fetch?url=http%3A%2F%2Fsecret-origin.example.test%2F",
+        "{}/tenant/session-secret-123/fetch?api_key_SECRET_987=http%3A%2F%2Fsecret-origin.example.test%2F",
         server.origin()
     );
     let (plan, permit) = prepare(
@@ -447,7 +482,48 @@ async fn serialized_record_never_leaks_secrets_or_body() {
     assert!(!serialized.contains("super-secret-cookie"));
     assert!(!serialized.contains("Bearer leaked-token"));
     assert!(!serialized.contains("sensitive-response-body"));
+    assert!(!serialized.contains("api_key_SECRET_987"));
+    assert!(!serialized.contains("session-secret-123"));
+    assert!(!serialized.contains("target_path_sha256"));
+    assert!(serialized.contains("query_parameter"));
+    assert!(serialized.contains("\"occurrence\":0"));
     assert!(serialized.contains("<redacted>"));
+}
+
+#[tokio::test]
+async fn every_model_visible_response_header_value_is_redacted_by_default() {
+    let server = serve(Router::new().route("/*path", any(arbitrary_secret_header_handler))).await;
+    let root = tempfile::tempdir().unwrap();
+    let observation_url = format!(
+        "{}/fetch?url=http%3A%2F%2Forigin.example.test%2F",
+        server.origin()
+    );
+    let (plan, permit) = prepare(
+        root.path(),
+        &observation_url,
+        DUMMY_CALLBACK_ORIGIN,
+        0,
+        DEFAULT_TOKEN,
+    );
+
+    let record = SsrfHttpExecutor
+        .execute(&plan, permit, OffsetDateTime::now_utc())
+        .await
+        .unwrap();
+    let serialized = serde_json::to_string(&record).unwrap();
+
+    for secret in [
+        DEFAULT_TOKEN,
+        "/callbacks/",
+        "target-controlled-location-secret",
+        "target-controlled-debug-secret",
+        "target-controlled-unknown-secret",
+    ] {
+        assert!(!serialized.contains(secret));
+    }
+    for name in ["location", "x-debug-token", "x-arbitrary-secret"] {
+        assert!(serialized.contains(name));
+    }
 }
 
 #[tokio::test]
@@ -563,6 +639,26 @@ async fn secret_header_handler() -> Response {
         "sensitive-response-body",
     )
         .into_response()
+}
+
+// Return arbitrary target-controlled secrets through commonly trusted and unknown headers
+async fn arbitrary_secret_header_handler() -> Response {
+    let callback_location = format!(
+        "http://callback.example.test/callbacks/{DEFAULT_TOKEN}?target-controlled-location-secret"
+    );
+    let mut response = StatusCode::FOUND.into_response();
+    response
+        .headers_mut()
+        .insert(header::LOCATION, callback_location.parse().unwrap());
+    response.headers_mut().insert(
+        "x-debug-token",
+        "target-controlled-debug-secret".parse().unwrap(),
+    );
+    response.headers_mut().insert(
+        "x-arbitrary-secret",
+        "target-controlled-unknown-secret".parse().unwrap(),
+    );
+    response
 }
 
 // Bind an ephemeral loopback server for one test

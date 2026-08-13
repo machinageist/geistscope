@@ -12,7 +12,12 @@ engagement = { path = "../engagement" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hex = "0.4"
+ed25519-dalek = { version = "2.2", default-features = false, features = ["std"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1"
 
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
+static_assertions = "1"

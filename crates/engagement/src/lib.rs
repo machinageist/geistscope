@@ -9,6 +9,7 @@
 
 pub mod artifact_store;
 pub mod audit;
+pub mod capture_provenance;
 pub mod engagement;
 pub mod finding;
 pub mod program;
@@ -18,6 +19,10 @@ pub mod traffic;
 
 pub use artifact_store::{ArtifactStore, ArtifactWriteRecord};
 pub use audit::{AuditDecision, AuditEvent, AuditRisk, append_audit_event};
+pub use capture_provenance::{
+    CaptureProvenanceError, CaptureTrustStore, CaptureVerifier, SignedCaptureClaims,
+    SignedCapturedRequestEvidence,
+};
 pub use engagement::{Engagement, EngagementMeta};
 pub use finding::{Finding, Severity, Status};
 pub use program::ProgramRulesSnapshot;

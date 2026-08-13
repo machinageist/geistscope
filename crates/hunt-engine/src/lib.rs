@@ -28,6 +28,10 @@ pub use callback::{
     CallbackContractError, CallbackCorrelation, CallbackHeader, CallbackRecord,
     CallbackRecordOutcome, CallbackRecorder, CallbackRegistration, CallbackRequest, CallbackToken,
 };
+pub use engagement::{
+    CaptureProvenanceError, CaptureTrustStore, CaptureVerifier, SignedCaptureClaims,
+    SignedCapturedRequestEvidence,
+};
 pub use http_executor::{
     ExecutorError, ExecutorOutcome, HttpTransactionRecord, SsrfHttpExecutor, TransactionHeader,
 };
