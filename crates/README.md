@@ -32,7 +32,7 @@ The reviewed project state lives in `../docs/gauntlet/manifest.md` and
 | `mg-replay`      | bin      | `mg-replay`      | Replay curl evidence from findings; verdict: still_vulnerable / appears_fixed |
 | `mg-report`      | lib+bin  | `mg-report`      | Generate bounty-ready reports from findings with local CVSS 3.1 scoring |
 | `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with host pivoting, harness status, inspector, search, and session headers |
-| `mg-harness`     | lib+bin  | `mg-harness`     | JSON endpoint dispatcher + chat REPL (Ollama / OpenAI / Anthropic) over 90+ scoped tool endpoints |
+| `mg-harness`     | lib+bin  | `mg-harness`     | JSON endpoint dispatcher + chat REPL with 119 registered endpoints across gated profiles |
 | `mg-recopilot`   | bin      | `mg-recopilot`   | Decompiled-pseudocode analysis: reads RE output, writes structured findings   |
 | `mg-aifuzz`      | bin      | `mg-aifuzz`      | Adversarial LLM-endpoint fuzzer; requires operator consent before sending     |
 | `mg-exploitgen`  | bin      | `mg-exploitgen`  | CVE-driven exploit scaffolding from CVE description + target-env JSON         |
@@ -176,6 +176,9 @@ cargo clippy --workspace --tests --locked -- -D warnings
 
 The repository does not currently claim a supported install-everything path.
 Install or run only the specific package needed for a reviewed local workflow.
+The focused accepted-snapshot gates are authoritative for the current GS-4.1
+state; workspace-wide lint may still expose unrelated pre-existing warnings and
+must not be described as green without a fresh successful run.
 
 ## AI harness rules
 
