@@ -7,7 +7,7 @@ Updated: 2026-08-20
 | GS-0.1 Durable gauntlet protocol | GS-0 | integration owner | slice-pass | 1 | 1 | `docs/gauntlet/PLAN.md` | a920d69 | committed; project-local path checks pass | none | maintain with each slice |
 | GS-0.2 Product-state inventory | GS-0 | unassigned | pending | 0 | 0 | — | — | NOT RUN | GS-0.1 | inventory shipped/prototype/quarantined/deferred |
 | GS-0.3 Install/diagnostics/release gates | GS-0 | unassigned | pending | 0 | 0 | — | — | NOT RUN | core slices | baseline release path |
-| GS-4.1 SSRF vertical slice | GS-4 | integration owner | spec-pass / descriptor-chain-iteration-1-pass | 4 | 1 | `docs/gauntlet/specs/GS-4.1-ssrf.md` | 40b7b41 + `328c09fc...` | slice 1 independent PASS; evidence-core 43 and strict gates pass | intermediate-directory rename escape remains | commit reviewed atomic slice 1, then start slice 2 RED descendant-rename regression |
+| GS-4.1 SSRF vertical slice | GS-4 | integration owner | blocked / descriptor-chain-slice-2-exhausted | 4 | 2 | `docs/gauntlet/specs/GS-4.1-ssrf.md` | 6c17153 | slice 1 PASS/committed; final slice-2 `233f25ae...` rejected 0C/1I/0M; rejected production reverted | quarantine restoration source remains pathname-racy; result promotion blocked | explicit separately named successor architecture/review-series decision required |
 | GS-4.2 IDOR vertical slice | GS-4 | unassigned | pending | 0 | 0 | `.hermes/plans/2026-07-25_idor-slice/PLAN.md` | — | NOT RUN | GS-4.1 | baseline after SSRF pass |
 | GS-4.3 Critical injection slice | GS-4 | unassigned | pending | 0 | 0 | — | — | NOT RUN | GS-4.1/4.2 contracts | draft after IDOR pass |
 | GS-1.5 Persistence boundary | GS-1 | unassigned | pending | 0 | 0 | — | — | NOT RUN | GS-4.1 transitions | derive from benchmark |

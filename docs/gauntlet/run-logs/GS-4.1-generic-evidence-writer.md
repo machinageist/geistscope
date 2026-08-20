@@ -367,3 +367,60 @@ Minimal GREEN adds the same fail-closed original-locator preflight used by the h
 No manifest, dependency, lockfile, or other production file changed. A fresh slice-scoped independent review is required before the atomic commit.
 
 Independent review of exact five-file fingerprint `328c09fc51a581f424d796fe9feff0a4a225523ef1d1638b4cf037311bfe57f9` returned PASS with zero Critical, zero Important, and zero Minor findings. The reviewer independently passed the focused regression, all 43 evidence-core tests, strict Clippy, formatting, and diff checks; confirmed a clean index and stable five-file scope; and authorized the slice as safe for its atomic deployable commit. The separate `ArtifactStore` descendant rename race remains explicitly deferred to atomic slice 2.
+
+## Descriptor-chain authority successor series — atomic slice 2
+
+Slice 2 addresses the remaining known `ArtifactStore::atomic_bytes_write` escape through an already-open intermediate directory moved outside the retained engagement root.
+
+A deterministic public-path harness invokes `atomic_bytes_write`, pauses immediately after opening the first descendant descriptor, renames that directory outside the engagement root, and recreates its former pathname. The regression requires an error and no published bytes at either the moved descriptor location or recreated locator. It was observed behaviorally RED with exit 101 because the writer returned success and published `proof.json` through the moved descriptor.
+
+Minimal GREEN retains the root and every opened descendant descriptor plus the component naming each parent-child edge. It no-follow reopens and compares device/inode identity for the complete chain after each descent, before publication, and after the parent-directory durability sync. A detected mismatch fails closed; temp or newly published output is removed relative to the retained deepest descriptor before returning the error.
+
+Verification on the intended slice bytes:
+
+- focused descendant-move regression: 1 passed after the observed RED;
+- `engagement`: 61 library tests plus 2 binary tests passed;
+- `proxy-core`: 8 tests passed;
+- strict touched-crate Clippy: PASS;
+- touched-crate formatting: PASS;
+- `git diff --check`: PASS.
+
+No manifest, dependency, or lockfile changed. A fresh slice-scoped independent review is required before the atomic commit.
+
+Independent review of fingerprint `e14406c6ba87d2aded7acc28c08bff34023285fb56dfaa805f76fb0091b2fb80` returned REQUEST_CHANGES with zero Critical, two Important, and one Minor finding:
+
+1. a root-identity failure after publication occurred outside the retained-authority cleanup scope and returned an error while leaving the published member behind;
+2. post-publication cleanup unconditionally unlinked the final name and could therefore delete a different replacement member;
+3. the deterministic harness covered only the initial descendant-open timing rather than temp-sync, publication, parent-sync, and cleanup timings.
+
+Strict remediation added phase-specific deterministic hooks without changing public API. Two new tests were observed RED for the intended behaviors: the post-parent-sync root move returned an error but left `moved-engagement/evidence/proof.json`, and replacement cleanup removed the replacement path. Minimal GREEN moved final root-identity validation inside the retained publication/cleanup scope and changed cleanup to no-follow open the named member, compare its device/inode to this operation's retained temp-file descriptor, refuse to unlink on identity mismatch, propagate cleanup failure explicitly, and durably sync successful cleanup. The full phase enum now exposes descendant-open, temp-sync, publication, and parent-sync timings to deterministic tests.
+
+Remediation verification:
+
+- both new cleanup regressions and the original descendant-move regression: PASS;
+- `engagement`: 63 library tests plus 2 binary tests passed;
+- `proxy-core`: 8 tests passed;
+- strict touched-crate Clippy, formatting, and `git diff --check`: PASS.
+
+A fresh blind review of the replacement fingerprint is required. The rejected `e14406c6...` fingerprint is not commit-authorized.
+
+Replacement fingerprint `464ee4aebd7c98eccd2cdfc94c6e248eb9ec233bdcf7e4c277dc6a18e21e6ad5` also returned REQUEST_CHANGES: zero Critical, two Important, and two Minor findings. The reviewer accepted that final root validation now enters cleanup, but found that cleanup still verified one inode and later unlinked a pathname that could be replaced in between. The reviewer also found destructive rename-over-existing semantics: a fallible post-publication step could remove both the displaced prior artifact and the new artifact. The available phase harness lacked the exact cleanup verification/mutation interval, and the handoff overstated the guarantee.
+
+This is slice 2's final permitted remediation attempt. Two focused contracts were written first and observed behaviorally RED:
+
+1. replacement after cleanup identity verification was deleted before the test could read it;
+2. a second write returned success and replaced an existing artifact instead of preserving immutable evidence.
+
+Minimal final remediation changes publication to platform-native exclusive no-replace rename (`renameatx_np(RENAME_EXCL)` on macOS and `rustix::fs::renameat_with(NOREPLACE)` on Linux). Existing artifacts are never displaced. Failed temp or published members are no longer unlinked: after no-follow identity verification they move to a bounded, exclusive `.failed-artifact-*` quarantine. The cleanup-race hook fires before that move; quarantine identity is rechecked afterward. If a replacement raced into the source name, it is exclusively restored and cleanup failure is reported rather than deleting it. Successful quarantine is durably parent-synced.
+
+Final-remediation verification:
+
+- native macOS: all five atomic-write adversarial tests passed; `engagement` 65 library + 2 binary and `proxy-core` 8 passed; strict touched Clippy, formatting, and diff checks passed;
+- Linux arm64 Docker (`rust:1.90-bookworm`): all five atomic-write adversarial tests passed; `engagement` 68 library + 2 binary and `proxy-core` 8 passed; strict touched Clippy passed;
+- no Cargo manifest or lockfile changed.
+
+The final replacement fingerprint requires one fresh blind verdict. Any remaining Critical or Important finding exhausts descriptor-chain atomic slice 2; no further remediation is authorized.
+
+Final blind review of exact six-file fingerprint `233f25ae09d3a50695a62c1c9b467e4b6055fef90f12ee811f966b1c484f7dcc` returned REQUEST_CHANGES with zero Critical, one Important, and zero Minor findings. All prior findings were adjudicated resolved, but a distinct pathname-source race remains in mismatch restoration: after quarantine identity inspection, the quarantine pathname can be rebound, causing exclusive restore to move an unrelated inode into the original artifact name. `NOREPLACE` protects only the destination; it does not bind the rename source to the inspected descriptor.
+
+Atomic slice 2 is exhausted and not commit-safe. Its production diff was reverted rather than committed. Atomic slice 1 remains independently PASS and committed at `6c17153`. No additional descriptor-chain remediation or dependent result-promotion work is authorized without an explicit separately named architecture/review-series decision.

@@ -2,6 +2,14 @@
 
 An explicit architecture/review-series decision blocks the active slice.
 
+## Decision required: successor to exhausted descriptor-chain atomic slice 2
+
+Date: 2026-08-20
+
+Atomic slice 1 independently passed and remains committed at `6c17153`. Atomic slice 2 exhausted its final permitted attempt at exact fingerprint `233f25ae09d3a50695a62c1c9b467e4b6055fef90f12ee811f966b1c484f7dcc`. The final verdict contained zero Critical, one Important, and zero Minor findings: quarantine mismatch restoration still acts on a pathname source that can be rebound after identity inspection, allowing an unrelated inode to be relocated. The rejected production diff was reverted and must not be recommitted.
+
+Choose either a separately named successor architecture/review series with a contract that does not claim descriptor-bound mutation from pathname-only primitives, or defer evidence-authority work and keep GS-4.1 result promotion blocked. This is not descriptor-chain remediation 4.
+
 ## Recorded decision: descriptor-chain authority successor series
 
 Date: 2026-08-20
