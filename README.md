@@ -1,19 +1,42 @@
 # GeistScope
 
-Professional bug bounty and red-team tooling for human + AI collaboration.
-The current system is a Rust CLI/TUI suite that writes to a shared engagement
-workspace. The product direction is an AI-native offensive security operating
-system: a TUI-based bug-hunting browser, scoped AI harness, deterministic replay
-layer, and persistent security graph around dedicated tool endpoints.
+GeistScope is an experimental, local-first Rust workspace for learning about
+authorized security testing, evidence handling, request replay, and scoped
+human/AI tool orchestration. It is not a finished product or a claim that every
+workspace crate is safe, complete, or independently validated.
+
+Use it only on systems you own or have explicit permission to test.
+
+## Current status
+
+- The workspace currently contains 83 packages. Breadth is inventory, not proof
+  of production readiness.
+- The live harness registry reports 119 endpoints: 111 marked implemented and 8
+  marked unimplemented. Registry wiring does not mean an endpoint has passed the
+  project’s publication, adversarial-review, or authorized-engagement gates.
+- The engagement/scope workspace, request corpus, replay/proxy foundations,
+  harness metadata, and parts of the evidence pipeline have focused tests.
+- GS-4.1 result promotion remains blocked. The public legacy evidence writer’s
+  terminal-root symlink bypass is fixed in `6c17153`, but the descriptor-chain
+  successor’s second atomic slice exhausted review on a pathname-source race.
+  Its rejected production diff was reverted.
+- No product-level completion or public-release claim is made. See
+  `docs/gauntlet/manifest.md`, `docs/gauntlet/summary.md`, and
+  `docs/gauntlet/decisions-needed.md` for the exact reviewed state and blocker.
 
 ## Architecture
 
 ```text
 crates/               Rust workspace: CLIs, libraries, TUI
 tests/                Integration smoke tests
+docs/gauntlet/        Specs, review evidence, manifest, decisions, handoff
 ```
 
-## Pipeline overview
+## Intended pipeline map
+
+This diagram is an orientation map, not a statement that every path is complete
+or cleared for real-world use. Active behavior must be checked against the
+harness registry and gauntlet manifest.
 
 ```
 [Target domain]
@@ -40,29 +63,30 @@ mg-harness            ← Scoped AI tool endpoint dispatcher
 ## Quick start
 
 ```bash
-# Build and install everything
+# Build and test the workspace
 cd crates
-cargo build --workspace
-for crate in engagement subdomain-enum mg-scan fingerprint mg-recon \
-             ai-prioritize mg-crawl mg-probe mg-fuzz mg-replay mg-report mg-tui mg-harness; do
-    cargo install --path $crate
-done
+cargo build --workspace --locked
+cargo test --workspace --locked
 
-# Initialize and run a full engagement
-mg-engagement init target-bounty --target target.example.com --platform hackerone
-mg-recon target-bounty
-mg-crawl target-bounty https://www.target.example.com
-mg-probe target-bounty
-ai-prioritize target-bounty        # requires ANTHROPIC_API_KEY or local Ollama
-mg-report generate target-bounty YYYYMMDD-001
+# Initialize a local engagement for an owned/authorized target
+cargo run -p engagement --bin mg-engagement -- \
+  init local-lab --target lab.example.test --platform local
+
+# Inspect the live endpoint registry without executing a testing tool
+printf '%s\n' '{"endpoint":"endpoint.registry","engagement":"local-lab"}' | \
+  cargo run -p mg-harness -- dispatch --pretty
 ```
+
+Do not begin with the broad scanner inventory. Start with engagement scope,
+read-only registry inspection, focused tests, and a local intentionally
+vulnerable target. Active endpoints retain normal scope and confirmation policy.
 
 ### Docker
 
-A multi-stage `Dockerfile` ships all workspace binaries in one image; CI
-publishes it to `ghcr.io/<owner>/geistscope` on every push to `main` and on
-tagged releases. Mount a host directory at `/workspace/engagements` to persist
-findings between runs.
+A multi-stage `Dockerfile` builds the workspace binaries into one image. The
+image is a development artifact, not evidence that every included binary is
+release-ready. Mount a host directory at `/workspace/engagements` to persist
+local engagement data.
 
 ```bash
 # Pull the latest image
@@ -83,7 +107,10 @@ docker run --rm -it --network host \
 docker build -t geistscope .
 ```
 
-## Binaries
+## Selected operator surfaces
+
+The table below highlights navigation points, not a release manifest. Confirm
+current behavior in source, tests, and `endpoint.registry` before relying on it.
 
 | Binary           | What it does                                        |
 |------------------|-----------------------------------------------------|
@@ -157,23 +184,29 @@ an engagement has a configured session profile.
 
 ## Integration Smoke Test
 
-The Docker-backed smoke target lives in `tests/target/`. It exercises crawl,
-active probe, and report generation against known local bugs:
-
-```bash
-docker compose -f tests/target/docker-compose.yml up -d --wait
-bash tests/integration/pipeline-smoke.sh
-docker compose -f tests/target/docker-compose.yml down -v
-```
+`tests/integration/pipeline-smoke.sh` is present, but its referenced
+`tests/target/docker-compose.yml` fixture is absent from the current checkout.
+The Docker-backed integration smoke path and the matching CI steps are therefore
+not reproducible yet. Do not treat that gate as passing until the fixture is
+restored or the workflow is replaced and exercised.
 
 ## Requirements
 
-- Rust 1.82+ (edition 2024, let-chain syntax)
-- `ANTHROPIC_API_KEY` for ai-prioritize (falls back to Ollama if unset)
+- A current stable Rust toolchain with edition 2024 support. Rust 1.90 is used
+  for the current Linux verification path.
+- Docker for the intentionally vulnerable integration target and Linux checks.
+- Optional LLM credentials only when deliberately using a remote backend. The
+  harness can use local Ollama; never commit API keys or target credentials.
 
-## Extended Tool Suite
+## Workspace inventory
 
-69 additional binaries covering every major bug-bounty and pentest surface. All read/write to the engagement workspace and emit standardized findings to `engagements/<name>/findings/`. All are accessible as harness endpoints (`mg-harness`) and via `mg-recon --with <tool>`.
+The remaining tables document the repository’s broad experimental surface.
+They are not a promise that every binary is safe, complete, reachable through
+the default profile, or independently verified. The harness classifies endpoint
+risk and exposure; retired, service-internal, lab-only, high-active, and
+destructive affordances are deliberately hidden or gated. Treat these entries as
+code inventory until a specific path passes focused tests, blind review, and an
+authorized-engagement evidence gate.
 
 ### Active Vulnerability Detection
 
