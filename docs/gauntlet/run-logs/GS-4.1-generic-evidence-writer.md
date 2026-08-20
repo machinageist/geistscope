@@ -338,3 +338,14 @@ Root-locator iteration-3 final-attempt gates on the final bytes:
 - Linux aarch64 touched-crate all-target check, strict Clippy, and formatting.
 
 The unrelated native TLS-to-plaintext classification test failed under the initial combined suite ordering, then passed in isolation and in a complete unchanged `hunt-engine` rerun. This repeated timing-sensitive behavior remains explicitly recorded. All authority, durability, root-locator, proxy migration, and evidence tests passed on both target families.
+
+### Root-locator iteration 3 final verdict — series exhausted
+
+A fresh blind reviewer inspected exact committed snapshot `cd4e708f1c20e5bcb275eaaf6d1f575f724c9c4d` with scoped parent-to-HEAD fingerprint `8dc08ba5a3f1e2515175a347f4658e8315b02eb88d21418de12cb2ec34ede618`. The fingerprint, HEAD, and clean worktree remained unchanged throughout review. The verdict was `REQUEST_CHANGES` with zero Critical, two Important, and zero Minor findings.
+
+1. The adjacent public legacy `EvidenceBundleWriter::write` path still accepts a terminal symlink as the engagement root and writes through ordinary pathname operations. The hardened generic writer therefore does not yet establish root-symlink rejection across every public evidence-writing authority.
+2. `ArtifactStore::atomic_bytes_write` discards ancestor directory descriptors while descending. A same-user actor can rename an already-open intermediate directory outside the engagement root, recreate its former pathname, and let publication continue through the moved descriptor. The final root-only identity check can still pass while bytes were published outside the retained root and the returned locator names a different in-root object.
+
+The reviewer independently passed `evidence-core` 42 tests, `engagement` 60+2, `proxy-core` 8, full `hunt-engine`, `mg-hunt` 16, `mg-evidence` 1, touched-crate strict Clippy, formatting, and diff checks. Green gates do not cover or override the two authority defects. The broad committed `Cargo.lock` rewrite had no matching `Cargo.toml` change and is unrelated to the root-locator scope.
+
+This consumes root-locator remediation 3/3. The series is exhausted; no remediation 4 is authorized. Typed result promotion, campaign E2E, and authority-bearing consumers remain blocked until the user explicitly authorizes a separately named successor architecture/review series or defers this path.

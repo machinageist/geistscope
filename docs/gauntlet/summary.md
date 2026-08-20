@@ -1,13 +1,15 @@
 # Gauntlet Summary
 
-Updated: 2026-08-13
+Updated: 2026-08-20
 
 ## Current state
 
-- GS-0.1 project-local gauntlet bootstrap: committed as `a920d69`.
-- GS-4.1 specification: iteration 1 blind review failed at 2.008/3 with no auto-fail; iteration 2 remediates acyclic promotion, traffic/coverage/explanation, fail-closed interruption, schema, replay, and verification-gate gaps; fresh SHA-bound review pending.
-- GS-4.1 generic atomic evidence writer: rejected remediation-3 state remains documented in the gap report. Reset-series iteration 1 uses dependency-free target-specific FFI, includes manifest bytes in the 32 MiB ceiling, quarantines every post-staging identity failure, and passes full native macOS plus Linux aarch64 Docker tests/check/strict Clippy/fmt. Staged fingerprint `14405dd1df6c2ec9805fd09c45a310719431d2800b2681a3f95dbd0bd36ae232`; fresh exact review pending.
-- GS-4.1 legacy SSRF/OOB salvage inventory: complete; no deletion authorized; replacement parity and Checkpoint 5 decisions remain pending.
-- Task 4.3 result promotion, campaign E2E, API/persistence checkpoint, CLI, legacy reconciliation, and release AAA gates: not complete.
+- GS-0.1 project-local gauntlet bootstrap is committed.
+- GS-4.1 specification iteration 4 passed blind review at approved SHA `323a05df...`.
+- Root-locator successor iteration 3 was reviewed at committed snapshot `cd4e708` and scoped fingerprint `8dc08ba5...`. Verdict: REQUEST_CHANGES with zero Critical and two Important findings; the series is exhausted 3/3.
+- Remaining authority defects are a symlinked-root bypass in the public legacy evidence writer and an already-open intermediate-directory rename escape in `ArtifactStore::atomic_bytes_write`.
+- Current native gates remain green: evidence-core 42, engagement 60+2, proxy-core 8, full hunt-engine, mg-hunt 16, mg-evidence 1, and strict touched checks. Green gates do not satisfy the missing adversarial contracts.
+- The user explicitly authorized a new strict-TDD descriptor-chain authority series with atomic deployable commits. This is a new series, not remediation 4.
+- Task 4.3 result promotion, campaign E2E, API/persistence checkpoint, CLI, legacy reconciliation, and release gates remain blocked/not complete.
 
 No product-level completion claim is made.

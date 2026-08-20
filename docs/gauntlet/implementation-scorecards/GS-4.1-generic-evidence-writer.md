@@ -1,13 +1,15 @@
 # GS-4.1 Generic Atomic Evidence Writer — Implementation Scorecard
 
 Date: 2026-08-13
-Review state: REQUEST_CHANGES; pathname reset, content-addressed, and nonblocking-reader successor series exhausted 3/3
-Latest rejected exact fingerprint: `47a4db57bb965c14e73f8c3c1c29e15b1e432c97a32a7cc34fce2dd78405ee0c`
+Review state: REQUEST_CHANGES; root-locator successor series exhausted 3/3
+Latest rejected exact commit: `cd4e708f1c20e5bcb275eaaf6d1f575f724c9c4d`
+Latest rejected scoped fingerprint: `8dc08ba5a3f1e2515175a347f4658e8315b02eb88d21418de12cb2ec34ede618`
 
 ## Scope
 
 - `crates/evidence-core/src/lib.rs`
 - `crates/engagement/src/artifact_store.rs`
+- `crates/proxy-core/src/lib.rs`
 - `docs/gauntlet/run-logs/GS-4.1-generic-evidence-writer.md`
 
 ## Verified commands
@@ -61,3 +63,9 @@ NONBLOCKING-READER SUCCESSOR ITERATION 1 VERDICT: REQUEST_CHANGES against `cb145
 NONBLOCKING-READER SUCCESSOR ITERATION 2 VERDICT: REQUEST_CHANGES against `7387a955786d8df2c0725c9c74bbd2464ec87949ae11061d8e777d8b4bb96066`; writer acquisition was bounded, but channel completion did not prove thread termination before an unbounded join.
 
 NONBLOCKING-READER SUCCESSOR ITERATION 3 VERDICT: REQUEST_CHANGES against `47a4db57bb965c14e73f8c3c1c29e15b1e432c97a32a7cc34fce2dd78405ee0c`. FIFO production and harness remediations passed review, but `EvidenceBundleWriter` and `engagement::ArtifactStore` canonicalize the caller-supplied engagement root before no-follow opening, so a terminal root symlink is followed. No Critical findings remained. This exhausts the successor series; no remediation 4 or dependent commit is authorized.
+
+ROOT-LOCATOR SUCCESSOR ITERATION 1 VERDICT: REQUEST_CHANGES. Static original-root symlink rejection and constructor descriptor/path identity were accepted, but `ArtifactStore::atomic_json_write` still followed the stored canonical pathname after root replacement.
+
+ROOT-LOCATOR SUCCESSOR ITERATION 2 VERDICT: REQUEST_CHANGES. Descriptor-relative publication and static intermediate-symlink rejection passed, but the public write record still exposed an authority-bearing pathname and newly created ancestor links were not durably synchronized.
+
+ROOT-LOCATOR SUCCESSOR ITERATION 3 VERDICT: REQUEST_CHANGES against committed snapshot `cd4e708f1c20e5bcb275eaaf6d1f575f724c9c4d` and scoped fingerprint `8dc08ba5a3f1e2515175a347f4658e8315b02eb88d21418de12cb2ec34ede618`. The reviewer found zero Critical and two Important defects: the public legacy writer still follows a symlinked engagement root through pathname-based publication, and `ArtifactStore::atomic_bytes_write` can continue through an intermediate directory descriptor after that directory is moved outside the retained root. This exhausts root-locator remediation 3/3. No remediation 4 or dependent result-promotion work is authorized without an explicit new-series decision.

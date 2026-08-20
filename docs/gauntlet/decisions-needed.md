@@ -2,6 +2,16 @@
 
 An explicit architecture/review-series decision blocks the active slice.
 
+## Recorded decision: descriptor-chain authority successor series
+
+Date: 2026-08-20
+
+Root-locator iteration 3/3 was rejected at committed snapshot `cd4e708f1c20e5bcb275eaaf6d1f575f724c9c4d` and scoped fingerprint `8dc08ba5a3f1e2515175a347f4658e8315b02eb88d21418de12cb2ec34ede618`. The final blind verdict contained zero Critical and two Important findings: the public legacy writer still follows a symlinked authority root through pathname publication, and `ArtifactStore::atomic_bytes_write` can continue through an already-open intermediate directory after it is moved outside the retained engagement root.
+
+The user explicitly authorized a separately named strict-TDD descriptor-chain authority series and requested atomic deployable commits. This successor must begin with public RED regressions for both findings, route or harden the legacy writer without weakening compatibility, retain and revalidate every authority-bearing ancestor descriptor through publication, add no dependency/lockfile drift, and restart blind review at iteration 1.
+
+This is not root-locator remediation 4. Each independently deployable RED/GREEN slice must pass its focused and affected-crate gates before an atomic commit.
+
 ## Recorded decision: successor to exhausted nonblocking-reader series
 
 Date: 2026-08-13
