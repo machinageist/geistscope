@@ -688,6 +688,11 @@ impl EvidenceBundleWriter {
     ) -> Result<EvidenceBundle, EvidenceBundleError> {
         validate_relative_identifier_path(&request.candidate_id)?;
         validate_relative_identifier_path(&request.run_id)?;
+        let root_metadata =
+            std::fs::symlink_metadata(&request.engagement_root).map_err(io_error)?;
+        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+            return Err(EvidenceBundleError::UnsafePath);
+        }
         let bundle_dir = request
             .engagement_root
             .join("evidence")
@@ -1608,6 +1613,25 @@ mod tests {
                 .join("evidence/team/candidate-001/batch/run-abc")
         );
         assert!(bundle.bundle_dir.join("manifest.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_writer_rejects_symlinked_engagement_root_before_writing() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let root_link = parent.path().join("engagement-root");
+        symlink(target.path(), &root_link).unwrap();
+        let request = EvidenceBundleRequest::new(&root_link, "candidate-001", "run-root-link")
+            .with_summary("safe summary");
+
+        assert_eq!(
+            EvidenceBundleWriter.write(request).unwrap_err(),
+            EvidenceBundleError::UnsafePath
+        );
+        assert!(!target.path().join("evidence").exists());
     }
 
     #[test]

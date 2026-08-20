@@ -349,3 +349,21 @@ A fresh blind reviewer inspected exact committed snapshot `cd4e708f1c20e5bcb275e
 The reviewer independently passed `evidence-core` 42 tests, `engagement` 60+2, `proxy-core` 8, full `hunt-engine`, `mg-hunt` 16, `mg-evidence` 1, touched-crate strict Clippy, formatting, and diff checks. Green gates do not cover or override the two authority defects. The broad committed `Cargo.lock` rewrite had no matching `Cargo.toml` change and is unrelated to the root-locator scope.
 
 This consumes root-locator remediation 3/3. The series is exhausted; no remediation 4 is authorized. Typed result promotion, campaign E2E, and authority-bearing consumers remain blocked until the user explicitly authorizes a separately named successor architecture/review series or defers this path.
+
+## Descriptor-chain authority successor series — atomic slice 1
+
+The user explicitly authorized a new strict-TDD successor series with atomic deployable commits. Slice 1 addresses only the public legacy writer's terminal root-symlink bypass.
+
+A public Unix regression, `legacy_writer_rejects_symlinked_engagement_root_before_writing`, supplies a real terminal symlink as `EvidenceBundleRequest.engagement_root`, requires `UnsafePath`, and proves the resolved target receives no `evidence/` side effect. The focused test was observed RED with exit 101 because the legacy writer returned `Ok(EvidenceBundle)` and wrote through the symlink.
+
+Minimal GREEN adds the same fail-closed original-locator preflight used by the hardened paths: `symlink_metadata` must report a non-symlink directory before the legacy writer constructs or mutates bundle paths. Verification on the intended slice bytes:
+
+- focused regression: 1 passed;
+- full `evidence-core`: 43 passed;
+- `cargo clippy -p evidence-core --all-targets --locked -- -D warnings`: PASS;
+- `cargo fmt -p evidence-core -- --check`: PASS;
+- `git diff --check`: PASS.
+
+No manifest, dependency, lockfile, or other production file changed. A fresh slice-scoped independent review is required before the atomic commit.
+
+Independent review of exact five-file fingerprint `328c09fc51a581f424d796fe9feff0a4a225523ef1d1638b4cf037311bfe57f9` returned PASS with zero Critical, zero Important, and zero Minor findings. The reviewer independently passed the focused regression, all 43 evidence-core tests, strict Clippy, formatting, and diff checks; confirmed a clean index and stable five-file scope; and authorized the slice as safe for its atomic deployable commit. The separate `ArtifactStore` descendant rename race remains explicitly deferred to atomic slice 2.
