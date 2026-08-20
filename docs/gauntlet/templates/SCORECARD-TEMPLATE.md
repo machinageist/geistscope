@@ -114,13 +114,14 @@ Read the actual source files referenced in the spec before filling this table.
 | {Lens 4+ if any} | {avg} | {weight} | {avg × weight} |
 | **Composite** | | | **{sum}** |
 
-**Pass conditions (from criteria.md):**
-- [ ] Composite ≥ 2.0
-- [ ] All lens averages ≥ 2.0
-- [ ] No criterion scores 0
-- [ ] No more than two criteria at 1 per lens
+**Pass conditions (copy exact values/rules from criteria.md; criteria.md is binding):**
+- [ ] Composite ≥ {criteria.md composite threshold}
+- [ ] Every lens average ≥ {criteria.md lens threshold}
+- [ ] No criterion scores 0, unless criteria.md explicitly defines otherwise
+- [ ] Per-lens low-score limit from criteria.md is satisfied
 - [ ] All auto-fail rules pass
-- [ ] Feasibility ≠ Infeasible
+- [ ] Feasibility satisfies criteria.md
+- [ ] Reviewer personally executed every command claimed as passing when criteria.md requires it
 
 **All conditions met:** {Yes → PASS / No → FAIL}
 

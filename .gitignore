@@ -9,3 +9,4 @@ crates/engagements/*
 # Local-only research material — never published (repo or release tarballs)
 research/
 resume.py
+./resume-commands/*

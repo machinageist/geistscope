@@ -8,13 +8,20 @@ user-defined quality criteria, and loops failures through remediation.
 project and interviews the user to build the quality criteria dynamically. It
 works on any codebase, any platform, any domain.
 
-**Platforms:** Claude Code CLI, Xcode Chat (26.3+), or any environment with
-Claude's agent harness (subagents + file I/O).
+**Platforms:** Any capable agent environment with repository file access,
+command execution, and support for isolated author/reviewer contexts. The
+protocol depends on files and commands, not a specific model or vendor harness.
 
 **Invocation:**
-> "Run the spec gauntlet. Read gauntlet-universal/GAUNTLET.md and follow it."
+> "Run the spec gauntlet. Read docs/gauntlet/templates/UNIVERSAL-GAUNTLET.md and follow it."
 
-Or as a Claude Code slash command: `/gauntlet`
+The invocation mechanism is agent-specific; the repository files are authoritative.
+
+**Completion extension:** This universal file governs criteria, spec authoring,
+blind spec review, and spec remediation. If `docs/gauntlet/PLAN.md` exists, read
+it before acting; its project-specific implementation, blind execution review,
+verification, commit, and handoff gates are mandatory after spec approval. A
+spec pass alone never proves implementation or product completion.
 
 ---
 
@@ -189,7 +196,7 @@ Feature ID: {feature-id}
 Parent: {parent-id or "root"}
 
 CONTEXT FILES TO READ FIRST:
-1. gauntlet-universal/SPEC-TEMPLATE.md — your output template
+1. docs/gauntlet/templates/SPEC-TEMPLATE.md — your output template
 2. docs/gauntlet/criteria.md — your spec will be graded against this
 3. {project's entry-point docs discovered in Phase 0}
 4. {specific source files relevant to this feature}
@@ -241,7 +248,7 @@ YOUR ASSIGNMENT: Blind-review this spec against the project's quality criteria.
 
 SPEC TO REVIEW: docs/gauntlet/specs/{feature-id}.md
 GRADING CRITERIA: docs/gauntlet/criteria.md
-OUTPUT TEMPLATE: gauntlet-universal/SCORECARD-TEMPLATE.md
+OUTPUT TEMPLATE: docs/gauntlet/templates/SCORECARD-TEMPLATE.md
 
 Read all three files now.
 
@@ -250,7 +257,7 @@ FEASIBILITY CHECK:
 - Verify implementation claims are accurate.
 - Check that dependencies exist and are version-compatible.
 
-OUTPUT: docs/gauntlet/scorecards/{feature-id}-scorecard.md
+OUTPUT: docs/gauntlet/spec-scorecards/{feature-id}-scorecard.md
 
 RULES:
 - You are BLIND. Grade only what's in the spec file.
@@ -275,6 +282,11 @@ Escalations go to `docs/gauntlet/gap-reports/{feature-id}-escalation.md`.
 ---
 
 ## Phase 4: Final Report
+
+For a spec-only repository, generate the report below. For a repository with a
+completion extension in `docs/gauntlet/PLAN.md`, this report is only a spec-phase
+checkpoint; continue through the implementation and execution-review state
+machine before making any completion claim.
 
 Generate `docs/gauntlet/summary.md`:
 
@@ -328,7 +340,7 @@ docs/gauntlet/
 ├── summary.md               # Final report
 ├── specs/
 │   └── {feature-id}.md      # One per feature
-├── scorecards/
+├── spec-scorecards/
 │   └── {feature-id}-scorecard.md
 └── gap-reports/
     └── {feature-id}-escalation.md  # Only for 3x failures
@@ -338,20 +350,15 @@ docs/gauntlet/
 
 ## Installation
 
-### Claude Code slash command
-```bash
-mkdir -p .claude/commands
-cat > .claude/commands/gauntlet.md << 'EOF'
-Read and follow gauntlet-universal/GAUNTLET.md. This is the Spec Gauntlet — a
-multi-agent pipeline for AAA product spec generation with user-defined quality
-criteria, blind verification, and remediation. Start with Phase 0 and proceed
-sequentially. If docs/gauntlet/criteria.md exists, ask whether to reuse or
-rebuild it.
-EOF
-```
+### Agent entry point
+
+Tell the active agent to read `docs/gauntlet/README.md`, then follow the
+repository's `HANDOFF.md`, manifest, criteria, and this protocol. Optional
+vendor-specific aliases may point to that entry point, but they are never
+required or authoritative.
 
 ### Portable
-Copy the `gauntlet-universal/` directory into any project repo. The gauntlet
+Copy the `docs/gauntlet/templates/` directory into any project repo. The gauntlet
 adapts to whatever it finds.
 
 ### Partial runs

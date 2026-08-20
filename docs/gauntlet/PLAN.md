@@ -1,6 +1,6 @@
 # GeistScope Completion Gauntlet Plan
 
-> **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
+> **Execution note:** Follow this plan task-by-task using isolated author, implementer, and blind-review contexts. Tooling may vary by agent; the file contracts and verification commands are authoritative.
 
 **Goal:** Finish GeistScope as a demonstrably working, safe, local-first bug-hunting and pentest suite for the full recon → model → hypothesize → test/exploit → verify → evidence → report pipeline by advancing verified vertical slices through a model-agnostic spec → implementation → blind verification → remediation loop.
 
@@ -26,7 +26,7 @@ This extension preserves the universal protocol rather than replacing it.
 
 ## 2. Ground truth discovered on 2026-08-13
 
-- Repository: `/Users/machinageist/geistscope`
+- Repository: the Git root containing `docs/gauntlet/` (commands are repository-relative)
 - Branch at discovery: `main`, 23 commits ahead of `origin/main`, clean worktree.
 - Stack: Rust workspace with 83 package manifests and 84 listed workspace members.
 - Current product direction: one adaptive closed loop—observe → remember → hypothesize → plan → authorize → execute → interpret → preserve evidence → continue → verify → report.
@@ -414,7 +414,7 @@ Legacy disposition rules:
 
 ## 11. Required command tiers
 
-Commands run from `/Users/machinageist/geistscope/crates` unless noted.
+Commands run from the repository's `crates/` directory unless noted.
 
 ### Atomic task
 
@@ -428,7 +428,7 @@ cd .. && git diff --check
 ### Slice boundary
 
 ```bash
-cd /Users/machinageist/geistscope/crates
+cd crates
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --tests --locked -- -D warnings
@@ -439,7 +439,7 @@ git diff --check
 ### Product/release boundary
 
 ```bash
-cd /Users/machinageist/geistscope/crates
+cd crates
 cargo build --workspace --locked
 cargo test --workspace --locked
 cargo clippy --workspace --tests --locked -- -D warnings

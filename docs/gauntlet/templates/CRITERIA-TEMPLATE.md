@@ -25,8 +25,9 @@ Each criterion is graded 0–3:
 - **2 — Acceptable:** Correct and functional; minor gaps.
 - **3 — Excellent:** Would ship in a best-in-class product; no meaningful gap.
 
-**Pass threshold:** No criterion scores 0. Every lens average ≥ 2.0. No more
-than two criteria at 1 per lens.
+**Pass threshold:** {Set the binding composite threshold, per-lens threshold,
+low-score limit, feasibility rule, and reviewer-execution requirement from the
+user interview. Do not rely on scorecard-template defaults.}
 
 ---
 

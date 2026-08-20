@@ -1,0 +1,2 @@
+hermes --resume 20260813_133021_13da32
+hermes -c "Build bug bounty gauntlet loop"

@@ -9,6 +9,7 @@ use engagement::{
     EngagementError, SignedCaptureClaims, SignedCapturedRequestEvidence,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -348,18 +349,7 @@ fn write_raw_artifact(
     relative: &str,
     bytes: &[u8],
 ) -> Result<ArtifactWriteRecord, EngagementError> {
-    let path = store.resolve_relative(relative)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| EngagementError::Invalid("artifact path has no parent directory".into()))?;
-    std::fs::create_dir_all(parent)?;
-    std::fs::write(&path, bytes)?;
-
-    Ok(ArtifactWriteRecord {
-        path,
-        sha256: hex::encode(Sha256::digest(bytes)),
-        bytes: bytes.len(),
-    })
+    store.atomic_bytes_write(relative, bytes)
 }
 
 // Reject path-like capture IDs before artifact writes
@@ -451,13 +441,20 @@ mod tests {
         let record = capture
             .write_authenticated_request_evidence(&engagement, &signer, "request-1")
             .unwrap();
-        let bytes = std::fs::read(&record.path).unwrap();
+        let store = ArtifactStore::new(&engagement.root).unwrap();
+        let mut verified = store.open_verified(&record).unwrap();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut verified, &mut bytes).unwrap();
         let evidence: SignedCapturedRequestEvidence = serde_json::from_slice(&bytes).unwrap();
 
-        assert!(record.path.starts_with(&engagement.root));
         assert!(
             record
-                .path
+                .locator
+                .starts_with(engagement.root.canonicalize().unwrap())
+        );
+        assert!(
+            record
+                .locator
                 .to_string_lossy()
                 .contains("traffic/capture-provenance")
         );
@@ -614,8 +611,9 @@ mod tests {
 
         let artifacts = capture.write_artifacts(&engagement, "capture-1").unwrap();
 
-        assert!(artifacts.request.path.starts_with(&engagement.root));
-        assert!(artifacts.response.path.starts_with(&engagement.root));
+        let canonical_root = engagement.root.canonicalize().unwrap();
+        assert!(artifacts.request.locator.starts_with(&canonical_root));
+        assert!(artifacts.response.locator.starts_with(&canonical_root));
         assert_eq!(artifacts.request.bytes, br#"{"order":1}"#.len());
         assert_eq!(artifacts.response.bytes, br#"{"ok":true}"#.len());
         assert_eq!(artifacts.request.sha256.len(), 64);
