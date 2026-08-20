@@ -1,9 +1,14 @@
 # GeistScope engine — Rust workspace
 
-Recon, web testing, replay, fuzzing, and TUI tooling for authorized bug bounty,
-pentest, and red-team work. Tools are designed to be used standalone, chained
-through the engagement workspace, and consumed by an AI harness through scoped
-tool endpoints.
+Experimental Rust libraries and CLIs for local, owned, or explicitly authorized
+security-testing research. The workspace includes engagement scope, request
+corpus, replay/proxy, evidence, TUI, and typed harness surfaces alongside a much
+broader scanner inventory.
+
+Workspace membership, compilation, or harness registration is not proof that a
+crate is safe, complete, publication-ready, or validated on a real engagement.
+The reviewed project state lives in `../docs/gauntlet/manifest.md` and
+`../docs/gauntlet/summary.md`.
 
 ## Crates
 
@@ -32,15 +37,15 @@ tool endpoints.
 | `mg-aifuzz`      | bin      | `mg-aifuzz`      | Adversarial LLM-endpoint fuzzer; requires operator consent before sending     |
 | `mg-exploitgen`  | bin      | `mg-exploitgen`  | CVE-driven exploit scaffolding from CVE description + target-env JSON         |
 
-### Extended tool suite
+### Broader workspace inventory
 
-69 additional binaries cover active vulnerability detection, auth/session
-testing, OSINT, modern protocols, JS/client-side, infrastructure, cloud &
-container, post-exploitation, mobile, and engagement workflow — every one
-reachable as a `mg-harness` subprocess endpoint, every one emitting
-`ToolFinding` records to `engagements/<name>/findings/` that flow into
-`ai-prioritize` and `security-graph` automatically. See the top-level
-[README](../README.md) for the full table.
+The Cargo workspace currently contains 83 packages. The broad active-testing,
+auth/session, OSINT, protocol, infrastructure, cloud, post-access, mobile, and
+workflow surface remains experimental. Some endpoints are hidden from the
+default profile, lab-only, service-internal, retired pending repackaging, or
+unimplemented. Do not infer automatic finding flow or validation from a crate's
+presence. See the top-level [README](../README.md) for the inventory and current
+safety boundary.
 
 `mg-engagement credentials-set` writes `session.json` using env-var references
 only. `mg-harness session.get_headers` resolves headers for tools but returns
@@ -76,20 +81,19 @@ mg-report ◄─── mg-harness
 security-graph ◄─── mg-harness
 ```
 
-Planned harness layer:
+Harness relationship map (non-exhaustive):
 
 ```text
 mg-harness -> engagement/http-client/llm-client/current tool libraries
 mg-tui     -> mg-harness endpoints for replay, fuzz, OOB, reporting, ranking
 ```
 
-Add typed endpoint wrappers — no arbitrary command execution.
-
-90+ harness endpoints are registered. The core control surface lives in
-`mg-harness/src/lib.rs::registry()`; the 67 subprocess-dispatched tool
-endpoints derive from one `SUBPROCESS_TOOLS` const slice paired with their
-binary, risk class, and description — adding a tool is a one-row edit.
-Invoke `endpoint.registry` to enumerate the full list at runtime, e.g.
+The live registry currently reports 119 endpoints: 111 marked implemented and
+8 marked unimplemented. These are registry states, not publication verdicts.
+The core control surface lives in `mg-harness/src/lib.rs::registry()`;
+subprocess-dispatched entries derive from `SUBPROCESS_TOOLS` with binary, risk,
+exposure, and description metadata. Invoke `endpoint.registry` to enumerate the
+runtime list:
 
 ```bash
 echo '{"endpoint":"endpoint.registry","engagement":"any"}' | mg-harness dispatch --pretty
@@ -129,33 +133,23 @@ engagements/<name>/
     └── edges.jsonl            # local security-graph edges
 ```
 
-## Typical bug bounty workflow
+## Safe local starting workflow
 
 ```bash
-# 1. Initialize the engagement
-mg-engagement init acme-bounty --target acme.example.com --platform hackerone
+# From crates/
+cargo run -p engagement --bin mg-engagement -- \
+  init local-lab --target lab.example.test --platform local
 
-# 2. Refine scope (default is target + *.target)
-mg-engagement scope-deny acme-bounty '*.dev.acme.example.com'
+cargo run -p engagement --bin mg-engagement -- \
+  explain-scope local-lab https://lab.example.test/
 
-# 3. Full automated recon (resumable — skips completed stages)
-mg-recon acme-bounty
-
-# 4. Crawl HTTP-accessible hosts
-mg-crawl acme-bounty https://www.acme.example.com https://api.acme.example.com
-
-# 5. Passive security posture check (headers, CORS, cookies, debug paths, stack traces)
-mg-probe acme-bounty
-
-# 6. AI-ranked priority list (Anthropic or Ollama)
-ai-prioritize acme-bounty
-
-# 7. Active fuzzing — e.g. IDOR on user ID parameter
-mg-fuzz acme-bounty --template idor.txt --payloads numbers:1-200 --mode sniper
-
-# 8. Replay a finding's evidence to confirm it's still exploitable
-mg-replay acme-bounty 20260509-probe-001
+printf '%s\n' '{"endpoint":"endpoint.registry","engagement":"local-lab"}' | \
+  cargo run -p mg-harness -- dispatch --pretty
 ```
+
+Start with scope explanation and registry inspection. Use active tools only
+against a local intentionally vulnerable target and only after checking the
+endpoint risk, exposure, confirmation, and current gauntlet state.
 
 ## Fuzz template format
 
@@ -176,15 +170,12 @@ Attack modes mirror Burp Intruder: `sniper`, `battering-ram`, `pitchfork`, `clus
 
 ```bash
 cargo build --workspace --locked
-cargo test --workspace
-cargo clippy --workspace --tests -- -D warnings
-
-# Install every workspace binary in one pass (83 binaries)
-cargo install --path . --bins --locked  # from inside each crate, or:
-for d in */; do
-    [ -f "$d/Cargo.toml" ] && grep -q '^\[\[bin\]\]' "$d/Cargo.toml" && cargo install --path "$d"
-done
+cargo test --workspace --locked
+cargo clippy --workspace --tests --locked -- -D warnings
 ```
+
+The repository does not currently claim a supported install-everything path.
+Install or run only the specific package needed for a reviewed local workflow.
 
 ## AI harness rules
 
@@ -204,6 +195,10 @@ toolchain without shell access. Rules in force:
 - Tokens, cookies, and sensitive response bodies are redacted before model
   ingestion.
 - Every dispatch — allow, block, error — appends to `audit.log`.
+
+These are intended harness contracts, not a substitute for per-endpoint review.
+GS-4.1 result promotion remains blocked after the descriptor-chain slice-2
+series exhausted independent review; rejected production code was reverted.
 
 Provider-specific LLM clients live behind the `chat::ChatBackend` trait in
 `mg-harness/src/chat/` (Anthropic, OpenAI-compatible, Ollama). Tool policy
