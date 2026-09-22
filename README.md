@@ -7,7 +7,27 @@ workspace crate is safe, complete, or independently validated.
 
 Use it only on systems you own or have explicit permission to test.
 
-## Current status
+## Learning-session entry point
+
+This repository is in a recovery transition. The broad Rust workspace and tool
+inventory below are legacy material pending the approved archive/reduction
+operation; they are not the active learning workflow.
+
+For an AI-assisted learning session, begin with [`AGENTS.md`](AGENTS.md), then
+use the [web/API authorization curriculum](docs/learning/web-api-authorization/README.md)
+and its [AI learning-session protocol](docs/learning/web-api-authorization/AI_SESSION_PROTOCOL.md).
+The private, secret-free resume state is deliberately outside this repository
+at `~/.local/share/geistscope-learning/LEARNING_STATE.md`.
+
+## Legacy prototype inventory — not active learning instructions
+
+Everything below this heading describes the broad legacy prototype preserved
+while the archive/reduction plan awaits approval. Do not run its build, Docker,
+chat, credential, scanner, crawler, replay, fuzzing, or target-facing commands
+as part of the current learning curriculum. The active entry point is the
+learning-session section above.
+
+### Current status
 
 - The workspace currently contains 83 packages. Breadth is inventory, not proof
   of production readiness.
