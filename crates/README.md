@@ -7,8 +7,11 @@ broader scanner inventory.
 
 Workspace membership, compilation, or harness registration is not proof that a
 crate is safe, complete, publication-ready, or validated on a real engagement.
-The reviewed project state lives in `../docs/gauntlet/manifest.md` and
-`../docs/gauntlet/summary.md`.
+Current learning direction is governed by the
+[`PRODUCT_RECOVERY_DECISIONS`](../docs/PRODUCT_RECOVERY_DECISIONS.md), and AI
+session conduct by the
+[`AI_SESSION_PROTOCOL`](../docs/learning/web-api-authorization/AI_SESSION_PROTOCOL.md).
+This workspace inventory is legacy material, not active learning scope.
 
 ## Crates
 
@@ -32,20 +35,19 @@ The reviewed project state lives in `../docs/gauntlet/manifest.md` and
 | `mg-replay`      | bin      | `mg-replay`      | Replay curl evidence from findings; verdict: still_vulnerable / appears_fixed |
 | `mg-report`      | lib+bin  | `mg-report`      | Generate bounty-ready reports from findings with local CVSS 3.1 scoring |
 | `mg-tui`         | bin      | `mg-tui`         | Ratatui dashboard/browser with host pivoting, harness status, inspector, search, and session headers |
-| `mg-harness`     | lib+bin  | `mg-harness`     | JSON endpoint dispatcher + chat REPL with 119 registered endpoints across gated profiles |
+| `mg-harness`     | lib+bin  | `mg-harness`     | JSON endpoint dispatcher + chat REPL with gated profiles             |
 | `mg-recopilot`   | bin      | `mg-recopilot`   | Decompiled-pseudocode analysis: reads RE output, writes structured findings   |
 | `mg-aifuzz`      | bin      | `mg-aifuzz`      | Adversarial LLM-endpoint fuzzer; requires operator consent before sending     |
 | `mg-exploitgen`  | bin      | `mg-exploitgen`  | CVE-driven exploit scaffolding from CVE description + target-env JSON         |
 
 ### Broader workspace inventory
 
-The Cargo workspace currently contains 83 packages. The broad active-testing,
-auth/session, OSINT, protocol, infrastructure, cloud, post-access, mobile, and
-workflow surface remains experimental. Some endpoints are hidden from the
-default profile, lab-only, service-internal, retired pending repackaging, or
-unimplemented. Do not infer automatic finding flow or validation from a crate's
-presence. See the top-level [README](../README.md) for the inventory and current
-safety boundary.
+The broad active-testing, auth/session, OSINT, protocol, infrastructure, cloud,
+post-access, mobile, and workflow surface remains experimental. Some endpoints are
+hidden from the default profile, lab-only, service-internal, retired pending
+repackaging, or unimplemented. Do not infer automatic finding flow or
+validation from a crate's presence. See the top-level [README](../README.md) for
+the inventory and current safety boundary.
 
 `mg-engagement credentials-set` writes `session.json` using env-var references
 only. `mg-harness session.get_headers` resolves headers for tools but returns
@@ -88,12 +90,11 @@ mg-harness -> engagement/http-client/llm-client/current tool libraries
 mg-tui     -> mg-harness endpoints for replay, fuzz, OOB, reporting, ranking
 ```
 
-The live registry currently reports 119 endpoints: 111 marked implemented and
-8 marked unimplemented. These are registry states, not publication verdicts.
-The core control surface lives in `mg-harness/src/lib.rs::registry()`;
+The endpoint registry is an implementation inventory, not a publication
+verdict. The core control surface lives in `mg-harness/src/lib.rs::registry()`;
 subprocess-dispatched entries derive from `SUBPROCESS_TOOLS` with binary, risk,
 exposure, and description metadata. Invoke `endpoint.registry` to enumerate the
-runtime list:
+legacy runtime list when a permitted code study calls for it:
 
 ```bash
 echo '{"endpoint":"endpoint.registry","engagement":"any"}' | mg-harness dispatch --pretty
@@ -147,9 +148,9 @@ printf '%s\n' '{"endpoint":"endpoint.registry","engagement":"local-lab"}' | \
   cargo run -p mg-harness -- dispatch --pretty
 ```
 
-Start with scope explanation and registry inspection. Use active tools only
-against a local intentionally vulnerable target and only after checking the
-endpoint risk, exposure, confirmation, and current gauntlet state.
+These commands document legacy workspace behavior, not current learning steps.
+Use the decision record and AI session protocol linked above for the current
+learning scope and AI boundaries.
 
 ## Fuzz template format
 
@@ -174,11 +175,10 @@ cargo test --workspace --locked
 cargo clippy --workspace --tests --locked -- -D warnings
 ```
 
-The repository does not currently claim a supported install-everything path.
-Install or run only the specific package needed for a reviewed local workflow.
-The focused accepted-snapshot gates are authoritative for the current GS-4.1
-state; workspace-wide lint may still expose unrelated pre-existing warnings and
-must not be described as green without a fresh successful run.
+The repository does not claim a supported install-everything path. This
+workspace inventory and its build commands are legacy references, not the
+current learning workflow; follow the authority documents linked above for
+current scope and AI boundaries.
 
 ## AI harness rules
 
@@ -200,8 +200,6 @@ toolchain without shell access. Rules in force:
 - Every dispatch — allow, block, error — appends to `audit.log`.
 
 These are intended harness contracts, not a substitute for per-endpoint review.
-GS-4.1 result promotion remains blocked after the descriptor-chain slice-2
-series exhausted independent review; rejected production code was reverted.
 
 Provider-specific LLM clients live behind the `chat::ChatBackend` trait in
 `mg-harness/src/chat/` (Anthropic, OpenAI-compatible, Ollama). Tool policy

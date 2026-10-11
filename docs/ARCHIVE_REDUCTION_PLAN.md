@@ -6,7 +6,7 @@ Decision authority: `docs/PRODUCT_RECOVERY_DECISIONS.md`
 
 ## Purpose
 
-Preserve the complete broad GeistScope workspace as an immutable, browsable Git-native legacy snapshot, including the pre-interview uncommitted prototypes and plans. Then reduce active `main` to the approved manual-first web/API authorization learning repository.
+Preserve the broad GeistScope workspace as an immutable, browsable Git-native legacy snapshot, including the pre-interview uncommitted prototypes and plans except for the two Gauntlet paths explicitly excluded by the user decision recorded in Section A. Then reduce active `main` to the approved manual-first web/API authorization learning repository.
 
 This plan does not authorize any Git state change by itself. It is the review artifact required before creating branches, commits, tags, removals, or remote updates.
 
@@ -30,11 +30,13 @@ The broad Rust workspace, scanner inventory, harness, TUI, active-testing code, 
 - The worktree contains tracked modifications, a tracked deletion, untracked Rust prototypes, legacy plans/evaluations, and the newly created recovery/learning documentation.
 - The current workspace does not have a passing frozen build gate. The active reduction must not describe the old workspace as working or supported.
 
-The current worktree has three logical groups:
+The worktree recorded on September 22, 2026 had three logical groups:
 
 1. Legacy workspace and pre-interview prototypes
    - tracked modifications under `crates/`;
-   - untracked `crates/campaign-core/`, `crates/gauntlet-output/`, `crates/mg-engine/`, and `crates/mg-observe/`;
+   - untracked `crates/campaign-core/`, `crates/mg-engine/`, and `crates/mg-observe/`;
+     `crates/gauntlet-output/` was also present at the September 22 baseline but
+     is excluded from the future snapshot by the later user decision in Section A;
    - legacy `.hermes` plans and `docs` evaluations/MVP material;
    - legacy source, tests, CI, Docker, and repository tooling.
 
@@ -69,7 +71,7 @@ recovery/reduced-main-2026-09-22
 Reference roles:
 
 - `recovery/staging-2026-09-22`
-  - exact tracked pre-reduction staging commit, excluding `.sessions`;
+  - reconciled in-scope pre-reduction staging commit, excluding `.sessions` and the two Section A paths;
   - temporary safety reference retained until the user explicitly decides otherwise.
 
 - `archive/geistscope-pre-reduction-2026-09-22`
@@ -88,7 +90,7 @@ Reference roles:
 
 ### A. Preserve in the legacy snapshot
 
-The snapshot must preserve the exact current state of all legacy repository material, including modifications and untracked prototypes existing before the recovery interview.
+The snapshot must preserve the exact current state of all remaining legacy repository material, including modifications and untracked prototypes existing before the recovery interview, subject to the explicit exclusions below.
 
 Tracked legacy material:
 
@@ -100,25 +102,30 @@ Tracked legacy material:
 Dockerfile
 crates/
 docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md
-docs/gauntlet/
 tests/
 resume-commands (preserve its current deleted state in the snapshot commit)
 ```
 
-All additional tracked root material not explicitly retained below is legacy material and remains in the snapshot.
+All additional tracked root material not explicitly retained below is legacy material and remains in the snapshot, subject to the exclusions below.
 
 Pre-interview untracked legacy material:
 
 ```text
 .hermes/plans/2026-09-02_adaptive-hunt-engine-bootstrap/
 crates/campaign-core/
-crates/gauntlet-output/
 crates/mg-engine/
 crates/mg-observe/
 docs/ADAPTIVE_HUNT_ENGINE_EVALUATION.md
 docs/GEISTSCOPE_SUITE_INTEGRATION_EVALUATION.md
 docs/MVP.md
 ```
+
+**Explicit user decision (October 11, 2026):** `docs/gauntlet/` and
+`crates/gauntlet-output/` are intentionally discarded by this narrow cleanup
+and must not be restored to or promised in the future legacy snapshot. The
+generated `crates/gauntlet-output/` directory was verified to contain only 13
+regular Markdown experiment artifacts before deletion. Their absence is
+intentional, not an incomplete preservation pass.
 
 The snapshot may also contain copies of the recovery documentation because it is an exact pre-reduction commit. Those copies do not alter the active-branch authority described below.
 
@@ -157,7 +164,6 @@ docs/AUTONOMOUS_HUNTING_PROGRESS_CHECKLIST.md
 docs/ADAPTIVE_HUNT_ENGINE_EVALUATION.md
 docs/GEISTSCOPE_SUITE_INTEGRATION_EVALUATION.md
 docs/MVP.md
-docs/gauntlet/
 resume-commands
 ```
 
@@ -165,13 +171,13 @@ The final reduction pass must use a generated allowlist based on section B rathe
 
 ## Commit boundaries
 
-### Commit 1: exact pre-reduction staging snapshot
+### Commit 1: reconciled pre-reduction staging snapshot
 
 Branch: `recovery/staging-2026-09-22`
 
 Intent:
 
-- capture all tracked legacy changes and pre-interview untracked prototypes/plans;
+- capture all in-scope tracked legacy changes and pre-interview untracked prototypes/plans, subject to the explicit exclusions in Section A;
 - capture the recovery/learning docs already written in this interview;
 - preserve the current deleted state of `resume-commands`;
 - exclude `.sessions` from Git.
@@ -179,10 +185,10 @@ Intent:
 Suggested message:
 
 ```text
-recovery: preserve complete pre-reduction workspace snapshot
+recovery: preserve reconciled pre-reduction workspace snapshot
 ```
 
-Before committing, the operator must inspect the staged path list and confirm that `.sessions` is absent and every known legacy prototype is present.
+Before committing, the operator must inspect the staged path list and confirm that `.sessions` and both Section A exclusions are absent and every remaining in-scope legacy prototype is present.
 
 ### Commit 2: proposed active-branch reduction
 
@@ -229,9 +235,9 @@ This fast-forward is a separate explicit approval. No force update and no remote
 ### Phase 1: create the staging snapshot
 
 1. Create `recovery/staging-2026-09-22` from the current worktree.
-2. Stage all intended tracked and untracked repository paths except `.sessions`.
+2. Stage all intended tracked and untracked repository paths except `.sessions` and the explicit Section A exclusions.
 3. Inspect the full staged name list, diff statistics, and whitespace check.
-4. Confirm all four untracked Rust prototypes and all listed legacy plans/evaluations are staged.
+4. Confirm the three remaining untracked Rust prototypes (`campaign-core`, `mg-engine`, and `mg-observe`) and all listed legacy plans/evaluations are staged; confirm both Section A exclusions are absent.
 5. Commit the snapshot.
 6. Create `archive/geistscope-pre-reduction-2026-09-22` and annotated tag `geistscope-pre-reduction-2026-09-22` at that exact commit.
 7. Verify branch/tag SHA equality and verify that the snapshot contains the Cargo workspace and legacy plans.
@@ -320,7 +326,7 @@ Do not update `main`, push, or delete any local reference until Jeff explicitly 
 Before promotion:
 
 - `main` remains untouched at its original commit.
-- The staging branch and archive branch/tag retain the full snapshot.
+- The staging branch and archive branch/tag retain the same reconciled in-scope snapshot, with both Section A exclusions absent.
 - Delete only the proposed reduced branch if the review rejects it; do not delete the snapshot references.
 
 After a local fast-forward promotion to `main`:
@@ -334,7 +340,7 @@ After a local fast-forward promotion to `main`:
 The archive/reduction operation is ready to execute only when all are true:
 
 - [ ] `.sessions` has a verified private backup and is absent from Git staging.
-- [ ] The staging snapshot contains every listed legacy path and pre-interview prototype/plan.
+- [ ] The staging snapshot contains every listed in-scope legacy path and pre-interview prototype/plan; both Section A exclusions remain absent by decision.
 - [ ] Archive branch and annotated tag resolve to the exact staging snapshot SHA.
 - [ ] The reduced branch contains only the section-B allowlist plus intentionally added synthetic-fixture documentation.
 - [ ] No `Cargo.toml`, `Cargo.lock`, `crates/`, `tests/`, `.github/`, Docker, harness, TUI, scanner, proxy, or legacy gauntlet path remains active.

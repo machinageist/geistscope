@@ -9,54 +9,39 @@ Use it only on systems you own or have explicit permission to test.
 
 ## Learning-session entry point
 
-This repository is in a recovery transition. The broad Rust workspace and tool
-inventory below are legacy material pending the approved archive/reduction
-operation; they are not the active learning workflow.
+The current learning authority is the [product-recovery decision record](docs/PRODUCT_RECOVERY_DECISIONS.md)
+and [AI learning-session protocol](docs/learning/web-api-authorization/AI_SESSION_PROTOCOL.md).
+The broad Rust workspace and tool inventory below are retained legacy material,
+not the active learning workflow.
 
 For an AI-assisted learning session, begin with [`AGENTS.md`](AGENTS.md), then
-use the [web/API authorization curriculum](docs/learning/web-api-authorization/README.md)
-and its [AI learning-session protocol](docs/learning/web-api-authorization/AI_SESSION_PROTOCOL.md).
+follow the decision record and protocol alongside the
+[web/API authorization curriculum](docs/learning/web-api-authorization/README.md).
 The private, secret-free resume state is deliberately outside this repository
 at `~/.local/share/geistscope-learning/LEARNING_STATE.md`.
 
 ## Legacy prototype inventory — not active learning instructions
 
-Everything below this heading describes the broad legacy prototype preserved
-while the archive/reduction plan awaits approval. Do not run its build, Docker,
-chat, credential, scanner, crawler, replay, fuzzing, or target-facing commands
-as part of the current learning curriculum. The active entry point is the
-learning-session section above.
-
-### Current status
-
-- The workspace currently contains 83 packages. Breadth is inventory, not proof
-  of production readiness.
-- The live harness registry reports 119 endpoints: 111 marked implemented and 8
-  marked unimplemented. Registry wiring does not mean an endpoint has passed the
-  project’s publication, adversarial-review, or authorized-engagement gates.
-- The engagement/scope workspace, request corpus, replay/proxy foundations,
-  harness metadata, and parts of the evidence pipeline have focused tests.
-- GS-4.1 result promotion remains blocked. The public legacy evidence writer’s
-  terminal-root symlink bypass is fixed in `6c17153`, but the descriptor-chain
-  successor’s second atomic slice exhausted review on a pathname-source race.
-  Its rejected production diff was reverted.
-- No product-level completion or public-release claim is made. See
-  `docs/gauntlet/manifest.md`, `docs/gauntlet/summary.md`, and
-  `docs/gauntlet/decisions-needed.md` for the exact reviewed state and blocker.
+Everything below this heading describes the broad legacy prototype inventory.
+It does not define the active learning workflow or current project authority.
+Do not run its build, Docker, chat, credential, scanner, crawler, replay,
+fuzzing, or target-facing commands as part of the current learning curriculum.
+The active entry point is the learning-session section above.
 
 ## Architecture
 
 ```text
-crates/               Rust workspace: CLIs, libraries, TUI
-tests/                Integration smoke tests
-docs/gauntlet/        Specs, review evidence, manifest, decisions, handoff
+crates/               Legacy Rust workspace: CLIs, libraries, TUI
+tests/                Legacy integration smoke tests
+docs/                 Recovery decisions, learning curriculum, and legacy notes
 ```
 
 ## Intended pipeline map
 
-This diagram is an orientation map, not a statement that every path is complete
-or cleared for real-world use. Active behavior must be checked against the
-harness registry and gauntlet manifest.
+This diagram is a historical orientation map for the legacy prototype, not a
+statement of readiness or the current learning workflow. Current learning
+authority is in the [product-recovery decision record](docs/PRODUCT_RECOVERY_DECISIONS.md)
+and [AI learning-session protocol](docs/learning/web-api-authorization/AI_SESSION_PROTOCOL.md).
 
 ```
 [Target domain]
